@@ -10,7 +10,7 @@ The pipeline runs in two stages:
 
 1. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate** and **LRR standard deviation**.
 
-2. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, then re-call genotypes with adjusted cluster centers (`--adjust-clusters`). This improves intensity estimates for all samples by clustering on higher-quality samples.
+2. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).
 
@@ -39,6 +39,7 @@ That's it. The pipeline will:
 
 - Linux (tested on Ubuntu/Debian, should work on any HPC)
 - GCC 5+ (for compiling bcftools and plugins)
+- Python 3.6+ with NumPy (for EGT reclustering in Stage 2)
 - Standard tools: `wget`, `samtools`, `make`
 - ~30 GB disk for GRCh38 reference genome
 
@@ -154,14 +155,14 @@ Additional arrays can be processed by providing manifest files directly with `--
 ```
 output/
 ├── stage1/
-│   ├── gtc/                    # GTC genotype files
+│   ├── gtc/                    # GTC genotype files (original clusters)
 │   ├── vcf/
 │   │   └── stage1_initial.bcf  # Initial VCF with BAF + LRR
 │   └── qc/
 │       ├── stage1_sample_qc.tsv  # Per-sample call rate and LRR SD
 │       └── gtc_metadata.tsv      # GTC file metadata
 ├── stage2/
-│   ├── gtc/                    # Re-called GTC files
+│   ├── gtc/                    # Re-called GTC files (new clusters)
 │   ├── vcf/
 │   │   └── stage2_reclustered.bcf  # Reclustered VCF (final output)
 │   ├── qc/
@@ -169,6 +170,7 @@ output/
 │   │   ├── high_quality_samples.txt # Samples used for reclustering
 │   │   └── excluded_samples.txt     # Low-quality samples
 │   └── clusters/
+│       └── reclustered.egt          # Study-specific EGT cluster file
 ├── manifests/                  # Downloaded manifest files (if auto-downloaded)
 └── reference/                  # Downloaded reference (if auto-downloaded)
 ```
@@ -186,13 +188,19 @@ The `*_sample_qc.tsv` files contain:
 
 ## Two-Stage Processing Rationale
 
-Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a training set. However, batch effects and varying sample quality can degrade genotype calls.
+Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a training set. However, batch effects, population differences, and varying sample quality can degrade genotype calls when the default clusters don't match the study population.
 
-**Stage 1** applies the default EGT clusters and computes QC metrics. Samples with low call rate (< 0.97) or high LRR standard deviation (> 0.35) are flagged as low quality.
+**Stage 1** applies the default EGT clusters to produce initial genotype calls and computes per-sample QC metrics. Samples with low call rate (< 0.97) or high LRR standard deviation (> 0.35) are flagged as low quality.
 
-**Stage 2** uses the `--adjust-clusters` option in `gtc2vcf` to median-adjust BAF and LRR values based on the remaining high-quality samples. This effectively reclusters the data using the study's own samples as the training set, correcting for batch-specific intensity shifts and improving genotype accuracy.
+**Stage 2** performs true reclustering in three steps:
 
-This two-stage approach is a best practice recommended by the [MoChA](https://github.com/freeseek/mocha) framework and is analogous to the iterative clustering performed in commercial tools like Genome Studio.
+1. **Recompute EGT**: Using `scripts/recluster_egt.py`, extracts normalized intensity data (theta, R coordinates) from Stage 1 GTC files of high-quality samples, grouped by their genotype calls (AA/AB/BB). For each probe, recomputes the cluster means and standard deviations in (theta, R) space. Probes with insufficient data fall back to the original cluster definitions. The result is a new EGT file tailored to the study population.
+
+2. **Re-call genotypes**: Runs `idat2gtc` with the new EGT file, producing improved genotype calls for ALL samples. Because the GenCall algorithm uses the EGT cluster definitions to assign each sample's intensities to the correct genotype, study-specific clusters yield more accurate genotype calls than the default Illumina training set.
+
+3. **Convert to VCF**: Runs `gtc2vcf` with `--adjust-clusters` for additional median adjustment of BAF and LRR values.
+
+This approach is fundamentally different from just using `--adjust-clusters` in `gtc2vcf` (which only adjusts BAF/LRR post-hoc without changing the underlying genotype calls). By recomputing the actual EGT cluster definitions, we improve the genotype calls themselves — analogous to the iterative clustering performed in Genome Studio, but fully automated for HPC.
 
 ## Downstream Analysis
 

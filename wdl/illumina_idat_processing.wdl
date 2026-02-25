@@ -80,12 +80,32 @@ workflow illumina_idat_processing {
         docker = docker,
     }
 
+    call recluster_egt {
+      input:
+        original_egt = egt_file,
+        bpm_file = bpm_file,
+        gtc_files = stage1_idat2gtc.gtc_files,
+        hq_samples = select_hq_samples.hq_samples,
+        filebase = sample_set_id,
+        docker = docker,
+    }
+
+    call idat_to_gtc as stage2_idat2gtc {
+      input:
+        green_idat_files = green_idat_files,
+        red_idat_files = red_idat_files,
+        bpm_file = bpm_file,
+        egt_file = recluster_egt.reclustered_egt,
+        filebase = sample_set_id + ".stage2",
+        docker = docker,
+    }
+
     call gtc_to_vcf as stage2_gtc2vcf {
       input:
-        gtc_files = stage1_idat2gtc.gtc_files,
+        gtc_files = stage2_idat2gtc.gtc_files,
         bpm_file = bpm_file,
         csv_file = csv_file,
-        egt_file = egt_file,
+        egt_file = recluster_egt.reclustered_egt,
         ref_fasta = ref_fasta,
         ref_fasta_fai = ref_fasta_fai,
         sample_ids = sample_ids,
@@ -109,7 +129,8 @@ workflow illumina_idat_processing {
     File final_vcf_idx = select_first([stage2_gtc2vcf.vcf_idx, stage1_gtc2vcf.vcf_idx])
     File final_qc_tsv = select_first([stage2_qc.qc_tsv, stage1_qc.qc_tsv])
     File stage1_qc_tsv = stage1_qc.qc_tsv
-    Array[File] gtc_files = stage1_idat2gtc.gtc_files
+    Array[File] gtc_files = select_first([stage2_idat2gtc.gtc_files, stage1_idat2gtc.gtc_files])
+    File? reclustered_egt_file = recluster_egt.reclustered_egt
     File? hq_samples_file = select_hq_samples.hq_samples
     File? excluded_samples_file = select_hq_samples.excluded_samples
   }
@@ -346,6 +367,59 @@ task select_hq_samples {
   output {
     File hq_samples = "~{filebase}.hq_samples.txt"
     File excluded_samples = "~{filebase}.excluded_samples.txt"
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+# ============================================================
+# Task: Recompute EGT cluster file from high-quality samples
+# ============================================================
+task recluster_egt {
+  input {
+    File original_egt
+    File bpm_file
+    Array[File] gtc_files
+    File hq_samples
+    String filebase
+
+    Int min_cluster_samples = 5
+
+    String docker
+    Int cpu = 2
+    Int disk_size = 50
+    Float memory = 16.0
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  command <<<
+    set -euo pipefail
+    mkdir -p gtc_dir
+
+    # Link GTC files
+    for f in ~{sep=' ' gtc_files}; do
+      ln -s "$f" gtc_dir/
+    done
+
+    python3 /opt/recluster_egt.py \
+      --egt ~{original_egt} \
+      --bpm ~{bpm_file} \
+      --gtc-dir gtc_dir \
+      --hq-samples ~{hq_samples} \
+      --output-egt ~{filebase}.reclustered.egt \
+      --min-cluster-samples ~{min_cluster_samples}
+  >>>
+
+  output {
+    File reclustered_egt = "~{filebase}.reclustered.egt"
   }
 
   runtime {

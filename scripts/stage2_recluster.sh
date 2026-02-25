@@ -5,9 +5,16 @@
 # Stage 2: Recluster and reprocess Illumina array data.
 #
 # Uses QC metrics from Stage 1 to identify high-quality samples (by call
-# rate and LRR standard deviation), then reclusters genotypes using only
-# those high-quality samples. The new clusters are then applied to re-call
-# genotypes for all study samples, producing improved intensity estimates.
+# rate and LRR standard deviation), then recomputes the EGT genotype
+# cluster file from the high-quality samples' intensity data. This new
+# EGT is used to re-call genotypes (via idat2gtc) for all study samples,
+# producing more accurate genotype calls and intensity estimates.
+#
+# This approach is fundamentally different from just using --adjust-clusters
+# in gtc2vcf (which only median-adjusts BAF/LRR post-hoc). By recomputing
+# the actual EGT cluster definitions, we improve the underlying genotype
+# calls themselves, since the GenCall algorithm uses the EGT to assign
+# each sample's intensities to the correct genotype cluster (AA/AB/BB).
 #
 # Inspired by the MoChA/mochawdl pipeline approach of iterative QC.
 #
@@ -19,27 +26,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIN_CALL_RATE=0.97
 MAX_LRR_SD=0.35
 THREADS=1
+MIN_CLUSTER_SAMPLES=5
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Stage 2: Recluster on high-quality samples and reprocess all samples.
+Stage 2: Recompute EGT clusters from high-quality samples and reprocess
+all samples with improved genotype calling.
 
 Required:
-  --idat-dir DIR         Directory containing IDAT files
-  --bpm FILE             Illumina BPM manifest file
-  --egt FILE             Illumina EGT cluster file
-  --csv FILE             Illumina CSV manifest file
-  --ref-fasta FILE       Reference genome FASTA file
-  --stage1-dir DIR       Stage 1 output directory (contains qc/ subdirectory)
-  --output-dir DIR       Output directory for Stage 2
+  --idat-dir DIR              Directory containing IDAT files
+  --bpm FILE                  Illumina BPM manifest file
+  --egt FILE                  Illumina EGT cluster file (original)
+  --csv FILE                  Illumina CSV manifest file
+  --ref-fasta FILE            Reference genome FASTA file
+  --stage1-dir DIR            Stage 1 output directory (contains gtc/ and qc/)
+  --output-dir DIR            Output directory for Stage 2
 
 Options:
-  --min-call-rate FLOAT  Minimum call rate for high-quality samples (default: ${MIN_CALL_RATE})
-  --max-lrr-sd FLOAT     Maximum LRR SD for high-quality samples (default: ${MAX_LRR_SD})
-  --threads INT          Number of threads (default: ${THREADS})
-  --help                 Show this help message
+  --min-call-rate FLOAT       Minimum call rate for HQ samples (default: ${MIN_CALL_RATE})
+  --max-lrr-sd FLOAT          Maximum LRR SD for HQ samples (default: ${MAX_LRR_SD})
+  --min-cluster-samples INT   Minimum samples per genotype to recompute cluster (default: ${MIN_CLUSTER_SAMPLES})
+  --threads INT               Number of threads (default: ${THREADS})
+  --help                      Show this help message
 EOF
     exit 0
 }
@@ -63,6 +73,7 @@ while [[ $# -gt 0 ]]; do
         --output-dir)     OUTPUT_DIR="$2"; shift 2 ;;
         --min-call-rate)  MIN_CALL_RATE="$2"; shift 2 ;;
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
+        --min-cluster-samples) MIN_CLUSTER_SAMPLES="$2"; shift 2 ;;
         --threads)        THREADS="$2"; shift 2 ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
@@ -78,8 +89,14 @@ for var in IDAT_DIR BPM EGT CSV REF_FASTA STAGE1_DIR OUTPUT_DIR; do
 done
 
 STAGE1_QC="${STAGE1_DIR}/qc/stage1_sample_qc.tsv"
+STAGE1_GTC_DIR="${STAGE1_DIR}/gtc"
 if [[ ! -f "${STAGE1_QC}" ]]; then
     echo "Error: Stage 1 QC file not found: ${STAGE1_QC}" >&2
+    echo "Run stage1_initial_genotyping.sh first." >&2
+    exit 1
+fi
+if [[ ! -d "${STAGE1_GTC_DIR}" ]]; then
+    echo "Error: Stage 1 GTC directory not found: ${STAGE1_GTC_DIR}" >&2
     echo "Run stage1_initial_genotyping.sh first." >&2
     exit 1
 fi
@@ -93,19 +110,20 @@ mkdir -p "${GTC_DIR}" "${VCF_DIR}" "${QC_DIR}" "${CLUSTER_DIR}"
 echo "============================================"
 echo "Stage 2: Recluster and Reprocess"
 echo "============================================"
-echo "IDAT dir:       ${IDAT_DIR}"
-echo "Stage 1 dir:    ${STAGE1_DIR}"
-echo "Output dir:     ${OUTPUT_DIR}"
-echo "Min call rate:  ${MIN_CALL_RATE}"
-echo "Max LRR SD:     ${MAX_LRR_SD}"
-echo "Threads:        ${THREADS}"
+echo "IDAT dir:              ${IDAT_DIR}"
+echo "Stage 1 dir:           ${STAGE1_DIR}"
+echo "Output dir:            ${OUTPUT_DIR}"
+echo "Min call rate:         ${MIN_CALL_RATE}"
+echo "Max LRR SD:            ${MAX_LRR_SD}"
+echo "Min cluster samples:   ${MIN_CLUSTER_SAMPLES}"
+echo "Threads:               ${THREADS}"
 echo "============================================"
 echo ""
 
 # ---------------------------------------------------------------
 # Step 1: Identify high-quality samples from Stage 1 QC metrics
 # ---------------------------------------------------------------
-echo "--- Step 1/4: Identifying high-quality samples ---"
+echo "--- Step 1/5: Identifying high-quality samples ---"
 
 HQ_SAMPLES="${QC_DIR}/high_quality_samples.txt"
 EXCLUDED_SAMPLES="${QC_DIR}/excluded_samples.txt"
@@ -139,45 +157,49 @@ if [[ "${n_hq}" -lt 10 ]]; then
 fi
 
 # ---------------------------------------------------------------
-# Step 2: Re-run idat2gtc with cluster adjustment
+# Step 2: Recompute EGT cluster file from high-quality samples
 # ---------------------------------------------------------------
-echo "--- Step 2/4: Re-genotyping all samples with adjusted clusters ---"
+echo "--- Step 2/5: Recomputing EGT clusters from high-quality samples ---"
 
-# Collect IDAT files for high-quality samples
-HQ_GRN_IDATS=()
-while IFS= read -r sample_id; do
-    grn=$(find "${IDAT_DIR}" -name "${sample_id}*_Grn.idat" -o -name "${sample_id}*_Grn.idat.gz" 2>/dev/null | head -1)
-    if [[ -n "${grn}" ]]; then
-        HQ_GRN_IDATS+=("${grn}")
-    fi
-done < "${HQ_SAMPLES}"
+RECLUSTERED_EGT="${CLUSTER_DIR}/reclustered.egt"
 
-echo "  Found ${#HQ_GRN_IDATS[@]} IDAT files for high-quality samples"
+python3 "${SCRIPT_DIR}/recluster_egt.py" \
+    --egt "${EGT}" \
+    --bpm "${BPM}" \
+    --gtc-dir "${STAGE1_GTC_DIR}" \
+    --hq-samples "${HQ_SAMPLES}" \
+    --output-egt "${RECLUSTERED_EGT}" \
+    --min-cluster-samples "${MIN_CLUSTER_SAMPLES}"
 
-# First, generate GTC files for all samples (using original clusters)
-echo "  Converting all IDAT files to GTC..."
+echo "  Reclustered EGT: ${RECLUSTERED_EGT}"
+
+# ---------------------------------------------------------------
+# Step 3: Re-run idat2gtc with the new EGT clusters
+# ---------------------------------------------------------------
+echo ""
+echo "--- Step 3/5: Re-genotyping all samples with new clusters ---"
+
 ALL_GRN_IDATS=()
 while IFS= read -r -d '' grn; do
     ALL_GRN_IDATS+=("${grn}")
 done < <(find "${IDAT_DIR}" -name "*_Grn.idat" -print0 | sort -z)
 
+echo "  Re-calling genotypes for ${#ALL_GRN_IDATS[@]} samples with reclustered EGT..."
+
 bcftools +idat2gtc \
     --bpm "${BPM}" \
-    --egt "${EGT}" \
+    --egt "${RECLUSTERED_EGT}" \
     --output "${GTC_DIR}" \
     "${ALL_GRN_IDATS[@]}" 2>&1 | tail -3
 
-echo "  GTC conversion complete."
+echo "  GTC re-calling complete."
 
 # ---------------------------------------------------------------
-# Step 3: Convert to VCF with cluster adjustment
+# Step 4: Convert reclustered GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 3/4: Converting to VCF with adjusted clusters ---"
+echo "--- Step 4/5: Converting reclustered GTC files to VCF ---"
 
-# Convert GTC to VCF, using --adjust-clusters to recompute cluster centers
-# from the high-quality samples. The adjust-clusters option median-adjusts
-# BAF and LRR values to correct for batch effects.
 VCF_OUTPUT="${VCF_DIR}/stage2_reclustered.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata_stage2.tsv"
 
@@ -185,7 +207,7 @@ bcftools +gtc2vcf \
     --no-version -Ou \
     --bpm "${BPM}" \
     --csv "${CSV}" \
-    --egt "${EGT}" \
+    --egt "${RECLUSTERED_EGT}" \
     --fasta-ref "${REF_FASTA}" \
     --gtcs "${GTC_DIR}" \
     --extra "${EXTRA_TSV}" \
@@ -198,10 +220,10 @@ bcftools norm --no-version -Ob -c x -f "${REF_FASTA}" \
 echo "  Reclustered VCF created: ${VCF_OUTPUT}"
 
 # ---------------------------------------------------------------
-# Step 4: Recompute QC metrics after reclustering
+# Step 5: Recompute QC metrics after reclustering
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 4/4: Recomputing QC metrics ---"
+echo "--- Step 5/5: Recomputing QC metrics ---"
 
 source "${SCRIPT_DIR}/collect_qc_metrics.sh"
 collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_DIR}/stage2_sample_qc.tsv"
@@ -233,10 +255,11 @@ echo ""
 echo "============================================"
 echo "Stage 2 complete!"
 echo "============================================"
+echo "  Reclustered EGT:   ${RECLUSTERED_EGT}"
 echo "  VCF:               ${VCF_OUTPUT}"
 echo "  QC metrics:        ${QC_DIR}/stage2_sample_qc.tsv"
 echo "  HQ sample list:    ${HQ_SAMPLES}"
 echo "  Excluded samples:  ${EXCLUDED_SAMPLES}"
 echo ""
-echo "The reclustered VCF is ready for downstream analysis"
-echo "(phasing, MoChA, imputation, etc.)."
+echo "The reclustered VCF uses study-specific genotype clusters"
+echo "and is ready for downstream analysis (phasing, MoChA, imputation)."
