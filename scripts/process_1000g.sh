@@ -244,23 +244,34 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     else
         # Stream a subset of samples directly, avoiding full archive download
         echo "  Selecting ${NUM_SAMPLES} samples..."
+        echo "  Mode: subset streaming (avoids downloading full ~20 GB archive)"
+        echo ""
 
         # Get green IDAT paths: use local archive if present, otherwise stream
+        LISTING_START=${SECONDS}
         if [[ -f "${ARCHIVE}" ]]; then
-            echo "  Using existing archive: ${ARCHIVE}"
+            echo "  [1/3] Listing archive contents (local)..."
+            echo "        Archive: ${ARCHIVE}"
             SAMPLE_LIST=$(tar tzf "${ARCHIVE}" 2>/dev/null | \
                 grep -i '_Grn\.idat' | \
                 head -n "${NUM_SAMPLES}")
         else
-            echo "  Streaming archive listing (skipping full archive download)..."
+            echo "  [1/3] Listing archive contents (streaming from remote)..."
+            echo "        URL: ${ARCHIVE_URL}"
+            echo "        This may take a few minutes depending on connection speed."
             SAMPLE_LIST=$(curl -sL "${ARCHIVE_URL}" | \
                 tar -tzf - 2>/dev/null | \
                 grep -i '_Grn\.idat' | \
                 head -n "${NUM_SAMPLES}") || true
         fi
+        LISTING_ELAPSED=$(( SECONDS - LISTING_START ))
+
+        N_FOUND=$(echo "${SAMPLE_LIST}" | grep -c '.' || true)
+        echo "        Found ${N_FOUND} green IDAT entries in ${LISTING_ELAPSED}s"
 
         if [[ -z "${SAMPLE_LIST}" ]]; then
-            echo "  Could not list archive contents. Falling back to full download..."
+            echo ""
+            echo "  [!] Could not list archive contents. Falling back to full download..."
             if [[ ! -f "${ARCHIVE}" ]]; then
                 wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
             fi
@@ -270,27 +281,53 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
             tar xzf "${ARCHIVE}" -C "${IDAT_DIR}"
         else
             # Build extraction list: both Grn and Red for selected samples
+            echo ""
+            echo "  [2/3] Building extraction list..."
             EXTRACT_LIST=""
+            N_PAIRS=0
             while IFS= read -r grn_file; do
                 red_file="${grn_file/_Grn.idat/_Red.idat}"
                 red_file="${red_file/_Grn.IDAT/_Red.IDAT}"
                 EXTRACT_LIST="${EXTRACT_LIST} ${grn_file} ${red_file}"
+                (( N_PAIRS++ )) || true
             done <<< "${SAMPLE_LIST}"
+            echo "        Will extract ${N_PAIRS} sample pairs (${N_PAIRS} Grn + ${N_PAIRS} Red = $(( N_PAIRS * 2 )) files)"
 
             # Extract from local archive or stream from remote
+            echo ""
+            EXTRACT_START=${SECONDS}
             if [[ -f "${ARCHIVE}" ]]; then
+                echo "  [3/3] Extracting selected samples from local archive..."
                 # shellcheck disable=SC2086
                 tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                     ${EXTRACT_LIST} 2>/dev/null || \
                 tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" \
                     ${EXTRACT_LIST} 2>/dev/null || {
-                    echo "  Selective extraction failed. Extracting all IDATs..."
+                    echo "        Selective extraction failed. Extracting all IDATs..."
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                         --wildcards '*.idat' 2>/dev/null || \
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
                 }
             else
-                echo "  Streaming extraction of selected samples..."
+                echo "  [3/3] Streaming extraction of ${N_PAIRS} samples from remote..."
+                echo "        URL: ${ARCHIVE_URL}"
+                echo "        Archive is ~20 GB — streaming to extract $(( N_PAIRS * 2 )) files."
+                echo "        tar must scan through the full archive stream to find requested files."
+                echo ""
+                # Background monitor: periodically report elapsed time and extraction progress
+                (
+                    TARGET_FILES=$(( N_PAIRS * 2 ))
+                    while true; do
+                        sleep 15
+                        N_DONE=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
+                        ELAPSED=$(( SECONDS - EXTRACT_START ))
+                        MINS=$(( ELAPSED / 60 ))
+                        SECS=$(( ELAPSED % 60 ))
+                        printf "        [%dm %02ds elapsed] %d / %d files extracted...\n" \
+                            "${MINS}" "${SECS}" "${N_DONE}" "${TARGET_FILES}"
+                    done
+                ) &
+                MONITOR_PID=$!
                 # shellcheck disable=SC2086
                 curl -sL "${ARCHIVE_URL}" | \
                     tar xzf - -C "${IDAT_DIR}" --strip-components=1 \
@@ -298,13 +335,18 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 curl -sL "${ARCHIVE_URL}" | \
                     tar xzf - -C "${IDAT_DIR}" \
                         ${EXTRACT_LIST} 2>/dev/null || {
-                    echo "  Streaming extraction failed. Falling back to full download..."
+                    echo "        Streaming extraction failed. Falling back to full download..."
                     wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                         --wildcards '*.idat' 2>/dev/null || \
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
                 }
+                kill "${MONITOR_PID}" 2>/dev/null || true
+                wait "${MONITOR_PID}" 2>/dev/null || true
             fi
+            EXTRACT_ELAPSED=$(( SECONDS - EXTRACT_START ))
+            N_EXTRACTED=$(find "${IDAT_DIR}" -name '*.idat' -o -name '*.IDAT' 2>/dev/null | wc -l)
+            echo "        Extraction complete: ${N_EXTRACTED} files in ${EXTRACT_ELAPSED}s"
         fi
     fi
 
