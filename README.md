@@ -16,6 +16,40 @@ The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstre
 
 ## Quick Start
 
+### Using Docker / Apptainer (recommended for HPC)
+
+A pre-built container image is available from GitHub Container Registry:
+
+```bash
+# Docker
+docker pull ghcr.io/jlanej/illumina_idat_processing:main
+docker run -v /path/to/data:/data ghcr.io/jlanej/illumina_idat_processing:main \
+    /opt/scripts/run_pipeline.sh \
+    --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
+
+# Apptainer / Singularity (HPC)
+apptainer pull docker://ghcr.io/jlanej/illumina_idat_processing:main
+apptainer exec illumina_idat_processing_main.sif \
+    bash /opt/scripts/run_pipeline.sh \
+    --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
+```
+
+### 1000 Genomes Example
+
+Process 1000 Genomes Omni2.5 IDAT data (downloads automatically):
+
+```bash
+# Process 200 samples (quick test)
+bash scripts/process_1000g.sh --output-dir /scratch/1000g --num-samples 200
+
+# Process all ~2141 samples on HPC with Apptainer
+apptainer exec illumina_idat_processing_main.sif \
+    bash /opt/scripts/process_1000g.sh \
+    --output-dir /scratch/1000g --num-samples all --threads 8
+```
+
+### From Source
+
 ```bash
 # 1. Install dependencies (bcftools + plugins)
 bash scripts/install_dependencies.sh --prefix $HOME/bin
@@ -29,7 +63,7 @@ bash scripts/run_pipeline.sh \
     --output-dir /path/to/output
 ```
 
-That's it. The pipeline will:
+The pipeline will:
 - Download the correct BPM, EGT, and CSV manifest files for the specified array
 - Download the GRCh38 reference genome
 - Run Stage 1 (initial genotyping + QC)
