@@ -133,7 +133,7 @@ download_file() {
         echo "  Already exists: ${dest}"
     else
         echo "  Downloading: ${url}"
-        wget -q -O "${dest}" "${url}"
+        wget -q --show-progress -O "${dest}" "${url}"
         # Decompress if gzipped
         if [[ "${dest}" == *.gz ]] && file "${dest}" | grep -q gzip; then
             echo "  Decompressing: ${dest}"

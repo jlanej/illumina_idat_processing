@@ -64,19 +64,53 @@ echo "Output directory: ${OUTPUT_DIR}"
 
 # Reference FASTA
 if [[ ! -f "${OUTPUT_DIR}/${FASTA_NAME}" ]]; then
-    echo "Downloading reference genome..."
+    echo "Downloading reference genome (this may take several minutes)..."
+    DL_START=${SECONDS}
+    (
+        while true; do
+            sleep 30
+            ELAPSED=$(( SECONDS - DL_START ))
+            MINS=$(( ELAPSED / 60 ))
+            SECS=$(( ELAPSED % 60 ))
+            printf "  [%dm %02ds elapsed] Still downloading reference genome...\n" \
+                "${MINS}" "${SECS}"
+        done
+    ) &
+    DL_MONITOR_PID=$!
     wget -q -O- "${FASTA_URL}" | gzip -d > "${OUTPUT_DIR}/${FASTA_NAME}"
+    kill "${DL_MONITOR_PID}" 2>/dev/null || true
+    wait "${DL_MONITOR_PID}" 2>/dev/null || true
+    DL_ELAPSED=$(( SECONDS - DL_START ))
+    echo "  Download complete in ${DL_ELAPSED}s"
+
     echo "Indexing reference genome..."
+    IDX_START=${SECONDS}
     samtools faidx "${OUTPUT_DIR}/${FASTA_NAME}"
+    IDX_ELAPSED=$(( SECONDS - IDX_START ))
+    echo "  Indexing complete in ${IDX_ELAPSED}s"
 else
     echo "Reference genome already exists: ${OUTPUT_DIR}/${FASTA_NAME}"
 fi
 
 # BWA index (needed for manifest realignment)
 if [[ ! -f "${OUTPUT_DIR}/${FASTA_NAME}.bwt" ]]; then
-    echo "Creating BWA index (this may take a while)..."
+    echo "Creating BWA index (this may take 30+ minutes)..."
     if command -v bwa &>/dev/null; then
+        BWA_START=${SECONDS}
+        (
+            while true; do
+                sleep 60
+                ELAPSED=$(( SECONDS - BWA_START ))
+                MINS=$(( ELAPSED / 60 ))
+                printf "  [%dm elapsed] Still building BWA index...\n" "${MINS}"
+            done
+        ) &
+        BWA_MONITOR_PID=$!
         bwa index "${OUTPUT_DIR}/${FASTA_NAME}"
+        kill "${BWA_MONITOR_PID}" 2>/dev/null || true
+        wait "${BWA_MONITOR_PID}" 2>/dev/null || true
+        BWA_ELAPSED=$(( SECONDS - BWA_START ))
+        echo "  BWA indexing complete in ${BWA_ELAPSED}s"
     else
         echo "Warning: bwa not found. BWA index not created (needed only for manifest realignment)."
     fi

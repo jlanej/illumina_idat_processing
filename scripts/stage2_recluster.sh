@@ -160,6 +160,7 @@ fi
 # Step 2: Recompute EGT cluster file from high-quality samples
 # ---------------------------------------------------------------
 echo "--- Step 2/5: Recomputing EGT clusters from high-quality samples ---"
+STEP_START=${SECONDS}
 
 RECLUSTERED_EGT="${CLUSTER_DIR}/reclustered.egt"
 
@@ -172,12 +173,15 @@ python3 "${SCRIPT_DIR}/recluster_egt.py" \
     --min-cluster-samples "${MIN_CLUSTER_SAMPLES}"
 
 echo "  Reclustered EGT: ${RECLUSTERED_EGT}"
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 2/5 completed in ${STEP_ELAPSED}s"
 
 # ---------------------------------------------------------------
 # Step 3: Re-run idat2gtc with the new EGT clusters
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 3/5: Re-genotyping all samples with new clusters ---"
+STEP_START=${SECONDS}
 
 ALL_GRN_IDATS=()
 while IFS= read -r -d '' grn; do
@@ -193,12 +197,15 @@ bcftools +idat2gtc \
     "${ALL_GRN_IDATS[@]}" 2>&1 | tail -3
 
 echo "  GTC re-calling complete."
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 3/5 completed in ${STEP_ELAPSED}s"
 
 # ---------------------------------------------------------------
 # Step 4: Convert reclustered GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 4/5: Converting reclustered GTC files to VCF ---"
+STEP_START=${SECONDS}
 
 VCF_OUTPUT="${VCF_DIR}/stage2_reclustered.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata_stage2.tsv"
@@ -218,15 +225,20 @@ bcftools norm --no-version -Ob -c x -f "${REF_FASTA}" \
     -o "${VCF_OUTPUT}" --write-index
 
 echo "  Reclustered VCF created: ${VCF_OUTPUT}"
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 4/5 completed in ${STEP_ELAPSED}s"
 
 # ---------------------------------------------------------------
 # Step 5: Recompute QC metrics after reclustering
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 5/5: Recomputing QC metrics ---"
+STEP_START=${SECONDS}
 
 source "${SCRIPT_DIR}/collect_qc_metrics.sh"
 collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_DIR}/stage2_sample_qc.tsv"
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 5/5 completed in ${STEP_ELAPSED}s"
 
 # Generate comparison report
 echo ""
