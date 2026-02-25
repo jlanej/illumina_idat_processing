@@ -31,7 +31,7 @@ docker run -v /path/to/data:/data ghcr.io/jlanej/illumina_idat_processing:main \
 
 # Apptainer / Singularity (HPC)
 apptainer pull docker://ghcr.io/jlanej/illumina_idat_processing:main
-apptainer exec illumina_idat_processing_main.sif \
+apptainer exec --bind /path/to/data:/data illumina_idat_processing_main.sif \
     bash /opt/scripts/run_pipeline.sh \
     --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
 ```
@@ -42,12 +42,12 @@ Process 1000 Genomes Omni2.5 IDAT data (downloads automatically):
 
 ```bash
 # Process 200 samples (quick test)
-bash scripts/process_1000g.sh --output-dir /scratch/1000g --num-samples 200
+bash scripts/process_1000g.sh --output-dir ./1000g_output --num-samples 200
 
 # Process all ~2141 samples on HPC with Apptainer
-apptainer exec illumina_idat_processing_main.sif \
+apptainer exec --bind $PWD illumina_idat_processing_main.sif \
     bash /opt/scripts/process_1000g.sh \
-    --output-dir /scratch/1000g --num-samples all --threads 8
+    --output-dir $PWD/1000g_output --num-samples all --threads 8
 ```
 
 ### From Source

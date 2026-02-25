@@ -18,8 +18,8 @@
 # approach.
 #
 # Usage:
-#   ./process_1000g.sh --output-dir /scratch/1000g --num-samples 200
-#   ./process_1000g.sh --output-dir /scratch/1000g --num-samples all
+#   ./process_1000g.sh --output-dir ./1000g_output --num-samples 200
+#   ./process_1000g.sh --output-dir ./1000g_output --num-samples all
 #
 set -euo pipefail
 
@@ -57,14 +57,14 @@ Options:
 
 Examples:
   # Process 200 samples (quick test)
-  $(basename "$0") --output-dir /scratch/1000g --num-samples 200
+  $(basename "$0") --output-dir ./1000g_output --num-samples 200
 
   # Process all ~2141 samples
-  $(basename "$0") --output-dir /scratch/1000g --num-samples all --threads 8
+  $(basename "$0") --output-dir ./1000g_output --num-samples all --threads 8
 
   # Use with Apptainer/Singularity on HPC
-  apptainer exec docker://ghcr.io/jlanej/illumina_idat_processing:main \\
-      bash /opt/scripts/process_1000g.sh --output-dir /scratch/1000g
+  apptainer exec --bind \$PWD docker://ghcr.io/jlanej/illumina_idat_processing:main \\
+      bash /opt/scripts/process_1000g.sh --output-dir \$PWD/1000g_output
 EOF
     exit 0
 }
@@ -301,5 +301,5 @@ echo "Samples processed: ${N_GRN}"
 echo ""
 echo "To process on an HPC cluster with Apptainer:"
 echo "  apptainer pull docker://ghcr.io/jlanej/illumina_idat_processing:main"
-echo "  apptainer exec illumina_idat_processing_main.sif \\"
-echo "      bash /opt/scripts/process_1000g.sh --output-dir /scratch/1000g"
+echo "  apptainer exec --bind \$PWD illumina_idat_processing_main.sif \\"
+echo "      bash /opt/scripts/process_1000g.sh --output-dir \$PWD/1000g_output"
