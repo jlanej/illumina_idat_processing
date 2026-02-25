@@ -24,6 +24,7 @@ HELP_SCRIPTS=(
     scripts/install_dependencies.sh
     scripts/download_manifests.sh
     scripts/download_reference.sh
+    scripts/realign_manifest.sh
     scripts/stage1_initial_genotyping.sh
     scripts/stage2_recluster.sh
     scripts/process_1000g.sh

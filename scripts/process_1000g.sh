@@ -11,11 +11,11 @@
 # The 1000G Omni2.5 data is available from:
 #   https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/
 #
-# Note: The original manifests are on GRCh37. To process on GRCh38, this
-# script realigns the CSV manifest probe flank sequences against the GRCh38
-# reference using bwa mem, then generates a GRCh38-remapped CSV via
-# bcftools +gtc2vcf --sam-flank. This is the recommended approach from
-# the gtc2vcf documentation for genome build remapping.
+# Note: The original manifests are on GRCh37. The pipeline's built-in
+# manifest realignment step (realign_manifest.sh) handles GRCh37→GRCh38
+# coordinate remapping by aligning probe flank sequences against the
+# GRCh38 reference using bwa mem, following the MoChA/gtc2vcf recommended
+# approach.
 #
 # Usage:
 #   ./process_1000g.sh --output-dir /scratch/1000g --num-samples 200
@@ -148,59 +148,6 @@ echo "  CSV: ${CSV}"
 echo ""
 
 # ---------------------------------------------------------------
-# Step 2.5: Download reference and remap CSV to GRCh38
-# ---------------------------------------------------------------
-REF_DIR="${OUTPUT_DIR}/reference"
-REF_FASTA="${REF_DIR}/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
-
-if [[ ! -f "${REF_FASTA}" ]]; then
-    echo "--- Step 2.5a: Downloading GRCh38 reference genome ---"
-    echo ""
-    bash "${SCRIPT_DIR}/download_reference.sh" \
-        --genome GRCh38 \
-        --output-dir "${REF_DIR}"
-    echo ""
-fi
-
-# The 1000G CSV manifest has GRCh37 coordinates. To get correct GRCh38
-# positions, we must realign the probe flank sequences against the GRCh38
-# reference. gtc2vcf does NOT automatically remap coordinates — using a
-# GRCh37 CSV with a GRCh38 reference would place variants at wrong positions.
-CSV_GRCh38="${MANIFEST_DIR}/$(basename "${CSV}" .csv).GRCh38.csv"
-
-if [[ ! -f "${CSV_GRCh38}" ]]; then
-    echo "--- Step 2.5b: Remapping CSV manifest to GRCh38 ---"
-    echo "  Extracting flank sequences from CSV..."
-
-    FLANK_FASTA="${MANIFEST_DIR}/flanks.fasta"
-    FLANK_SAM="${MANIFEST_DIR}/flanks.GRCh38.sam"
-
-    bcftools +gtc2vcf \
-        --csv "${CSV}" \
-        --fasta-flank \
-        -o "${FLANK_FASTA}"
-
-    echo "  Aligning flank sequences to GRCh38 reference..."
-    bwa mem -M "${REF_FASTA}" "${FLANK_FASTA}" -o "${FLANK_SAM}"
-
-    echo "  Generating GRCh38-remapped CSV..."
-    bcftools +gtc2vcf \
-        --csv "${CSV}" \
-        --sam-flank "${FLANK_SAM}" \
-        -o "${CSV_GRCh38}"
-
-    # Clean up intermediate files
-    rm -f "${FLANK_FASTA}" "${FLANK_SAM}"
-
-    echo "  Remapped CSV: ${CSV_GRCh38}"
-    echo ""
-else
-    echo "GRCh38 CSV already exists: ${CSV_GRCh38}"
-fi
-
-CSV="${CSV_GRCh38}"
-
-# ---------------------------------------------------------------
 # Step 2: Download and extract IDAT files
 # ---------------------------------------------------------------
 if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
@@ -323,7 +270,6 @@ PIPELINE_ARGS=(
     --bpm "${BPM}"
     --egt "${EGT}"
     --csv "${CSV}"
-    --ref-fasta "${REF_FASTA}"
     --genome GRCh38
     --threads "${THREADS}"
 )
