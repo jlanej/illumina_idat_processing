@@ -133,6 +133,7 @@ fi
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 1/3: Converting IDAT files to GTC ---"
+STEP_START=${SECONDS}
 
 # Collect all green and red IDAT files
 GREEN_IDATS=()
@@ -179,12 +180,15 @@ for (( i=0; i<n_total; i+=BATCH_SIZE )); do
 done
 
 echo "GTC conversion complete. Files in: ${GTC_DIR}"
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 1/3 completed in ${STEP_ELAPSED}s"
 
 # ---------------------------------------------------------------
 # Step 3: Convert GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 2/3: Converting GTC files to VCF ---"
+STEP_START=${SECONDS}
 
 VCF_OUTPUT="${VCF_DIR}/stage1_initial.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata.tsv"
@@ -203,15 +207,20 @@ bcftools norm --no-version -Ob -c x -f "${REF_FASTA}" \
     -o "${VCF_OUTPUT}" --write-index
 
 echo "VCF created: ${VCF_OUTPUT}"
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 2/3 completed in ${STEP_ELAPSED}s"
 
 # ---------------------------------------------------------------
 # Step 4: Compute per-sample QC metrics
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 3/3: Computing QC metrics ---"
+STEP_START=${SECONDS}
 
 source "${SCRIPT_DIR}/collect_qc_metrics.sh"
 collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_DIR}/stage1_sample_qc.tsv"
+STEP_ELAPSED=$(( SECONDS - STEP_START ))
+echo "  Step 3/3 completed in ${STEP_ELAPSED}s"
 
 echo ""
 echo "============================================"
