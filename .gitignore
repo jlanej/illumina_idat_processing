@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+*.o
+*.so
+*.a
+
+# Reference and data files
+*.fasta
+*.fasta.fai
+*.fasta.bwt
+*.fna
+*.fna.fai
+*.fna.bwt
+
+# Pipeline outputs
+output/
+*.gtc
+*.bcf
+*.bcf.csi
+*.bam
+*.bam.bai
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Temporary files
+tmp/
+*.tmp

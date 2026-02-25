@@ -224,6 +224,40 @@ echo "  Max LRR SD:     ${MAX_LRR_SD}"
 echo ""
 
 # ---------------------------------------------------------------
+# Realign manifest probe sequences against reference genome
+# ---------------------------------------------------------------
+# Following MoChA/gtc2vcf best practice, always realign the CSV manifest
+# flank sequences against the reference. This validates probe positions
+# and enables correct coordinate mapping regardless of the original build.
+REALIGN_DIR="${OUTPUT_DIR}/realigned_manifests"
+
+if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
+    echo "======================================================"
+    echo "  Realigning Manifest Probes Against Reference"
+    echo "======================================================"
+    echo ""
+
+    bash "${SCRIPT_DIR}/realign_manifest.sh" \
+        --csv "${CSV}" \
+        --ref-fasta "${REF_FASTA}" \
+        --output-dir "${REALIGN_DIR}"
+
+    # Use the realigned CSV for all downstream steps
+    REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)
+    if [[ -n "${REALIGNED_CSV}" && -f "${REALIGNED_CSV}" ]]; then
+        echo "Using realigned CSV: ${REALIGNED_CSV}"
+        CSV="${REALIGNED_CSV}"
+    fi
+    echo ""
+else
+    echo "Note: Skipping manifest realignment (bwa or BWA index not available)."
+    echo "  Probe positions will use coordinates from the original CSV manifest."
+    echo "  For best results, install bwa and create an index:"
+    echo "    bwa index ${REF_FASTA}"
+    echo ""
+fi
+
+# ---------------------------------------------------------------
 # Stage 1: Initial genotyping
 # ---------------------------------------------------------------
 STAGE1_DIR="${OUTPUT_DIR}/stage1"

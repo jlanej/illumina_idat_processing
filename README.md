@@ -6,15 +6,51 @@ Inspired by [MoChA](https://github.com/freeseek/mocha) and [MoChA WDL](https://g
 
 ## Overview
 
-The pipeline runs in two stages:
+The pipeline runs in three phases:
 
-1. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate** and **LRR standard deviation**.
+1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
-2. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction.
+2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate** and **LRR standard deviation**.
+
+3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).
 
 ## Quick Start
+
+### Using Docker / Apptainer (recommended for HPC)
+
+A pre-built container image is available from GitHub Container Registry:
+
+```bash
+# Docker
+docker pull ghcr.io/jlanej/illumina_idat_processing:main
+docker run -v /path/to/data:/data ghcr.io/jlanej/illumina_idat_processing:main \
+    /opt/scripts/run_pipeline.sh \
+    --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
+
+# Apptainer / Singularity (HPC)
+apptainer pull docker://ghcr.io/jlanej/illumina_idat_processing:main
+apptainer exec illumina_idat_processing_main.sif \
+    bash /opt/scripts/run_pipeline.sh \
+    --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
+```
+
+### 1000 Genomes Example
+
+Process 1000 Genomes Omni2.5 IDAT data (downloads automatically):
+
+```bash
+# Process 200 samples (quick test)
+bash scripts/process_1000g.sh --output-dir /scratch/1000g --num-samples 200
+
+# Process all ~2141 samples on HPC with Apptainer
+apptainer exec illumina_idat_processing_main.sif \
+    bash /opt/scripts/process_1000g.sh \
+    --output-dir /scratch/1000g --num-samples all --threads 8
+```
+
+### From Source
 
 ```bash
 # 1. Install dependencies (bcftools + plugins)
@@ -29,7 +65,7 @@ bash scripts/run_pipeline.sh \
     --output-dir /path/to/output
 ```
 
-That's it. The pipeline will:
+The pipeline will:
 - Download the correct BPM, EGT, and CSV manifest files for the specified array
 - Download the GRCh38 reference genome
 - Run Stage 1 (initial genotyping + QC)
@@ -172,6 +208,9 @@ output/
 │   └── clusters/
 │       └── reclustered.egt          # Study-specific EGT cluster file
 ├── manifests/                  # Downloaded manifest files (if auto-downloaded)
+├── realigned_manifests/        # Realigned manifest and mapping summary
+│   ├── *.realigned.csv         # CSV with validated/remapped coordinates
+│   └── realign_summary.txt     # Detailed mapping statistics
 └── reference/                  # Downloaded reference (if auto-downloaded)
 ```
 
@@ -186,7 +225,21 @@ The `*_sample_qc.tsv` files contain:
 | `lrr_sd` | Standard deviation of Log R Ratio (lower is better) |
 | `computed_gender` | Inferred gender (1=male, 2=female) |
 
-## Two-Stage Processing Rationale
+## Processing Rationale
+
+### Manifest Realignment
+
+Before genotyping, the pipeline always realigns probe flank sequences from the CSV manifest against the reference genome using BWA (`scripts/realign_manifest.sh`). This follows the [MoChA WDL](https://github.com/freeseek/mochawdl) best practice and is critical for two reasons:
+
+1. **Cross-build remapping**: If the manifest was designed for GRCh37 but processing targets GRCh38 (or vice versa), `gtc2vcf` does **not** automatically remap coordinates. The flank alignment produces a remapped CSV with correct positions for the target reference.
+
+2. **Position validation**: Even when the manifest claims the same build, probes can have incorrect positions due to assembly updates, manufacturer errors, or custom array designs. Realignment validates every probe against the actual reference sequence.
+
+The pipeline outputs a detailed mapping summary (`realign_summary.txt`) reporting:
+- Total probes, mapped/unmapped counts, mapping quality distribution
+- Coordinate changes: positions confirmed, changed, newly placed, or lost
+
+### Two-Stage Genotyping
 
 Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a training set. However, batch effects, population differences, and varying sample quality can degrade genotype calls when the default clusters don't match the study population.
 

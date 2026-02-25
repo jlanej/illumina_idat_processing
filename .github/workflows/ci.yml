@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shell syntax and lint checks
+        run: bash tests/test_shell_syntax.sh
+
+      - name: Script help output tests
+        run: bash tests/test_scripts_help.sh
+
+      - name: Validate resource URLs
+        run: bash tests/test_resource_links.sh
