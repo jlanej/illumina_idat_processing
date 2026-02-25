@@ -89,11 +89,15 @@ echo "--- 1000 Genomes Resources ---"
 check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/" \
     "1000G broad_intensities directory"
 
-# NOTE: The 1000G FTP no longer hosts array manifest files (BPM/EGT/CSV).
-# These proprietary Illumina files must now be obtained from:
-#   https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html
-check_url "https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html" \
-    "1000G Omni2.5 manifests (Illumina Support page)"
+# 1000G Omni2.5 manifest files (HumanOmni2.5-4v1)
+check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/HumanOmni2.5-4v1-Multi_B.bpm" \
+    "1000G Omni2.5 BPM manifest"
+
+check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/HumanOmni2.5-4v1-Multi_B.egt" \
+    "1000G Omni2.5 EGT cluster file"
+
+check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/HumanOmni2.5-4v1_B.csv" \
+    "1000G Omni2.5 CSV manifest"
 
 echo ""
 echo "--- Reference Genome Resources ---"

@@ -183,6 +183,7 @@ The following arrays have pre-configured manifest download URLs in `config/manif
 | `MEGA_Consortium_v2-0_A1` | Multi-Ethnic Global Array v2.0 |
 | `InfiniumOmni2-5-8v1-5_A1` | Infinium Omni2.5 v1.5 |
 | `HumanCNV370v1_C` | HumanCNV370-Duo v1.0 |
+| `HumanOmni2-5-4v1-Multi_B` | HumanOmni2.5-4 v1 Multi (1000G) |
 
 Additional arrays can be processed by providing manifest files directly with `--bpm`, `--egt`, and `--csv`, or by adding entries to `config/manifest_urls.tsv`.
 
