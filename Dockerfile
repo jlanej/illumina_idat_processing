@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 LABEL maintainer="illumina_idat_processing"
 LABEL description="Illumina IDAT processing pipeline with bcftools and plugins for HPC"
 
-ARG BCFTOOLS_VERSION=1.21
+ARG BCFTOOLS_VERSION=1.23
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

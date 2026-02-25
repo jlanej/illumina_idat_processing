@@ -93,6 +93,19 @@ if [[ -n "${ARRAY_NAME}" && -f "${MANIFEST_FILE}" ]]; then
     echo "Looking up manifest URLs for ${ARRAY_NAME}..."
     MATCH=$(grep -v '^#' "${MANIFEST_FILE}" | awk -F'\t' -v name="${ARRAY_NAME}" '$1==name {print}')
     if [[ -n "${MATCH}" ]]; then
+        LOOKED_UP_URL=$(echo "${MATCH}" | cut -f2)
+        # Check if URLs are Illumina Support pages (not direct download links)
+        if [[ "${LOOKED_UP_URL}" == *"support.illumina.com"* ]]; then
+            echo ""
+            echo "NOTE: Illumina has moved manifest downloads to their Support portal." >&2
+            echo "Direct download URLs are no longer available for ${ARRAY_NAME}." >&2
+            echo "Please download BPM, EGT, and CSV files from:" >&2
+            echo "  ${LOOKED_UP_URL}" >&2
+            echo "" >&2
+            echo "Then re-run with --bpm-url, --egt-url, and --csv-url pointing to the" >&2
+            echo "downloaded files, or place them in the output directory." >&2
+            exit 1
+        fi
         [[ -z "${BPM_URL}" ]] && BPM_URL=$(echo "${MATCH}" | cut -f2)
         [[ -z "${EGT_URL}" ]] && EGT_URL=$(echo "${MATCH}" | cut -f3)
         [[ -z "${CSV_URL}" ]] && CSV_URL=$(echo "${MATCH}" | cut -f4)
