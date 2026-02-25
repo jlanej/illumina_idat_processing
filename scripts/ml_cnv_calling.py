@@ -594,9 +594,20 @@ Truth-set BED format (tab-separated, no header):
   chrom  start  end  cn_state
 
   The highly curated 1000 Genomes structural variant truth sets
-  (e.g., from the 1000 Genomes Phase 3 integrated SV call set or
-  the Chaisson et al. multi-platform validated set) can be converted
-  to this format for training labels.
+  can be used as training labels. For example, convert the 1000
+  Genomes Phase 3 integrated SV call set to BED format:
+
+  # Download 1000G Phase 3 SV truth set
+  wget ftp://ftp.1000genomes.ebi.ac.uk/vol1/ftp/phase3/integrated_sv_map/ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz
+
+  # Extract DEL/DUP calls for a sample as a CN truth-set BED
+  bcftools query -s NA12878 -i 'GT="alt"' \\
+      -f '%CHROM\\t%POS\\t%INFO/END\\t%INFO/SVTYPE\\n' \\
+      ALL.wgs.mergedSV.v8.20130502.svs.genotypes.vcf.gz \\
+    | awk -F'\\t' '{
+        if ($4=="DEL") print $1"\\t"$2"\\t"$3"\\t1";
+        else if ($4=="DUP") print $1"\\t"$2"\\t"$3"\\t3";
+      }' > 1000g_cnv_truthset.bed
 """,
     )
 
