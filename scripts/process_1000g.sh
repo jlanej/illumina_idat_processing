@@ -216,40 +216,54 @@ echo ""
 if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     mkdir -p "${DOWNLOAD_DIR}" "${IDAT_DIR}"
 
-    echo "--- Step 2: Downloading 1000G IDAT archive ---"
-    echo "  Source: ${FTP_BASE}/${IDAT_TGZ}"
-    echo "  This is a large file (~20 GB) and may take a while."
-    echo ""
-
     ARCHIVE="${DOWNLOAD_DIR}/${IDAT_TGZ}"
-    if [[ -f "${ARCHIVE}" ]]; then
-        echo "  Archive already downloaded: ${ARCHIVE}"
-    else
-        wget -q --show-progress -O "${ARCHIVE}" "${FTP_BASE}/${IDAT_TGZ}"
-    fi
+    ARCHIVE_URL="${FTP_BASE}/${IDAT_TGZ}"
 
+    echo "--- Step 2: Downloading 1000G IDAT files ---"
+    echo "  Source: ${ARCHIVE_URL}"
     echo ""
-    echo "  Extracting IDAT files..."
 
     # Extract only IDAT files (skip GTC files to save space)
     # The archive contains files like: broad_intensities/*_Grn.idat, *_Red.idat
     if [[ "${NUM_SAMPLES}" == "all" ]]; then
+        # Download full archive for all samples
+        echo "  This is a large file (~20 GB) and may take a while."
+        echo ""
+        if [[ -f "${ARCHIVE}" ]]; then
+            echo "  Archive already downloaded: ${ARCHIVE}"
+        else
+            wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
+        fi
+
+        echo ""
+        echo "  Extracting IDAT files..."
         tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
             --wildcards '*.idat' 2>/dev/null || \
         tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat' 2>/dev/null || \
         tar xzf "${ARCHIVE}" -C "${IDAT_DIR}"
     else
-        # Extract a subset of samples
-        # List all IDAT files in the archive, take N sample pairs
-        echo "  Selecting ${NUM_SAMPLES} samples from archive..."
+        # Stream a subset of samples directly, avoiding full archive download
+        echo "  Selecting ${NUM_SAMPLES} samples..."
 
-        # Get unique sample prefixes (barcode_position) from Grn IDATs
-        SAMPLE_LIST=$(tar tzf "${ARCHIVE}" 2>/dev/null | \
-            grep -i '_Grn\.idat' | \
-            head -n "${NUM_SAMPLES}")
+        # Get green IDAT paths: use local archive if present, otherwise stream
+        if [[ -f "${ARCHIVE}" ]]; then
+            echo "  Using existing archive: ${ARCHIVE}"
+            SAMPLE_LIST=$(tar tzf "${ARCHIVE}" 2>/dev/null | \
+                grep -i '_Grn\.idat' | \
+                head -n "${NUM_SAMPLES}")
+        else
+            echo "  Streaming archive listing (skipping full archive download)..."
+            SAMPLE_LIST=$(curl -sL "${ARCHIVE_URL}" | \
+                tar -tzf - 2>/dev/null | \
+                grep -i '_Grn\.idat' | \
+                head -n "${NUM_SAMPLES}") || true
+        fi
 
         if [[ -z "${SAMPLE_LIST}" ]]; then
-            echo "  Could not list archive contents. Extracting all and subsetting..."
+            echo "  Could not list archive contents. Falling back to full download..."
+            if [[ ! -f "${ARCHIVE}" ]]; then
+                wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
+            fi
             tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                 --wildcards '*.idat' 2>/dev/null || \
             tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat' 2>/dev/null || \
@@ -263,16 +277,34 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 EXTRACT_LIST="${EXTRACT_LIST} ${grn_file} ${red_file}"
             done <<< "${SAMPLE_LIST}"
 
-            # shellcheck disable=SC2086
-            tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
-                ${EXTRACT_LIST} 2>/dev/null || \
-            tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" \
-                ${EXTRACT_LIST} 2>/dev/null || {
-                echo "  Selective extraction failed. Extracting all IDATs..."
+            # Extract from local archive or stream from remote
+            if [[ -f "${ARCHIVE}" ]]; then
+                # shellcheck disable=SC2086
                 tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
-                    --wildcards '*.idat' 2>/dev/null || \
-                tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
-            }
+                    ${EXTRACT_LIST} 2>/dev/null || \
+                tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" \
+                    ${EXTRACT_LIST} 2>/dev/null || {
+                    echo "  Selective extraction failed. Extracting all IDATs..."
+                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+                        --wildcards '*.idat' 2>/dev/null || \
+                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
+                }
+            else
+                echo "  Streaming extraction of selected samples..."
+                # shellcheck disable=SC2086
+                curl -sL "${ARCHIVE_URL}" | \
+                    tar xzf - -C "${IDAT_DIR}" --strip-components=1 \
+                        ${EXTRACT_LIST} 2>/dev/null || \
+                curl -sL "${ARCHIVE_URL}" | \
+                    tar xzf - -C "${IDAT_DIR}" \
+                        ${EXTRACT_LIST} 2>/dev/null || {
+                    echo "  Streaming extraction failed. Falling back to full download..."
+                    wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
+                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+                        --wildcards '*.idat' 2>/dev/null || \
+                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
+                }
+            fi
         fi
     fi
 
