@@ -310,7 +310,24 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 }
             else
                 echo "  [3/3] Streaming extraction of ${N_PAIRS} samples from remote..."
-                echo "        This requires re-reading the archive stream. Please be patient."
+                echo "        URL: ${ARCHIVE_URL}"
+                echo "        Archive is ~20 GB — streaming to extract $(( N_PAIRS * 2 )) files."
+                echo "        tar must scan through the full archive stream to find requested files."
+                echo ""
+                # Background monitor: periodically report elapsed time and extraction progress
+                (
+                    TARGET_FILES=$(( N_PAIRS * 2 ))
+                    while true; do
+                        sleep 15
+                        N_DONE=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
+                        ELAPSED=$(( SECONDS - EXTRACT_START ))
+                        MINS=$(( ELAPSED / 60 ))
+                        SECS=$(( ELAPSED % 60 ))
+                        printf "        [%dm %02ds elapsed] %d / %d files extracted...\n" \
+                            "${MINS}" "${SECS}" "${N_DONE}" "${TARGET_FILES}"
+                    done
+                ) &
+                MONITOR_PID=$!
                 # shellcheck disable=SC2086
                 curl -sL "${ARCHIVE_URL}" | \
                     tar xzf - -C "${IDAT_DIR}" --strip-components=1 \
@@ -324,6 +341,8 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                         --wildcards '*.idat' 2>/dev/null || \
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
                 }
+                kill "${MONITOR_PID}" 2>/dev/null || true
+                wait "${MONITOR_PID}" 2>/dev/null || true
             fi
             EXTRACT_ELAPSED=$(( SECONDS - EXTRACT_START ))
             N_EXTRACTED=$(find "${IDAT_DIR}" -name '*.idat' -o -name '*.IDAT' 2>/dev/null | wc -l)
