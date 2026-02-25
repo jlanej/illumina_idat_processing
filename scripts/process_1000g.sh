@@ -6,7 +6,8 @@
 #
 # Downloads a configurable number of samples (default: 200) from the 1000G
 # HD genotype chip data, along with the required array manifests (BPM, EGT,
-# CSV). Processes the data using the pipeline with GRCh38 coordinates.
+# CSV: HumanOmni2.5-4v1). Processes the data using the pipeline with GRCh38
+# coordinates.
 #
 # The 1000G Omni2.5 data is available from:
 #   https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/
@@ -36,6 +37,10 @@ THREADS=1
 SKIP_DOWNLOAD="false"
 SKIP_STAGE2="false"
 KEEP_ARCHIVE="false"
+USER_BPM=""
+USER_EGT=""
+USER_CSV=""
+USER_MANIFEST_DIR=""
 
 usage() {
     cat <<EOF
@@ -45,6 +50,12 @@ Download and process 1000 Genomes Omni2.5 IDAT data on GRCh38.
 
 Required:
   --output-dir DIR       Output directory (needs ~50 GB for all samples)
+
+Manifest options (override auto-downloaded manifests):
+  --bpm FILE             Path to BPM manifest file
+  --egt FILE             Path to EGT cluster file
+  --csv FILE             Path to CSV manifest file
+  --manifest-dir DIR     Directory containing BPM, EGT, CSV files
 
 Options:
   --num-samples N|all    Number of samples to process (default: ${NUM_SAMPLES})
@@ -56,7 +67,7 @@ Options:
   --help                 Show this help message
 
 Examples:
-  # Process 200 samples (quick test)
+  # Process 200 samples (quick test - manifests downloaded automatically)
   $(basename "$0") --output-dir ./1000g_output --num-samples 200
 
   # Process all ~2141 samples
@@ -65,6 +76,12 @@ Examples:
   # Use with Apptainer/Singularity on HPC
   apptainer exec --bind \$PWD docker://ghcr.io/jlanej/illumina_idat_processing:main \\
       bash /opt/scripts/process_1000g.sh --output-dir \$PWD/1000g_output
+
+  # Provide manifest files manually (if auto-download fails)
+  $(basename "$0") --output-dir ./1000g_output \\
+      --bpm /path/to/HumanOmni2.5-4v1-Multi_B.bpm \\
+      --egt /path/to/HumanOmni2.5-4v1-Multi_B.egt \\
+      --csv /path/to/HumanOmni2.5-4v1_B.csv
 EOF
     exit 0
 }
@@ -74,6 +91,10 @@ while [[ $# -gt 0 ]]; do
         --output-dir)    OUTPUT_DIR="$2"; shift 2 ;;
         --num-samples)   NUM_SAMPLES="$2"; shift 2 ;;
         --threads)       THREADS="$2"; shift 2 ;;
+        --bpm)           USER_BPM="$2"; shift 2 ;;
+        --egt)           USER_EGT="$2"; shift 2 ;;
+        --csv)           USER_CSV="$2"; shift 2 ;;
+        --manifest-dir)  USER_MANIFEST_DIR="$2"; shift 2 ;;
         --skip-download) SKIP_DOWNLOAD="true"; shift ;;
         --skip-stage2)   SKIP_STAGE2="true"; shift ;;
         --keep-archive)  KEEP_ARCHIVE="true"; shift ;;
@@ -104,23 +125,45 @@ echo "Threads:        ${THREADS}"
 echo ""
 
 # ---------------------------------------------------------------
-# Step 1: Download array manifests (BPM, EGT, CSV)
+# Step 1: Resolve array manifests (BPM, EGT, CSV)
 # ---------------------------------------------------------------
-if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
-    mkdir -p "${MANIFEST_DIR}"
+mkdir -p "${MANIFEST_DIR}"
 
+# Handle user-provided manifest directory
+if [[ -n "${USER_MANIFEST_DIR}" ]]; then
+    [[ -z "${USER_BPM}" ]] && USER_BPM=$(find "${USER_MANIFEST_DIR}" -name "*.bpm" -print -quit)
+    [[ -z "${USER_EGT}" ]] && USER_EGT=$(find "${USER_MANIFEST_DIR}" -name "*.egt" -print -quit)
+    [[ -z "${USER_CSV}" ]] && USER_CSV=$(find "${USER_MANIFEST_DIR}" -name "*.csv" -print -quit)
+fi
+
+# Copy user-provided manifest files to the manifest directory
+if [[ -n "${USER_BPM}" || -n "${USER_EGT}" || -n "${USER_CSV}" ]]; then
+    echo "--- Step 1: Using provided manifest files ---"
+    echo ""
+    for src_var in USER_BPM USER_EGT USER_CSV; do
+        src="${!src_var}"
+        if [[ -n "${src}" ]]; then
+            if [[ ! -f "${src}" ]]; then
+                echo "Error: Manifest file not found: ${src}" >&2
+                exit 1
+            fi
+            dest="${MANIFEST_DIR}/$(basename "${src}")"
+            if [[ ! -f "${dest}" ]]; then
+                cp "${src}" "${dest}"
+            fi
+            echo "  $(basename "${src}"): ${dest}"
+        fi
+    done
+    echo ""
+elif [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     echo "--- Step 1: Downloading array manifests ---"
     echo ""
 
-    # The 1000G Omni2.5 uses InfiniumOmni2-5-8v1-3 manifests
-    # NOTE: The 1000G FTP no longer hosts these proprietary Illumina files.
-    # Download them from the Illumina Support portal (free registration required):
-    #   https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html
-    # Then place BPM, EGT, and CSV files in the manifest directory, or re-run
-    # with --skip-download and ensure the files are already present.
-    BPM_URL="${BPM_URL:-${FTP_BASE}/HumanOmni2.5-8v1-3_A.bpm}"
-    EGT_URL="${EGT_URL:-${FTP_BASE}/HumanOmni2.5-8v1-3_A.egt}"
-    CSV_URL="${CSV_URL:-${FTP_BASE}/HumanOmni2.5-8v1-3_A.csv}"
+    # The 1000G Omni2.5 uses HumanOmni2.5-4v1 manifests hosted on the 1000G FTP.
+    # Note: BPM and EGT use the "Multi_B" suffix, while the CSV uses "_B".
+    BPM_URL="${BPM_URL:-${FTP_BASE}/HumanOmni2.5-4v1-Multi_B.bpm}"
+    EGT_URL="${EGT_URL:-${FTP_BASE}/HumanOmni2.5-4v1-Multi_B.egt}"
+    CSV_URL="${CSV_URL:-${FTP_BASE}/HumanOmni2.5-4v1_B.csv}"
 
     for url in "${BPM_URL}" "${EGT_URL}" "${CSV_URL}"; do
         fname=$(basename "${url}")
@@ -131,10 +174,9 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
             echo "  Downloading: ${url}"
             if ! wget -q --show-progress -O "${dest}" "${url}"; then
                 echo "  WARNING: Download failed for ${url}" >&2
-                echo "  The 1000G FTP may no longer host Illumina manifest files." >&2
-                echo "  Please download manually from Illumina Support:" >&2
-                echo "    https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html" >&2
-                echo "  Then place the file in: ${MANIFEST_DIR}/" >&2
+                echo "  You can download manifests manually from the 1000G FTP:" >&2
+                echo "    ${FTP_BASE}/" >&2
+                echo "  Then provide the files with --bpm, --egt, --csv options." >&2
                 rm -f "${dest}"
             fi
         fi
@@ -148,7 +190,17 @@ CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit)
 
 if [[ -z "${BPM}" || -z "${EGT}" || -z "${CSV}" ]]; then
     echo "Error: Manifest files not found in ${MANIFEST_DIR}" >&2
-    echo "Run without --skip-download to fetch them." >&2
+    echo "" >&2
+    echo "Download them from the 1000G FTP:" >&2
+    echo "  ${FTP_BASE}/HumanOmni2.5-4v1-Multi_B.bpm" >&2
+    echo "  ${FTP_BASE}/HumanOmni2.5-4v1-Multi_B.egt" >&2
+    echo "  ${FTP_BASE}/HumanOmni2.5-4v1_B.csv" >&2
+    echo "" >&2
+    echo "Then re-run with the manifest file paths:" >&2
+    echo "  $(basename "$0") --output-dir ${OUTPUT_DIR} \\" >&2
+    echo "      --bpm /path/to/HumanOmni2.5-4v1-Multi_B.bpm \\" >&2
+    echo "      --egt /path/to/HumanOmni2.5-4v1-Multi_B.egt \\" >&2
+    echo "      --csv /path/to/HumanOmni2.5-4v1_B.csv" >&2
     exit 1
 fi
 
