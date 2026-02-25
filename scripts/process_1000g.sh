@@ -331,14 +331,16 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 echo "  [3/3] Streaming extraction of ${N_PAIRS} samples from remote..."
                 echo "        URL: ${ARCHIVE_URL}"
                 echo "        Archive is ~20 GB — streaming to extract $(( N_PAIRS * 2 )) files."
-                echo "        tar must scan through the full archive stream to find requested files."
+                echo "        This may take several minutes as the full archive is streamed."
                 echo ""
                 # Background monitor: periodically report elapsed time and extraction progress
+                BASELINE_FILES=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
                 (
                     TARGET_FILES=$(( N_PAIRS * 2 ))
                     while true; do
                         sleep 15
-                        N_DONE=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
+                        N_TOTAL=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
+                        N_DONE=$(( N_TOTAL - BASELINE_FILES ))
                         ELAPSED=$(( SECONDS - EXTRACT_START ))
                         MINS=$(( ELAPSED / 60 ))
                         SECS=$(( ELAPSED % 60 ))
