@@ -1,0 +1,14 @@
+# Illumina array manifest download URLs
+# Columns: array_name	bpm_url	egt_url	csv_url
+# This file provides known download locations for common Illumina array manifests.
+# URLs may change over time; check Illumina support for current links:
+#   https://support.illumina.com/array/downloads.html
+#
+# array_name	bpm_url	egt_url	csv_url
+GSA-24v3-0_A1	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v3-0/GSA-24v3-0_A1.bpm	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v3-0/GSA-24v3-0_A1_ClusterFile.egt	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v3-0/GSA-24v3-0_A1.csv
+GSA-24v3-0_A2	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v3-0/GSA-24v3-0_A2.bpm	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v3-0/GSA-24v3-0_A2_ClusterFile.egt	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v3-0/GSA-24v3-0_A2.csv
+GSA-24v2-0_A1	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v2-0/GSA-24v2-0_A1.bpm	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v2-0/GSA-24v2-0_A1_ClusterFile.egt	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v2-0/GSA-24v2-0_A1.csv
+GSA-24v1-0_A1	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v1-0/GSA-24v1-0_A1.bpm	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v1-0/GSA-24v1-0_A1_ClusterFile.egt	https://webdata.illumina.com/downloads/productfiles/global-screening-array-24/v1-0/GSA-24v1-0_A1.csv
+MEGA_Consortium_v2-0_A1	https://webdata.illumina.com/downloads/productfiles/multiethnic-global/v2-0/MEGA_Consortium_v2-0_A1.bpm	https://webdata.illumina.com/downloads/productfiles/multiethnic-global/v2-0/MEGA_Consortium_v2-0_A1_ClusterFile.egt	https://webdata.illumina.com/downloads/productfiles/multiethnic-global/v2-0/MEGA_Consortium_v2-0_A1.csv
+InfiniumOmni2-5-8v1-5_A1	https://webdata.illumina.com/downloads/productfiles/humanomni25/v1-5/InfiniumOmni2-5-8v1-5_A1.bpm	https://webdata.illumina.com/downloads/productfiles/humanomni25/v1-5/InfiniumOmni2-5-8v1-5_A1_ClusterFile.egt	https://webdata.illumina.com/downloads/productfiles/humanomni25/v1-5/InfiniumOmni2-5-8v1-5_A1.csv
+HumanCNV370v1_C	ftp://webdata:webdata@ftp.illumina.com/downloads/ProductFiles/HumanCNV370/HumanCNV370-Duo/humancnv370v1_c.bpm	ftp://webdata2:webdata2@ftp.illumina.com/downloads/ProductFiles/HumanCNV370/HumanCNV370-Duo/HumanCNV370v1_C.egt	https://ftp.ncbi.nlm.nih.gov/geo/platforms/GPL6nnn/GPL6986/suppl/GPL6986_HumanCNV370v1_C.csv.gz
