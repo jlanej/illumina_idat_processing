@@ -10,7 +10,7 @@
 #
 set -euo pipefail
 
-BCFTOOLS_VERSION="1.21"
+BCFTOOLS_VERSION="1.23"
 INSTALL_PREFIX="${HOME}/bin"
 
 usage() {

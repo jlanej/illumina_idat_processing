@@ -6,6 +6,11 @@
 # Checks HTTP status codes for all URLs in config/manifest_urls.tsv and
 # key external resources used by the pipeline.
 #
+# NOTE: Illumina has retired their webdata.illumina.com direct download URLs.
+# Manifest URLs now point to support.illumina.com product file pages.
+# These pages require free registration to download files, but the pages
+# themselves should be reachable (HTTP 200).
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +52,9 @@ echo "============================================"
 echo ""
 
 # Test manifest URLs from config file
+# Since Illumina has moved to support.illumina.com, BPM/EGT/CSV URLs now
+# point to the same product file download page. We deduplicate and check
+# each unique URL once per array.
 echo "--- Manifest URLs (config/manifest_urls.tsv) ---"
 if [[ -f "${MANIFEST_FILE}" ]]; then
     while IFS=$'\t' read -r array_name bpm_url egt_url csv_url; do
@@ -55,9 +63,19 @@ if [[ -f "${MANIFEST_FILE}" ]]; then
 
         echo ""
         echo "  Array: ${array_name}"
-        check_url "${bpm_url}" "${array_name} BPM"
-        check_url "${egt_url}" "${array_name} EGT"
-        check_url "${csv_url}" "${array_name} CSV"
+
+        # Collect unique URLs for this array
+        declare -A seen_urls=()
+        for url in "${bpm_url}" "${egt_url}" "${csv_url}"; do
+            if [[ "${url}" == ftp://* ]]; then
+                echo "  SKIP: ${array_name} (FTP URL)"
+                (( SKIP++ )) || true
+            elif [[ -z "${seen_urls[${url}]+_}" ]]; then
+                seen_urls["${url}"]=1
+                check_url "${url}" "${array_name} product files"
+            fi
+        done
+        unset seen_urls
     done < "${MANIFEST_FILE}"
 else
     echo "  FAIL: Manifest URL file not found: ${MANIFEST_FILE}"
@@ -71,14 +89,11 @@ echo "--- 1000 Genomes Resources ---"
 check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/" \
     "1000G broad_intensities directory"
 
-check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/HumanOmni2.5-8v1-3_A.bpm" \
-    "1000G Omni2.5 BPM manifest"
-
-check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/HumanOmni2.5-8v1-3_A.egt" \
-    "1000G Omni2.5 EGT cluster file"
-
-check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/HumanOmni2.5-8v1-3_A.csv" \
-    "1000G Omni2.5 CSV manifest"
+# NOTE: The 1000G FTP no longer hosts array manifest files (BPM/EGT/CSV).
+# These proprietary Illumina files must now be obtained from:
+#   https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html
+check_url "https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html" \
+    "1000G Omni2.5 manifests (Illumina Support page)"
 
 echo ""
 echo "--- Reference Genome Resources ---"
@@ -92,8 +107,8 @@ check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/human_
 echo ""
 echo "--- Dependency Sources ---"
 
-check_url "https://github.com/samtools/bcftools/releases/download/1.21/bcftools-1.21.tar.bz2" \
-    "bcftools 1.21 release"
+check_url "https://github.com/samtools/bcftools/releases/download/1.23/bcftools-1.23.tar.bz2" \
+    "bcftools 1.23 release"
 
 check_url "https://raw.githubusercontent.com/freeseek/gtc2vcf/master/gtc2vcf.c" \
     "gtc2vcf plugin source"

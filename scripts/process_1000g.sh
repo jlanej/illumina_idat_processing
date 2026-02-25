@@ -113,10 +113,14 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     echo ""
 
     # The 1000G Omni2.5 uses InfiniumOmni2-5-8v1-3 manifests
-    # Available at the same FTP location
-    BPM_URL="${FTP_BASE}/HumanOmni2.5-8v1-3_A.bpm"
-    EGT_URL="${FTP_BASE}/HumanOmni2.5-8v1-3_A.egt"
-    CSV_URL="${FTP_BASE}/HumanOmni2.5-8v1-3_A.csv"
+    # NOTE: The 1000G FTP no longer hosts these proprietary Illumina files.
+    # Download them from the Illumina Support portal (free registration required):
+    #   https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html
+    # Then place BPM, EGT, and CSV files in the manifest directory, or re-run
+    # with --skip-download and ensure the files are already present.
+    BPM_URL="${BPM_URL:-${FTP_BASE}/HumanOmni2.5-8v1-3_A.bpm}"
+    EGT_URL="${EGT_URL:-${FTP_BASE}/HumanOmni2.5-8v1-3_A.egt}"
+    CSV_URL="${CSV_URL:-${FTP_BASE}/HumanOmni2.5-8v1-3_A.csv}"
 
     for url in "${BPM_URL}" "${EGT_URL}" "${CSV_URL}"; do
         fname=$(basename "${url}")
@@ -125,7 +129,14 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
             echo "  Already exists: ${dest}"
         else
             echo "  Downloading: ${url}"
-            wget -q --show-progress -O "${dest}" "${url}"
+            if ! wget -q --show-progress -O "${dest}" "${url}"; then
+                echo "  WARNING: Download failed for ${url}" >&2
+                echo "  The 1000G FTP may no longer host Illumina manifest files." >&2
+                echo "  Please download manually from Illumina Support:" >&2
+                echo "    https://support.illumina.com/downloads/infinium-omni2-5-8-v1-3-product-files.html" >&2
+                echo "  Then place the file in: ${MANIFEST_DIR}/" >&2
+                rm -f "${dest}"
+            fi
         fi
     done
     echo ""
