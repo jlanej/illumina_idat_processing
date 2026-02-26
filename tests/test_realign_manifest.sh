@@ -212,7 +212,8 @@ if [[ -f "${TEST_CSV}" ]]; then
 
     # Check data rows have flank sequences (contain [...] pattern)
     n_flanks=$(awk -F',' '/^\[Assay\]/{found=1; next} found && !/^\[/{print}' "${TEST_CSV}" | \
-        tail -n +2 | grep -c '\[' || echo "0")
+        tail -n +2 | grep -c '\[' || true)
+    n_flanks="${n_flanks:-0}"
     if [[ "${n_flanks}" -gt 0 ]]; then
         echo "  PASS: Found ${n_flanks} rows with flank sequences in test CSV"
         (( PASS++ )) || true
