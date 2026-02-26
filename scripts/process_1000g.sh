@@ -219,6 +219,15 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     ARCHIVE="${DOWNLOAD_DIR}/${IDAT_TGZ}"
     ARCHIVE_URL="${FTP_BASE}/${IDAT_TGZ}"
 
+    # Check if the correct number of IDAT files are already present
+    EXISTING_GRN=$(find "${IDAT_DIR}" -name "*_Grn.idat" -o -name "*_Grn.IDAT" 2>/dev/null | wc -l)
+    if [[ "${NUM_SAMPLES}" != "all" && "${EXISTING_GRN}" -ge "${NUM_SAMPLES}" ]]; then
+        echo "--- Step 2: IDAT files already present ---"
+        echo "  Found ${EXISTING_GRN} samples in ${IDAT_DIR} (need ${NUM_SAMPLES})"
+        echo "  Skipping download."
+        echo ""
+    else
+
     echo "--- Step 2: Downloading 1000G IDAT files ---"
     echo "  Source: ${ARCHIVE_URL}"
     echo ""
@@ -333,43 +342,71 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 echo "        Archive is ~20 GB — streaming to extract $(( N_PAIRS * 2 )) files."
                 echo "        This may take several minutes as the full archive is streamed."
                 echo ""
-                # Background monitor: periodically report elapsed time and extraction progress
                 BASELINE_FILES=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
-                (
-                    TARGET_FILES=$(( N_PAIRS * 2 ))
-                    while true; do
+                TARGET_FILES=$(( N_PAIRS * 2 ))
+
+                # Monitor a background extraction pipeline, reporting progress
+                # and terminating the stream early once all files are extracted.
+                _monitor_extraction() {
+                    local extract_pid="$1"
+                    while kill -0 "${extract_pid}" 2>/dev/null; do
                         sleep 15
-                        N_TOTAL=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
-                        N_DONE=$(( N_TOTAL - BASELINE_FILES ))
-                        ELAPSED=$(( SECONDS - EXTRACT_START ))
-                        MINS=$(( ELAPSED / 60 ))
-                        SECS=$(( ELAPSED % 60 ))
+                        local n_total n_done elapsed mins secs
+                        n_total=$(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l)
+                        n_done=$(( n_total - BASELINE_FILES ))
+                        elapsed=$(( SECONDS - EXTRACT_START ))
+                        mins=$(( elapsed / 60 ))
+                        secs=$(( elapsed % 60 ))
                         printf "        [%dm %02ds elapsed] %d / %d files extracted...\n" \
-                            "${MINS}" "${SECS}" "${N_DONE}" "${TARGET_FILES}"
+                            "${mins}" "${secs}" "${n_done}" "${TARGET_FILES}"
+                        if [[ "${n_done}" -ge "${TARGET_FILES}" ]]; then
+                            printf "        All %d files extracted. Stopping archive stream.\n" "${TARGET_FILES}"
+                            kill "${extract_pid}" 2>/dev/null || true
+                            break
+                        fi
                     done
-                ) &
-                MONITOR_PID=$!
+                    wait "${extract_pid}" 2>/dev/null || true
+                }
+
+                # Attempt 1: stream with --strip-components=1
                 # shellcheck disable=SC2086
                 curl -sL "${ARCHIVE_URL}" | \
                     tar xzf - -C "${IDAT_DIR}" --strip-components=1 \
-                        ${EXTRACT_LIST} 2>/dev/null || \
-                curl -sL "${ARCHIVE_URL}" | \
-                    tar xzf - -C "${IDAT_DIR}" \
-                        ${EXTRACT_LIST} 2>/dev/null || {
+                        ${EXTRACT_LIST} 2>/dev/null &
+                EXTRACT_PID=$!
+                _monitor_extraction "${EXTRACT_PID}"
+
+                # Check result; fall back to alternative extraction strategies
+                N_DONE=$(( $(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l) - BASELINE_FILES ))
+
+                if [[ "${N_DONE}" -eq 0 ]]; then
+                    # Attempt 2: stream without --strip-components
+                    echo "        Retrying without --strip-components..."
+                    # shellcheck disable=SC2086
+                    curl -sL "${ARCHIVE_URL}" | \
+                        tar xzf - -C "${IDAT_DIR}" \
+                            ${EXTRACT_LIST} 2>/dev/null &
+                    EXTRACT_PID=$!
+                    _monitor_extraction "${EXTRACT_PID}"
+                    N_DONE=$(( $(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l) - BASELINE_FILES ))
+                fi
+
+                if [[ "${N_DONE}" -eq 0 ]]; then
+                    # Attempt 3: full download fallback
                     echo "        Streaming extraction failed. Falling back to full download..."
                     wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                         --wildcards '*.idat' 2>/dev/null || \
                     tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
-                }
-                kill "${MONITOR_PID}" 2>/dev/null || true
-                wait "${MONITOR_PID}" 2>/dev/null || true
+                fi
             fi
             EXTRACT_ELAPSED=$(( SECONDS - EXTRACT_START ))
             N_EXTRACTED=$(find "${IDAT_DIR}" -name '*.idat' -o -name '*.IDAT' 2>/dev/null | wc -l)
             echo "        Extraction complete: ${N_EXTRACTED} files in ${EXTRACT_ELAPSED}s"
         fi
     fi
+
+    fi  # end of "already have enough IDATs" check
 
     # Move any nested IDAT files to the top-level IDAT directory
     find "${IDAT_DIR}" -mindepth 2 -name '*.idat' -exec mv {} "${IDAT_DIR}/" \; 2>/dev/null || true
@@ -395,23 +432,9 @@ if [[ "${N_GRN}" -eq 0 ]]; then
     exit 1
 fi
 
-# If we extracted all but only want a subset, limit the IDAT directory
+# If more samples are present than requested, process them all
 if [[ "${NUM_SAMPLES}" != "all" && "${N_GRN}" -gt "${NUM_SAMPLES}" ]]; then
-    echo "  Subsetting to ${NUM_SAMPLES} samples..."
-    SUBSET_DIR="${OUTPUT_DIR}/idats_subset"
-    mkdir -p "${SUBSET_DIR}"
-
-    find "${IDAT_DIR}" -name "*_Grn.idat" -o -name "*_Grn.IDAT" | \
-        sort | head -n "${NUM_SAMPLES}" | while read -r grn; do
-        red="${grn/_Grn.idat/_Red.idat}"
-        red="${red/_Grn.IDAT/_Red.IDAT}"
-        ln -sf "${grn}" "${SUBSET_DIR}/"
-        [[ -f "${red}" ]] && ln -sf "${red}" "${SUBSET_DIR}/"
-    done
-
-    IDAT_DIR="${SUBSET_DIR}"
-    N_GRN=$(find "${IDAT_DIR}" -name "*_Grn.idat" -o -name "*_Grn.IDAT" 2>/dev/null | wc -l)
-    echo "  Using ${N_GRN} samples for processing"
+    echo "  Found ${N_GRN} samples (more than requested ${NUM_SAMPLES}). Processing all."
 fi
 
 echo ""
