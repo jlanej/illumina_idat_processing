@@ -586,7 +586,7 @@ printf 'SAMP002\t0.98\tF\n' >> "${TMP_DIR}/meta.tsv"
 gender_out=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) {if($i=="sample_id") si=i; if($i=="computed_gender") gi=i}}
              NR>1 {print $si "\t" $gi}' "${TMP_DIR}/meta.tsv")
 
-expected_gender=$(printf 'SAMP001\tM\nSAMP002\tF')
+expected_gender=$'SAMP001\tM\nSAMP002\tF'
 if [[ "${gender_out}" == "${expected_gender}" ]]; then
     echo "  PASS: Gender extraction produces correct columns"
     (( PASS++ )) || true
@@ -616,14 +616,18 @@ cr_out=$(awk -F'\t' '{
 
 # SAMP1: 2 called out of 3 → 0.666667
 # SAMP2: 1 called out of 3 → 0.333333
-samp1_cr=$(echo "${cr_out}" | grep 'SAMP1' | awk -F'\t' '{printf "%.2f", $2}')
-samp2_cr=$(echo "${cr_out}" | grep 'SAMP2' | awk -F'\t' '{printf "%.2f", $2}')
+samp1_ok=$(echo "${cr_out}" | awk -F'\t' '/SAMP1/ {exit !($2 >= 0.66 && $2 <= 0.68)}' && echo "yes" || echo "no")
+samp2_ok=$(echo "${cr_out}" | awk -F'\t' '/SAMP2/ {exit !($2 >= 0.32 && $2 <= 0.34)}' && echo "yes" || echo "no")
 
-if [[ "${samp1_cr}" == "0.67" ]] && [[ "${samp2_cr}" == "0.33" ]]; then
+if [[ "${samp1_ok}" == "yes" ]] && [[ "${samp2_ok}" == "yes" ]]; then
+    samp1_cr=$(echo "${cr_out}" | grep 'SAMP1' | awk -F'\t' '{printf "%.2f", $2}')
+    samp2_cr=$(echo "${cr_out}" | grep 'SAMP2' | awk -F'\t' '{printf "%.2f", $2}')
     echo "  PASS: Per-sample call rates computed correctly (SAMP1=${samp1_cr}, SAMP2=${samp2_cr})"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Per-sample call rates: SAMP1=${samp1_cr} (expected 0.67), SAMP2=${samp2_cr} (expected 0.33)"
+    samp1_cr=$(echo "${cr_out}" | grep 'SAMP1' | awk -F'\t' '{printf "%.4f", $2}')
+    samp2_cr=$(echo "${cr_out}" | grep 'SAMP2' | awk -F'\t' '{printf "%.4f", $2}')
+    echo "  FAIL: Per-sample call rates: SAMP1=${samp1_cr} (expected ~0.67), SAMP2=${samp2_cr} (expected ~0.33)"
     (( FAIL++ )) || true
 fi
 

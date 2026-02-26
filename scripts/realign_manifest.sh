@@ -331,8 +331,9 @@ lost = 0
 unchanged = 0
 
 # Diagnostic: show first few chromosome values for debugging
-orig_chroms = set(c for c, p in list(orig.values())[:100])
-real_chroms = set(c for c, p in list(real.values())[:100])
+import itertools
+orig_chroms = set(c for c, p in itertools.islice(orig.values(), 100))
+real_chroms = set(c for c, p in itertools.islice(real.values(), 100))
 print(f'  [diag] Original CSV sample chroms: {sorted(orig_chroms)[:10]}')
 print(f'  [diag] Realigned CSV sample chroms: {sorted(real_chroms)[:10]}')
 
