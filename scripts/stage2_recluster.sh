@@ -212,6 +212,7 @@ EXTRA_TSV="${QC_DIR}/gtc_metadata_stage2.tsv"
 
 bcftools +gtc2vcf \
     --no-version -Ou \
+    --do-not-check-bpm \
     --bpm "${BPM}" \
     --csv "${CSV}" \
     --egt "${RECLUSTERED_EGT}" \

@@ -126,7 +126,8 @@ bcftools +gtc2vcf \
     --fasta-flank \
     -o "${FLANK_FASTA}" 2>&1 | head -20
 
-N_FLANKS=$(grep -c '^>' "${FLANK_FASTA}" 2>/dev/null || true)
+# Count sequence headers: FASTA uses '>' prefix, gtc2vcf --fasta-flank uses '@' prefix
+N_FLANKS=$(grep -c '^[>@]' "${FLANK_FASTA}" 2>/dev/null || true)
 N_FLANKS="${N_FLANKS:-0}"
 echo "  Extracted ${N_FLANKS} flank sequences"
 if [[ -f "${FLANK_FASTA}" ]]; then
