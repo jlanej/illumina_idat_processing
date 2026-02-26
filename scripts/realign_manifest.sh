@@ -315,6 +315,13 @@ def parse_illumina_csv(filepath):
 orig = parse_illumina_csv('$original')
 real = parse_illumina_csv('$realigned')
 
+def normalize_chrom(c):
+    \"\"\"Normalize chromosome name for comparison (strip 'chr' prefix, uppercase).\"\"\"
+    c = c.strip()
+    if c.lower().startswith('chr'):
+        c = c[3:]
+    return c.upper()
+
 total = len(orig)
 matched = 0
 chr_changed = 0
@@ -323,14 +330,22 @@ newly_placed = 0
 lost = 0
 unchanged = 0
 
+# Diagnostic: show first few chromosome values for debugging
+orig_chroms = set(c for c, p in list(orig.values())[:100])
+real_chroms = set(c for c, p in list(real.values())[:100])
+print(f'  [diag] Original CSV sample chroms: {sorted(orig_chroms)[:10]}')
+print(f'  [diag] Realigned CSV sample chroms: {sorted(real_chroms)[:10]}')
+
 for name, (o_chr, o_pos) in orig.items():
     if name in real:
         r_chr, r_pos = real[name]
-        if o_chr == r_chr and o_pos == r_pos:
+        o_chr_norm = normalize_chrom(o_chr)
+        r_chr_norm = normalize_chrom(r_chr)
+        if o_chr_norm == r_chr_norm and o_pos == r_pos:
             unchanged += 1
         elif (o_chr == '' or o_chr == '0') and r_chr not in ('', '0'):
             newly_placed += 1
-        elif o_chr != r_chr:
+        elif o_chr_norm != r_chr_norm:
             chr_changed += 1
         elif o_pos != r_pos:
             pos_changed += 1

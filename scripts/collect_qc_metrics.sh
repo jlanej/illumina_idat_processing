@@ -28,37 +28,27 @@ collect_qc_metrics() {
     bcftools query -l "${vcf_file}" > "${samples_file}"
 
     # Compute call rate per sample: fraction of non-missing genotypes
+    # Use per-sample genotype counting for correct per-sample call rates
     echo "  Computing call rate per sample..."
-    bcftools +fill-tags "${vcf_file}" -Ou -- -t F_MISSING | \
-        bcftools query -f '[%SAMPLE\t%F_MISSING\n]' | \
+    bcftools query -f '[%SAMPLE\t%GT\n]' "${vcf_file}" | \
         awk -F'\t' '{
-            missing[$1] += $2
-            count[$1]++
+            total[$1]++
+            if ($2 != "./." && $2 != "." && $2 != ".|.") called[$1]++
         } END {
-            for (s in missing) {
-                avg_missing = missing[s] / count[s]
-                call_rate = 1 - avg_missing
-                print s "\t" call_rate
+            for (s in total) {
+                cr = (total[s] > 0) ? called[s] / total[s] : 0
+                print s "\t" cr
             }
         }' | sort -k1,1 > "${call_rate_file}" 2>/dev/null || true
 
-    # If fill-tags approach fails, compute directly
-    if [[ ! -s "${call_rate_file}" ]]; then
-        echo "  Computing call rate from genotypes directly..."
-        bcftools query -f '%CHROM\t%POS[\t%GT]\n' "${vcf_file}" | \
-            awk -F'\t' 'BEGIN {OFS="\t"}
-            NR==1 {n_samples = NF - 2}
-            {
-                for (i=3; i<=NF; i++) {
-                    total[i]++
-                    if ($i != "./." && $i != "." && $i != "./." ) called[i]++
-                }
-            }
-            END {
-                for (i=3; i<=n_samples+2; i++) {
-                    print i-2, (total[i] > 0 ? called[i]/total[i] : 0)
-                }
-            }' > "${call_rate_file}"
+    # Diagnostic: log call rate file stats
+    if [[ -s "${call_rate_file}" ]]; then
+        n_cr=$(wc -l < "${call_rate_file}")
+        echo "  [diag] Call rate file: ${n_cr} samples"
+        echo "  [diag] Call rate first 3 lines:"
+        head -3 "${call_rate_file}" | sed 's/^/    [diag]   /'
+    else
+        echo "  [diag] WARNING: Call rate file is empty"
     fi
 
     # Compute LRR standard deviation per sample
@@ -82,9 +72,19 @@ collect_qc_metrics() {
             }
         }' | sort -k1,1 > "${lrr_sd_file}" 2>/dev/null || true
 
+    # Diagnostic: log LRR SD file stats
+    if [[ -s "${lrr_sd_file}" ]]; then
+        n_sd=$(wc -l < "${lrr_sd_file}")
+        echo "  [diag] LRR SD file: ${n_sd} samples"
+        echo "  [diag] LRR SD first 3 lines:"
+        head -3 "${lrr_sd_file}" | sed 's/^/    [diag]   /'
+    else
+        echo "  [diag] WARNING: LRR SD file is empty (LRR FORMAT field may not exist in VCF)"
+    fi
+
     # Extract computed gender from metadata if available
     if [[ -f "${metadata_tsv}" ]] && head -1 "${metadata_tsv}" | grep -q "computed_gender"; then
-        awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="sample_id") si=i; if($i=="computed_gender") gi=i}
+        awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) {if($i=="sample_id") si=i; if($i=="computed_gender") gi=i}}
                      NR>1 {print $si "\t" $gi}' "${metadata_tsv}" | sort -k1,1 > "${gender_file}"
     else
         # Placeholder
@@ -106,6 +106,28 @@ collect_qc_metrics() {
 
     n_samples=$(( $(wc -l < "${output_file}") - 1 ))
     echo "  QC metrics computed for ${n_samples} samples: ${output_file}"
+
+    # Diagnostic: show first few rows and value ranges
+    echo "  [diag] QC output first 5 lines:"
+    head -5 "${output_file}" | sed 's/^/    [diag]   /'
+    if [[ "${n_samples}" -gt 0 ]]; then
+        awk -F'\t' 'NR>1 && $2 != "NA" {
+            n++; sum+=$2
+            if (n==1 || $2+0 < min) min=$2+0
+            if (n==1 || $2+0 > max) max=$2+0
+        } END {
+            if (n>0) printf "  [diag] Call rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+            else print "  [diag] WARNING: No valid call rate values found"
+        }' "${output_file}"
+        awk -F'\t' 'NR>1 && $3 != "NA" {
+            n++; sum+=$3
+            if (n==1 || $3+0 < min) min=$3+0
+            if (n==1 || $3+0 > max) max=$3+0
+        } END {
+            if (n>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+            else print "  [diag] WARNING: No valid LRR SD values found"
+        }' "${output_file}"
+    fi
 
     rm -f "${samples_file}"
 }

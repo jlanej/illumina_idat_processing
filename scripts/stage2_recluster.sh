@@ -149,6 +149,25 @@ n_excluded=$(wc -l < "${EXCLUDED_SAMPLES}")
 echo "  Total samples:            ${n_total}"
 echo "  High-quality samples:     ${n_hq}"
 echo "  Excluded samples:         ${n_excluded}"
+
+# Diagnostic: show QC threshold evaluation details
+echo "  [diag] QC thresholds: call_rate >= ${MIN_CALL_RATE}, lrr_sd <= ${MAX_LRR_SD}"
+echo "  [diag] Stage 1 QC file first 5 lines:"
+head -5 "${STAGE1_QC}" | sed 's/^/    [diag]   /'
+if [[ "${n_excluded}" -gt 0 ]]; then
+    echo "  [diag] First 5 excluded samples with values:"
+    awk -F'\t' -v min_cr="${MIN_CALL_RATE}" -v max_sd="${MAX_LRR_SD}" '
+        NR == 1 { next }
+        {
+            cr = $2; sd = $3
+            fail_cr = (cr+0 < min_cr+0) ? "FAIL" : "ok"
+            fail_sd = (sd != "NA" && sd+0 > max_sd+0) ? "FAIL" : "ok"
+            if (fail_cr == "FAIL" || fail_sd == "FAIL") {
+                n++
+                if (n <= 5) printf "    [diag]   %s: call_rate=%s(%s) lrr_sd=%s(%s)\n", $1, cr, fail_cr, sd, fail_sd
+            }
+        }' "${STAGE1_QC}"
+fi
 echo ""
 
 if [[ "${n_hq}" -lt 10 ]]; then

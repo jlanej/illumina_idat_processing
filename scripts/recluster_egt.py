@@ -334,7 +334,9 @@ class GTCFile:
 
     @property
     def num_snps(self):
-        return self.toc.get(self._ID_NUM_SNPS, 0)
+        with open(self.filepath, "rb") as f:
+            f.seek(self.toc[self._ID_NUM_SNPS])
+            return read_int(f)
 
     @property
     def sample_name(self):
@@ -413,28 +415,47 @@ class BPMFile:
             _controls = read_string(f)
             self.num_loci = read_int(f)
 
-            # Read normalization ID for each locus
+            print(f"  BPM version: {_version}.{_version_int}, manifest: {manifest_name}",
+                  file=sys.stderr)
+
+            # Read locus entries (normalization IDs are in a separate section)
             self.norm_ids = []
             self.names = []
-            for _ in range(self.num_loci):
+            for idx in range(self.num_loci):
                 _version2 = read_int(f)
                 _ilmn_id = read_string(f)
                 name = read_string(f)
                 self.names.append(name)
-                # Skip several fields to get to norm_id
+                # Skip 3 strings (SNP, ILMN strand, Customer strand)
                 for __ in range(3):
                     read_string(f)
-                read_int(f)  # address_a
-                read_int(f)  # address_b (for Infinium II: 0)
+                read_int(f)     # address_a
                 read_string(f)  # allele_a_probe_seq
+                read_int(f)     # address_b (0 for Infinium II)
+                read_string(f)  # allele_b_probe_seq
                 read_string(f)  # genome_build
                 read_string(f)  # chrom
                 read_string(f)  # map_info
                 read_string(f)  # snp (e.g., [A/G])
                 read_string(f)  # ref_strand
                 read_byte(f)    # assay_type
-                norm_id = read_byte(f)
-                self.norm_ids.append(norm_id)
+
+                if (idx + 1) % 500000 == 0 or idx == 0:
+                    print(f"    Read {idx + 1}/{self.num_loci} locus entries...",
+                          file=sys.stderr)
+
+            print(f"  Read all {self.num_loci} locus entries", file=sys.stderr)
+
+            # Normalization IDs are stored in a separate section after all locus entries
+            if _version >= 4:
+                for _ in range(self.num_loci):
+                    self.norm_ids.append(read_byte(f))
+                print(f"  Read {len(self.norm_ids)} normalization IDs", file=sys.stderr)
+            else:
+                # Older BPM versions may not have normalization IDs
+                self.norm_ids = [0] * self.num_loci
+                print(f"  BPM version {_version} < 4: using default normalization IDs",
+                      file=sys.stderr)
 
 
 def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
