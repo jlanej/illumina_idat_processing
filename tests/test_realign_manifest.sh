@@ -466,6 +466,284 @@ else
     (( FAIL++ )) || true
 fi
 
+# ---------------------------------------------------------------
+# Test 9: Chromosome normalization in CSV comparison
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 9: Chromosome normalization (chr prefix handling) ---"
+
+# Create CSVs with different chromosome naming conventions
+cat > "${TMP_DIR}/orig_nochr.csv" << 'CSVEOF'
+[Assay]
+IlmnID,Name,Chr,MapInfo,SourceSeq
+probe1,SNP1,1,100,ACGT[A/G]TGCA
+probe2,SNP2,X,200,ACGT[T/C]TGCA
+probe3,SNP3,MT,300,ACGT[A/C]TGCA
+probe4,SNP4,,0,ACGT[A/T]TGCA
+[Controls]
+CSVEOF
+
+cat > "${TMP_DIR}/real_chr.csv" << 'CSVEOF'
+[Assay]
+IlmnID,Name,Chr,MapInfo,SourceSeq
+probe1,SNP1,chr1,100,ACGT[A/G]TGCA
+probe2,SNP2,chrX,200,ACGT[T/C]TGCA
+probe3,SNP3,chrM,305,ACGT[A/C]TGCA
+probe4,SNP4,chr5,500,ACGT[A/T]TGCA
+[Controls]
+CSVEOF
+
+chrom_result=$(python3 -c "
+def parse_illumina_csv(filepath):
+    probes = {}
+    in_data = False
+    chr_col = None
+    pos_col = None
+    name_col = None
+    with open(filepath, 'r', errors='replace') as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith('[Assay]'):
+                in_data = True
+                continue
+            if in_data and name_col is None:
+                cols = line.split(',')
+                for i, c in enumerate(cols):
+                    c_lower = c.strip().lower()
+                    if c_lower in ('ilmnid', 'name'):
+                        if name_col is None: name_col = i
+                    if c_lower in ('chr', 'chromosome'): chr_col = i
+                    if c_lower in ('mapinfo', 'position'): pos_col = i
+                continue
+            if in_data and name_col is not None:
+                if line.startswith('['): break
+                cols = line.split(',')
+                if len(cols) > max(name_col, chr_col or 0, pos_col or 0):
+                    name = cols[name_col].strip()
+                    chrom = cols[chr_col].strip() if chr_col is not None else ''
+                    pos = cols[pos_col].strip() if pos_col is not None else ''
+                    probes[name] = (chrom, pos)
+    return probes
+
+def normalize_chrom(c):
+    c = c.strip()
+    if c.lower().startswith('chr'):
+        c = c[3:]
+    return c.upper()
+
+orig = parse_illumina_csv('${TMP_DIR}/orig_nochr.csv')
+real = parse_illumina_csv('${TMP_DIR}/real_chr.csv')
+
+unchanged = 0
+pos_changed = 0
+chr_changed = 0
+newly_placed = 0
+for name, (o_chr, o_pos) in orig.items():
+    if name in real:
+        r_chr, r_pos = real[name]
+        o_norm = normalize_chrom(o_chr)
+        r_norm = normalize_chrom(r_chr)
+        if o_norm == r_norm and o_pos == r_pos:
+            unchanged += 1
+        elif (o_chr == '' or o_chr == '0') and r_chr not in ('', '0'):
+            newly_placed += 1
+        elif o_norm != r_norm:
+            chr_changed += 1
+        elif o_pos != r_pos:
+            pos_changed += 1
+
+# probe1: '1' vs 'chr1' same pos → unchanged
+# probe2: 'X' vs 'chrX' same pos → unchanged
+# probe3: 'MT' vs 'chrM' diff name but also diff pos → depends on normalization
+#   MT→MT, chrM→M → different → chr_changed
+# probe4: '' vs 'chr5' → newly_placed
+print(f'unchanged={unchanged} pos_changed={pos_changed} chr_changed={chr_changed} newly_placed={newly_placed}')
+assert unchanged == 2, f'Expected 2 unchanged, got {unchanged}'
+assert newly_placed == 1, f'Expected 1 newly_placed, got {newly_placed}'
+assert chr_changed == 1, f'Expected 1 chr_changed (MT vs M), got {chr_changed}'
+print('OK')
+" 2>&1)
+
+if echo "${chrom_result}" | grep -q "OK"; then
+    echo "  PASS: Chromosome normalization handles chr prefix correctly"
+    echo "        ${chrom_result}"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Chromosome normalization: ${chrom_result}"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 10: Gender extraction awk (for-loop scope fix)
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 10: Gender extraction awk for-loop fix ---"
+
+printf 'sample_id\tcall_rate\tcomputed_gender\n' > "${TMP_DIR}/meta.tsv"
+printf 'SAMP001\t0.99\tM\n' >> "${TMP_DIR}/meta.tsv"
+printf 'SAMP002\t0.98\tF\n' >> "${TMP_DIR}/meta.tsv"
+
+gender_out=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) {if($i=="sample_id") si=i; if($i=="computed_gender") gi=i}}
+             NR>1 {print $si "\t" $gi}' "${TMP_DIR}/meta.tsv")
+
+expected_gender=$'SAMP001\tM\nSAMP002\tF'
+if [[ "${gender_out}" == "${expected_gender}" ]]; then
+    echo "  PASS: Gender extraction produces correct columns"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Gender extraction: got '${gender_out}', expected '${expected_gender}'"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 11: QC call rate awk (per-sample computation)
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 11: Per-sample call rate computation ---"
+
+# Simulate bcftools query output: sample\tGT per site
+printf 'SAMP1\t0/0\nSAMP2\t./.\nSAMP1\t0/1\nSAMP2\t0/0\nSAMP1\t./.\nSAMP2\t./.\n' > "${TMP_DIR}/gt_data.txt"
+
+cr_out=$(awk -F'\t' '{
+    total[$1]++
+    if ($2 != "./." && $2 != "." && $2 != ".|.") called[$1]++
+} END {
+    for (s in total) {
+        cr = (total[s] > 0) ? called[s] / total[s] : 0
+        print s "\t" cr
+    }
+}' "${TMP_DIR}/gt_data.txt" | sort -k1,1)
+
+# SAMP1: 2 called out of 3 → 0.666667
+# SAMP2: 1 called out of 3 → 0.333333
+samp1_ok=$(echo "${cr_out}" | awk -F'\t' '/SAMP1/ {exit !($2 >= 0.66 && $2 <= 0.68)}' && echo "yes" || echo "no")
+samp2_ok=$(echo "${cr_out}" | awk -F'\t' '/SAMP2/ {exit !($2 >= 0.32 && $2 <= 0.34)}' && echo "yes" || echo "no")
+
+if [[ "${samp1_ok}" == "yes" ]] && [[ "${samp2_ok}" == "yes" ]]; then
+    samp1_cr=$(echo "${cr_out}" | grep 'SAMP1' | awk -F'\t' '{printf "%.2f", $2}')
+    samp2_cr=$(echo "${cr_out}" | grep 'SAMP2' | awk -F'\t' '{printf "%.2f", $2}')
+    echo "  PASS: Per-sample call rates computed correctly (SAMP1=${samp1_cr}, SAMP2=${samp2_cr})"
+    (( PASS++ )) || true
+else
+    samp1_cr=$(echo "${cr_out}" | grep 'SAMP1' | awk -F'\t' '{printf "%.4f", $2}')
+    samp2_cr=$(echo "${cr_out}" | grep 'SAMP2' | awk -F'\t' '{printf "%.4f", $2}')
+    echo "  FAIL: Per-sample call rates: SAMP1=${samp1_cr} (expected ~0.67), SAMP2=${samp2_cr} (expected ~0.33)"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 12: BPM reader field order validation
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 12: BPM reader Python validation ---"
+
+bpm_result=$(python3 -c "
+import struct, sys, os, tempfile
+
+# Helpers matching recluster_egt.py
+def write_byte(f, val): f.write(struct.pack('<B', val))
+def write_int(f, val): f.write(struct.pack('<i', val))
+def write_string(f, s):
+    encoded = s.encode('utf-8')
+    length = len(encoded)
+    while length >= 0x80:
+        write_byte(f, (length & 0x7F) | 0x80)
+        length >>= 7
+    write_byte(f, length)
+    f.write(encoded)
+
+def read_byte(f): return struct.unpack('<B', f.read(1))[0]
+def read_int(f): return struct.unpack('<i', f.read(4))[0]
+def read_string(f):
+    total_length = 0
+    partial_length = read_byte(f)
+    num_bytes = 0
+    while partial_length & 0x80 > 0:
+        total_length += (partial_length & 0x7F) << (7 * num_bytes)
+        partial_length = read_byte(f)
+        num_bytes += 1
+    total_length += partial_length << (7 * num_bytes)
+    return f.read(total_length).decode('utf-8')
+
+# Create a minimal BPM file with correct field order
+bpm_path = os.path.join(tempfile.mkdtemp(), 'test.bpm')
+num_loci = 2
+with open(bpm_path, 'wb') as f:
+    f.write(b'BPM')
+    write_byte(f, 4)      # version
+    write_int(f, 1)        # version_int
+    write_string(f, 'TestManifest')
+    write_string(f, '')    # controls
+    write_int(f, num_loci)
+
+    for i in range(num_loci):
+        write_int(f, 1)             # entry version
+        write_string(f, f'ILMN{i}')  # ilmn_id
+        write_string(f, f'SNP{i}')   # name
+        for _ in range(3):           # 3 skipped strings
+            write_string(f, '')
+        write_int(f, 1000 + i)      # address_a
+        write_string(f, 'ACGT')     # allele_a_probe_seq
+        write_int(f, 2000 + i)      # address_b
+        write_string(f, 'TGCA')     # allele_b_probe_seq
+        write_string(f, '38')       # genome_build
+        write_string(f, 'chr1')     # chrom
+        write_string(f, str(100+i)) # map_info
+        write_string(f, '[A/G]')    # snp
+        write_string(f, 'TOP')      # ref_strand
+        write_byte(f, 0)            # assay_type
+
+    # Normalization IDs in separate section
+    for i in range(num_loci):
+        write_byte(f, i + 10)
+
+# Now read it back using the BPM reader logic from recluster_egt.py
+with open(bpm_path, 'rb') as f:
+    magic = f.read(3).decode('utf-8')
+    assert magic == 'BPM', f'Bad magic: {magic}'
+    _version = read_byte(f)
+    _version_int = read_int(f)
+    manifest_name = read_string(f)
+    _controls = read_string(f)
+    n_loci = read_int(f)
+    assert n_loci == num_loci, f'Expected {num_loci} loci, got {n_loci}'
+
+    names = []
+    for idx in range(n_loci):
+        _ver = read_int(f)
+        _ilmn = read_string(f)
+        name = read_string(f)
+        names.append(name)
+        for _ in range(3): read_string(f)
+        read_int(f)      # address_a
+        read_string(f)   # allele_a_probe_seq
+        read_int(f)      # address_b
+        read_string(f)   # allele_b_probe_seq
+        read_string(f)   # genome_build
+        read_string(f)   # chrom
+        read_string(f)   # map_info
+        read_string(f)   # snp
+        read_string(f)   # ref_strand
+        read_byte(f)     # assay_type
+
+    norm_ids = []
+    for _ in range(n_loci):
+        norm_ids.append(read_byte(f))
+
+assert names == ['SNP0', 'SNP1'], f'Names: {names}'
+assert norm_ids == [10, 11], f'Norm IDs: {norm_ids}'
+print('OK')
+os.unlink(bpm_path)
+" 2>&1)
+
+if echo "${bpm_result}" | grep -q "OK"; then
+    echo "  PASS: BPM reader correctly parses field order and normalization IDs"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: BPM reader: ${bpm_result}"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
