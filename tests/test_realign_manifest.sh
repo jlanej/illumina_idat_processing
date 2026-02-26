@@ -425,6 +425,47 @@ else
     (( FAIL++ )) || true
 fi
 
+# ---------------------------------------------------------------
+# Test 8: Flank FASTA header counting (both > and @ prefixes)
+# ---------------------------------------------------------------
+echo "--- Test 8: Flank FASTA header counting (> and @ prefixes) ---"
+
+# Standard FASTA with '>' headers
+printf '>probe1\nACGT\n>probe2\nTGCA\n>probe3\nAAAA\n' > "${TMP_DIR}/standard.fasta"
+N_STD=$(grep -c '^[>@]' "${TMP_DIR}/standard.fasta" 2>/dev/null || true)
+N_STD="${N_STD:-0}"
+if [[ "${N_STD}" -eq 3 ]]; then
+    echo "  PASS: Standard FASTA (>) counted ${N_STD} sequences"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Standard FASTA (>) expected 3, got ${N_STD}"
+    (( FAIL++ )) || true
+fi
+
+# gtc2vcf --fasta-flank style with '@' headers
+printf '@probe1:1\nACGTTGCA\n@probe2:2\nTGCAAAAA\n' > "${TMP_DIR}/fastq_style.fasta"
+N_AT=$(grep -c '^[>@]' "${TMP_DIR}/fastq_style.fasta" 2>/dev/null || true)
+N_AT="${N_AT:-0}"
+if [[ "${N_AT}" -eq 2 ]]; then
+    echo "  PASS: FASTQ-style (@) counted ${N_AT} sequences"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: FASTQ-style (@) expected 2, got ${N_AT}"
+    (( FAIL++ )) || true
+fi
+
+# Empty file
+: > "${TMP_DIR}/empty.fasta"
+N_EMPTY=$(grep -c '^[>@]' "${TMP_DIR}/empty.fasta" 2>/dev/null || true)
+N_EMPTY="${N_EMPTY:-0}"
+if [[ "${N_EMPTY}" -eq 0 ]]; then
+    echo "  PASS: Empty FASTA counted ${N_EMPTY} sequences"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Empty FASTA expected 0, got ${N_EMPTY}"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"

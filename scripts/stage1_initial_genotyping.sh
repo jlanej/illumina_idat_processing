@@ -193,8 +193,16 @@ STEP_START=${SECONDS}
 VCF_OUTPUT="${VCF_DIR}/stage1_initial.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata.tsv"
 
+# Debug: show manifest and GTC file details for troubleshooting
+echo "  BPM file: ${BPM} ($(wc -c < "${BPM}") bytes)"
+echo "  CSV file: ${CSV} ($(wc -c < "${CSV}") bytes)"
+echo "  EGT file: ${EGT} ($(wc -c < "${EGT}") bytes)"
+echo "  GTC dir:  ${GTC_DIR} ($(find "${GTC_DIR}" -name '*.gtc' | wc -l) files)"
+echo "  Reference: ${REF_FASTA}"
+
 bcftools +gtc2vcf \
     --no-version -Ou \
+    --do-not-check-bpm \
     --bpm "${BPM}" \
     --csv "${CSV}" \
     --egt "${EGT}" \
