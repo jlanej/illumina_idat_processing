@@ -124,10 +124,18 @@ echo "--- Step 1/4: Extracting flank sequences from CSV manifest ---"
 bcftools +gtc2vcf \
     --csv "${CSV}" \
     --fasta-flank \
-    -o "${FLANK_FASTA}"
+    -o "${FLANK_FASTA}" 2>&1 | head -20
 
 N_FLANKS=$(grep -c '^>' "${FLANK_FASTA}" 2>/dev/null || echo "0")
 echo "  Extracted ${N_FLANKS} flank sequences"
+
+if [[ "${N_FLANKS}" -eq 0 ]]; then
+    echo "  WARNING: No flank sequences extracted from CSV manifest." >&2
+    echo "  Check that the CSV file contains a [Assay] section with a SourceSeq column." >&2
+    echo "  Verify with: head -20 '${CSV}'" >&2
+    echo "  First few lines of FASTA output:" >&2
+    head -5 "${FLANK_FASTA}" >&2 || true
+fi
 echo ""
 
 # ---------------------------------------------------------------
@@ -155,16 +163,16 @@ BEGIN {
 {
     total++
     flag = $2
-    mapq = $3 + 0
+    mapq = $5 + 0
 
-    # Check if secondary/supplementary alignment
-    if (and(flag, 256) || and(flag, 2048)) {
+    # Check if secondary/supplementary alignment (POSIX-portable bitwise check)
+    if (int(flag / 256) % 2 == 1 || int(flag / 2048) % 2 == 1) {
         secondary++
         next
     }
 
     # Check if unmapped
-    if (and(flag, 4)) {
+    if (int(flag / 4) % 2 == 1) {
         unmapped++
         next
     }
