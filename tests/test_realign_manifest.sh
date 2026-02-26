@@ -141,7 +141,7 @@ END {
         (( PASS++ )) || true
     else
         echo "  FAIL: mawk produced incorrect output:"
-        cat "${MAWK_SUMMARY}" | sed 's/^/        /'
+        sed 's/^/        /' "${MAWK_SUMMARY}"
         (( FAIL++ )) || true
     fi
 else
@@ -420,7 +420,7 @@ if grep -q "Total flank sequences:     0" "${EMPTY_SUMMARY}"; then
     (( PASS++ )) || true
 else
     echo "  FAIL: Empty SAM handling"
-    cat "${EMPTY_SUMMARY}" | sed 's/^/        /'
+    sed 's/^/        /' "${EMPTY_SUMMARY}"
     (( FAIL++ )) || true
 fi
 

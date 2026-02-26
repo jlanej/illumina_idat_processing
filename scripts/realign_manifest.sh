@@ -131,7 +131,7 @@ echo "  Extracted ${N_FLANKS} flank sequences"
 
 if [[ "${N_FLANKS}" -eq 0 ]]; then
     echo "  WARNING: No flank sequences extracted from CSV manifest." >&2
-    echo "  Check that the CSV file contains a [Assay] section with a SourceSeq column." >&2
+    echo "  Check that the CSV file contains an [Assay] section with a SourceSeq column." >&2
     echo "  Verify with: head -20 '${CSV}'" >&2
     echo "  First few lines of FASTA output:" >&2
     head -5 "${FLANK_FASTA}" >&2 || true
