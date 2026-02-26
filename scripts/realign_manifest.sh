@@ -126,15 +126,20 @@ bcftools +gtc2vcf \
     --fasta-flank \
     -o "${FLANK_FASTA}" 2>&1 | head -20
 
-N_FLANKS=$(grep -c '^>' "${FLANK_FASTA}" 2>/dev/null || echo "0")
+N_FLANKS=$(grep -c '^>' "${FLANK_FASTA}" 2>/dev/null || true)
+N_FLANKS="${N_FLANKS:-0}"
 echo "  Extracted ${N_FLANKS} flank sequences"
+if [[ -f "${FLANK_FASTA}" ]]; then
+    FASTA_SIZE=$(wc -c < "${FLANK_FASTA}")
+    echo "  FASTA file size: ${FASTA_SIZE} bytes"
+    echo "  FASTA first 3 lines:"
+    head -3 "${FLANK_FASTA}" | sed 's/^/    /'
+fi
 
 if [[ "${N_FLANKS}" -eq 0 ]]; then
     echo "  WARNING: No flank sequences extracted from CSV manifest." >&2
     echo "  Check that the CSV file contains an [Assay] section with a SourceSeq column." >&2
     echo "  Verify with: head -20 '${CSV}'" >&2
-    echo "  First few lines of FASTA output:" >&2
-    head -5 "${FLANK_FASTA}" >&2 || true
 fi
 echo ""
 
@@ -146,6 +151,11 @@ echo "--- Step 2/4: Aligning flank sequences to reference ---"
 bwa mem -M "${REF_FASTA}" "${FLANK_FASTA}" > "${FLANK_SAM}" 2>"${OUTPUT_DIR}/bwa_mem.log"
 
 echo "  Alignment complete"
+SAM_LINES=$(grep -cv '^@' "${FLANK_SAM}" 2>/dev/null || true)
+SAM_LINES="${SAM_LINES:-0}"
+echo "  SAM alignment records: ${SAM_LINES}"
+echo "  BWA log tail:"
+tail -3 "${OUTPUT_DIR}/bwa_mem.log" | sed 's/^/    /'
 echo ""
 
 # ---------------------------------------------------------------
@@ -216,9 +226,34 @@ echo "--- Step 4/4: Generating realigned CSV manifest ---"
 bcftools +gtc2vcf \
     --csv "${CSV}" \
     --sam-flank "${FLANK_SAM}" \
+    --verbose \
     -o "${REALIGNED_CSV}"
 
 echo "  Realigned CSV: ${REALIGNED_CSV}"
+
+# Diagnostic: verify realigned CSV structure
+if [[ -f "${REALIGNED_CSV}" ]]; then
+    RCSV_SIZE=$(wc -c < "${REALIGNED_CSV}")
+    RCSV_LINES=$(wc -l < "${REALIGNED_CSV}")
+    echo "  Realigned CSV size: ${RCSV_SIZE} bytes, ${RCSV_LINES} lines"
+    if grep -q '^\[Assay\]' "${REALIGNED_CSV}"; then
+        echo "  [Assay] section: found"
+        ASSAY_HEADER=$(grep -A1 '^\[Assay\]' "${REALIGNED_CSV}" | tail -1)
+        echo "  Column header: ${ASSAY_HEADER:0:120}..."
+        DATA_LINES=$(awk '/^\[Assay\]/{found=1; next} found && !/^\[/{n++} found && /^\[/{exit} END{print n+0}' "${REALIGNED_CSV}")
+        echo "  Data lines after [Assay] header: ${DATA_LINES}"
+        if [[ "${DATA_LINES}" -le 2 ]]; then
+            echo "  WARNING: Very few data lines in realigned CSV. First lines after header:"
+            awk '/^\[Assay\]/{found=1; next} found{print "    " $0; if(++n>=5) exit}' "${REALIGNED_CSV}"
+        fi
+    else
+        echo "  WARNING: [Assay] section NOT found in realigned CSV"
+        echo "  First 10 lines of realigned CSV:"
+        head -10 "${REALIGNED_CSV}" | sed 's/^/    /'
+    fi
+else
+    echo "  ERROR: Realigned CSV file not created!" >&2
+fi
 
 # ---------------------------------------------------------------
 # Compare original and realigned CSV to report coordinate changes
@@ -322,7 +357,7 @@ with open('$SUMMARY_FILE', 'a') as sf:
     sf.write('\n--- Coordinate Comparison ---\n')
     for line in summary:
         sf.write(line + '\n')
-" 2>/dev/null || echo "  (CSV comparison requires Python 3)"
+" 2>&1 || echo "  (CSV comparison requires Python 3)"
 }
 
 compare_csvs "${CSV}" "${REALIGNED_CSV}"
