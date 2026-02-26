@@ -373,7 +373,8 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 curl -sL "${ARCHIVE_URL}" | \
                     tar xzf - -C "${IDAT_DIR}" --strip-components=1 \
                         ${EXTRACT_LIST} 2>/dev/null &
-                _monitor_extraction $!
+                EXTRACT_PID=$!
+                _monitor_extraction "${EXTRACT_PID}"
 
                 # Check result; fall back to alternative extraction strategies
                 N_DONE=$(( $(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l) - BASELINE_FILES ))
@@ -385,7 +386,8 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                     curl -sL "${ARCHIVE_URL}" | \
                         tar xzf - -C "${IDAT_DIR}" \
                             ${EXTRACT_LIST} 2>/dev/null &
-                    _monitor_extraction $!
+                    EXTRACT_PID=$!
+                    _monitor_extraction "${EXTRACT_PID}"
                     N_DONE=$(( $(find "${IDAT_DIR}" \( -name '*.idat' -o -name '*.IDAT' \) 2>/dev/null | wc -l) - BASELINE_FILES ))
                 fi
 
