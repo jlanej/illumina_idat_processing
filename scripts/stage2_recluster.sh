@@ -229,6 +229,9 @@ STEP_START=${SECONDS}
 VCF_OUTPUT="${VCF_DIR}/stage2_reclustered.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata_stage2.tsv"
 
+# Convert reclustered GTC to VCF (pre-normalization)
+PRE_NORM_BCF="${VCF_DIR}/stage2_pre_norm.bcf"
+
 bcftools +gtc2vcf \
     --no-version -Ou \
     --do-not-check-bpm \
@@ -240,9 +243,34 @@ bcftools +gtc2vcf \
     --extra "${EXTRA_TSV}" \
     --adjust-clusters \
     --threads "${THREADS}" | \
-bcftools sort -Ou -T "${OUTPUT_DIR}/bcftools." | \
-bcftools norm --no-version -Ob -c x -f "${REF_FASTA}" \
-    -o "${VCF_OUTPUT}" --write-index
+bcftools sort -Ob -T "${OUTPUT_DIR}/bcftools." \
+    -o "${PRE_NORM_BCF}" --write-index
+
+# Diagnostic: count variants before normalization
+N_PRE_NORM=$(bcftools view -H "${PRE_NORM_BCF}" | wc -l)
+echo "  Variants before normalization: ${N_PRE_NORM}"
+
+# Normalize with -c ws (warn and swap REF/ALT to match reference).
+# CRITICAL: Do NOT use -c x here. See stage1_initial_genotyping.sh for details.
+NORM_LOG="${QC_DIR}/norm_warnings_stage2.log"
+
+bcftools norm --no-version -Ob -c ws -f "${REF_FASTA}" \
+    "${PRE_NORM_BCF}" \
+    -o "${VCF_OUTPUT}" --write-index 2>"${NORM_LOG}"
+
+# Diagnostic: count variants after normalization and REF swaps
+N_POST_NORM=$(bcftools view -H "${VCF_OUTPUT}" | wc -l)
+N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
+echo "  Variants after normalization:  ${N_POST_NORM}"
+echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"
+if [[ "${N_REF_SWAPS}" -gt 0 ]]; then
+    PCT_SWAPS=$(awk -v s="${N_REF_SWAPS}" -v t="${N_PRE_NORM}" 'BEGIN { printf "%.1f", (t>0) ? s*100.0/t : 0 }')
+    echo "  REF swap percentage:           ${PCT_SWAPS}%"
+fi
+echo "  Norm warnings log: ${NORM_LOG}"
+
+# Clean up pre-norm BCF
+rm -f "${PRE_NORM_BCF}" "${PRE_NORM_BCF}.csi"
 
 echo "  Reclustered VCF created: ${VCF_OUTPUT}"
 STEP_ELAPSED=$(( SECONDS - STEP_START ))

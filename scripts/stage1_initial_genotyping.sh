@@ -200,6 +200,12 @@ echo "  EGT file: ${EGT} ($(wc -c < "${EGT}") bytes)"
 echo "  GTC dir:  ${GTC_DIR} ($(find "${GTC_DIR}" -name '*.gtc' | wc -l) files)"
 echo "  Reference: ${REF_FASTA}"
 
+# Convert GTC to VCF (pre-normalization)
+# Note: --do-not-check-bpm is required because the realigned CSV may have
+# coordinates on a different build than the BPM (e.g., GRCh37 BPM with
+# GRCh38-realigned CSV), so the coordinate check would falsely fail.
+PRE_NORM_BCF="${VCF_DIR}/stage1_pre_norm.bcf"
+
 bcftools +gtc2vcf \
     --no-version -Ou \
     --do-not-check-bpm \
@@ -210,9 +216,40 @@ bcftools +gtc2vcf \
     --gtcs "${GTC_DIR}" \
     --extra "${EXTRA_TSV}" \
     --threads "${THREADS}" | \
-bcftools sort -Ou -T "${OUTPUT_DIR}/bcftools." | \
-bcftools norm --no-version -Ob -c x -f "${REF_FASTA}" \
-    -o "${VCF_OUTPUT}" --write-index
+bcftools sort -Ob -T "${OUTPUT_DIR}/bcftools." \
+    -o "${PRE_NORM_BCF}" --write-index
+
+# Diagnostic: count variants before normalization
+N_PRE_NORM=$(bcftools view -H "${PRE_NORM_BCF}" | wc -l)
+echo "  Variants before normalization: ${N_PRE_NORM}"
+
+# Normalize with -c ws (warn and swap REF/ALT to match reference).
+# CRITICAL: Do NOT use -c x here. When processing cross-build data
+# (e.g., GRCh37 manifests on GRCh38 reference), -c x silently sets
+# genotypes to missing for all REF-mismatched probes, which can
+# deflate call rates from >97% to ~65-75% and inflate LRR SD.
+# The -c ws mode swaps REF/ALT alleles to match the reference,
+# preserving genotype calls while fixing allele orientation.
+NORM_LOG="${QC_DIR}/norm_warnings.log"
+
+bcftools norm --no-version -Ob -c ws -f "${REF_FASTA}" \
+    "${PRE_NORM_BCF}" \
+    -o "${VCF_OUTPUT}" --write-index 2>"${NORM_LOG}"
+
+# Diagnostic: count variants after normalization and REF swaps
+N_POST_NORM=$(bcftools view -H "${VCF_OUTPUT}" | wc -l)
+N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
+echo "  Variants after normalization:  ${N_POST_NORM}"
+echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"
+if [[ "${N_REF_SWAPS}" -gt 0 ]]; then
+    PCT_SWAPS=$(awk -v s="${N_REF_SWAPS}" -v t="${N_PRE_NORM}" 'BEGIN { printf "%.1f", (t>0) ? s*100.0/t : 0 }')
+    echo "  REF swap percentage:           ${PCT_SWAPS}%"
+    echo "  (REF/ALT swapped to match reference — genotype calls preserved)"
+fi
+echo "  Norm warnings log: ${NORM_LOG}"
+
+# Clean up pre-norm BCF
+rm -f "${PRE_NORM_BCF}" "${PRE_NORM_BCF}.csi"
 
 echo "VCF created: ${VCF_OUTPUT}"
 STEP_ELAPSED=$(( SECONDS - STEP_START ))

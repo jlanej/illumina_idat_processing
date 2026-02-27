@@ -248,6 +248,25 @@ if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
         echo "Using realigned CSV: ${REALIGNED_CSV}"
         CSV="${REALIGNED_CSV}"
     fi
+
+    # Realignment quality gate: warn if too many probes are unmapped
+    REALIGN_SUMMARY=$(find "${REALIGN_DIR}" -name "realign_summary.txt" -print -quit 2>/dev/null)
+    if [[ -n "${REALIGN_SUMMARY}" && -f "${REALIGN_SUMMARY}" ]]; then
+        MAPPED_PCT=$(awk '/Mapped:/ && /%/ { gsub(/[^0-9.]/, "", $NF); print $NF; exit }' "${REALIGN_SUMMARY}")
+        if [[ -n "${MAPPED_PCT}" ]]; then
+            MAPPED_OK=$(awk -v p="${MAPPED_PCT}" 'BEGIN { print (p+0 >= 90) ? "yes" : "no" }')
+            if [[ "${MAPPED_OK}" == "no" ]]; then
+                echo ""
+                echo "WARNING: Only ${MAPPED_PCT}% of manifest probes mapped to the reference."
+                echo "  This may indicate a build mismatch or poor manifest quality."
+                echo "  Expect reduced call rates for unmapped probes."
+                echo "  Review: ${REALIGN_SUMMARY}"
+                echo ""
+            else
+                echo "Realignment quality: ${MAPPED_PCT}% of probes mapped (OK)"
+            fi
+        fi
+    fi
     echo ""
 else
     echo "Note: Skipping manifest realignment (bwa or BWA index not available)."
@@ -320,3 +339,25 @@ echo "  QC metrics: ${FINAL_QC}"
 echo ""
 echo "The VCF contains genotypes with BAF and LRR intensities"
 echo "ready for downstream analysis (phasing, MoChA, imputation)."
+
+# ---------------------------------------------------------------
+# Run automated QC diagnostics
+# ---------------------------------------------------------------
+echo ""
+echo "======================================================"
+echo "  Running QC Diagnostics"
+echo "======================================================"
+echo ""
+
+DIAG_REPORT="${OUTPUT_DIR}/qc_diagnostic_report.txt"
+if command -v python3 &>/dev/null; then
+    python3 "${SCRIPT_DIR}/diagnose_qc.py" \
+        --output-dir "${OUTPUT_DIR}" \
+        --report "${DIAG_REPORT}" 2>&1 || true
+    echo ""
+    echo "Diagnostic report: ${DIAG_REPORT}"
+else
+    echo "Note: python3 not found; skipping automated QC diagnostics."
+    echo "Run manually: python3 scripts/diagnose_qc.py --output-dir ${OUTPUT_DIR}"
+fi
+

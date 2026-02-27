@@ -27,6 +27,43 @@ collect_qc_metrics() {
     samples_file=$(mktemp)
     bcftools query -l "${vcf_file}" > "${samples_file}"
 
+    # -----------------------------------------------------------------
+    # Diagnostic: Variant counts at each filtering stage
+    # -----------------------------------------------------------------
+    echo "  [diag] === VCF variant diagnostics ==="
+    local n_total_vars n_intensity_only n_genotypeable n_missing_ref
+    n_total_vars=$(bcftools view -H "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
+    n_intensity_only=$(bcftools view -i 'INFO/INTENSITY_ONLY=1' -H "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
+    n_genotypeable=$(( n_total_vars - n_intensity_only ))
+    echo "  [diag] Total variants in VCF:          ${n_total_vars}"
+    echo "  [diag] Intensity-only probes:           ${n_intensity_only}"
+    echo "  [diag] Genotypeable variants:            ${n_genotypeable}"
+
+    # Count variants with all-missing genotypes (indicator of norm -c x damage)
+    n_all_missing=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' "${vcf_file}" 2>/dev/null | \
+        bcftools view -e 'COUNT(GT!="mis")>0' -H 2>/dev/null | wc -l | tr -d ' ') || n_all_missing="N/A"
+    echo "  [diag] Variants with ALL samples missing: ${n_all_missing}"
+
+    # Check for first sample: how many genotypes are called vs missing
+    local first_sample
+    first_sample=$(head -1 "${samples_file}")
+    if [[ -n "${first_sample}" ]]; then
+        local n_called_first n_missing_first
+        n_called_first=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -s "${first_sample}" "${vcf_file}" 2>/dev/null | \
+            bcftools query -f '[%GT]\n' 2>/dev/null | grep -cv '^\./\.\|^\.\|^\./\.' || true)
+        n_missing_first=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -s "${first_sample}" "${vcf_file}" 2>/dev/null | \
+            bcftools query -f '[%GT]\n' 2>/dev/null | grep -c '^\./\.\|^\.\|^\./\.' || true)
+        echo "  [diag] Sample '${first_sample}' genotype breakdown:"
+        echo "  [diag]   Called:  ${n_called_first}"
+        echo "  [diag]   Missing: ${n_missing_first}"
+        if [[ "${n_genotypeable}" -gt 0 ]]; then
+            local pct_called
+            pct_called=$(awk -v c="${n_called_first}" -v t="${n_genotypeable}" 'BEGIN { printf "%.4f", (t>0) ? c/t : 0 }')
+            echo "  [diag]   Call rate: ${pct_called}"
+        fi
+    fi
+    echo "  [diag] ==================================="
+
     # Compute call rate per sample: fraction of non-missing genotypes
     # Exclude intensity-only probes (no genotype, only BAF/LRR) from the
     # denominator so call rate reflects genotypeable loci only.

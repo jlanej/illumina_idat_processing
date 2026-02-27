@@ -237,15 +237,34 @@ task gtc_to_vcf {
       --extra ~{filebase}.metadata.tsv \
       ~{if adjust_clusters then "--adjust-clusters" else ""} \
       --threads ~{threads} | \
-    bcftools sort -Ou -T ./bcftools. | \
-    bcftools norm --no-version -Ob -c x -f ~{ref_fasta} \
-      -o ~{filebase}.bcf --write-index
+    bcftools sort -Ob -T ./bcftools. \
+      -o ~{filebase}.pre_norm.bcf --write-index
+
+    # Diagnostic: count variants before normalization
+    N_PRE_NORM=$(bcftools view -H ~{filebase}.pre_norm.bcf | wc -l)
+    echo "Variants before normalization: ${N_PRE_NORM}"
+
+    # Normalize with -c ws (warn and swap REF/ALT to match reference).
+    # CRITICAL: Do NOT use -c x. When processing cross-build data,
+    # -c x silently sets genotypes to missing for REF-mismatched probes,
+    # deflating call rates. -c ws swaps REF/ALT to match the reference.
+    bcftools norm --no-version -Ob -c ws -f ~{ref_fasta} \
+      ~{filebase}.pre_norm.bcf \
+      -o ~{filebase}.bcf --write-index 2>~{filebase}.norm_warnings.log
+
+    N_POST_NORM=$(bcftools view -H ~{filebase}.bcf | wc -l)
+    N_REF_SWAPS=$(grep -c "REF_MISMATCH" ~{filebase}.norm_warnings.log || true)
+    echo "Variants after normalization: ${N_POST_NORM}"
+    echo "REF/ALT swaps: ${N_REF_SWAPS}"
+
+    rm -f ~{filebase}.pre_norm.bcf ~{filebase}.pre_norm.bcf.csi
   >>>
 
   output {
     File vcf_file = "~{filebase}.bcf"
     File vcf_idx = "~{filebase}.bcf.csi"
     File metadata_tsv = "~{filebase}.metadata.tsv"
+    File norm_warnings_log = "~{filebase}.norm_warnings.log"
   }
 
   runtime {

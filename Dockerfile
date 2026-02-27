@@ -47,8 +47,9 @@ RUN wget -q "https://github.com/samtools/bcftools/releases/download/${BCFTOOLS_V
 
 ENV BCFTOOLS_PLUGINS=/usr/local/libexec/bcftools
 
-# Copy pipeline scripts
+# Copy pipeline scripts (includes diagnose_qc.py for QC troubleshooting)
 COPY scripts/ /opt/scripts/
+RUN chmod +x /opt/scripts/*.sh /opt/scripts/*.py
 COPY config/ /opt/config/
 
 WORKDIR /data
