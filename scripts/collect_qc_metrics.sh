@@ -96,6 +96,8 @@ collect_qc_metrics() {
     # Also exclude intensity-only probes (no genotype, only BAF/LRR).
     # Filter out non-numeric values (nan, -nan, inf, -inf) that gtc2vcf
     # outputs for probes with zero intensities or failed normalization.
+    # Note: Both chr-prefixed (chrX,chrY,chrM) and non-prefixed (X,Y,MT)
+    # names are excluded to support different reference genome conventions.
     echo "  Computing LRR standard deviation per sample..."
     bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT "${vcf_file}" 2>/dev/null | \
     bcftools query -f '[%SAMPLE\t%LRR\n]' 2>/dev/null | \
