@@ -166,16 +166,18 @@ task idat_to_gtc {
     green_files=(~{sep=' ' green_idat_files})
     red_files=(~{sep=' ' red_idat_files})
 
-    # Link files to working directory
-    for f in "${green_files[@]}" "${red_files[@]}"; do
-      ln -s "$f" .
+    # Build interleaved green/red IDAT pairs.
+    # idat2gtc expects pairs: <green.idat> <red.idat> [<green.idat> <red.idat> ...]
+    idat_args=()
+    for (( i=0; i<${#green_files[@]}; i++ )); do
+      idat_args+=("${green_files[i]}" "${red_files[i]}")
     done
 
     bcftools +idat2gtc \
       --bpm ~{bpm_file} \
       --egt ~{egt_file} \
       --output gtc_output \
-      "${green_files[@]}"
+      "${idat_args[@]}"
 
     ls gtc_output/*.gtc > gtc_list.txt
   >>>
@@ -316,8 +318,9 @@ task compute_qc_metrics {
         call_rate="NA"
       fi
 
-      # LRR standard deviation (filter non-numeric values like nan/inf)
-      lrr_sd=$(bcftools view -s "${sample}" ~{vcf_file} | \
+      # LRR standard deviation on autosomes only (filter non-numeric values like nan/inf)
+      # Restrict to autosomes to avoid inflation from sex chromosome hemizygosity
+      lrr_sd=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT -s "${sample}" ~{vcf_file} | \
         bcftools query -f '[%LRR]\n' | \
         awk '$1 != "." && $1 != "" && $1 ~ /^-?[0-9]/ {
           n++; sum += $1; sum2 += $1*$1
