@@ -284,12 +284,12 @@ task compute_qc_metrics {
     # Get sample list
     bcftools query -l ~{vcf_file} > samples.txt
 
-    # Total variants
-    n_total=$(bcftools view -H ~{vcf_file} | wc -l)
+    # Total genotypeable variants (excluding intensity-only probes)
+    n_total=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -H ~{vcf_file} | wc -l)
 
-    # Per-sample call rate: count non-missing genotypes
+    # Per-sample call rate: count non-missing genotypes (excluding intensity-only probes)
     while read -r sample; do
-      n_called=$(bcftools view -s "${sample}" -H ~{vcf_file} | \
+      n_called=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -s "${sample}" -H ~{vcf_file} | \
         bcftools query -f '[%GT]\n' | grep -cv '^\./\.' || true)
       if [[ "${n_total}" -gt 0 ]]; then
         call_rate=$(awk "BEGIN {printf \"%.6f\", ${n_called}/${n_total}}")
@@ -297,10 +297,10 @@ task compute_qc_metrics {
         call_rate="NA"
       fi
 
-      # LRR standard deviation
+      # LRR standard deviation (filter non-numeric values like nan/inf)
       lrr_sd=$(bcftools view -s "${sample}" ~{vcf_file} | \
         bcftools query -f '[%LRR]\n' | \
-        awk '$1 != "." && $1 != "" {
+        awk '$1 != "." && $1 != "" && $1 ~ /^-?[0-9]/ {
           n++; sum += $1; sum2 += $1*$1
         } END {
           if (n > 1) {
