@@ -18,6 +18,9 @@
 #
 # Inspired by the MoChA/mochawdl pipeline approach of iterative QC.
 #
+# Idempotent: each step uses a .done sentinel file so it can be safely
+# re-run after interruption without repeating completed work.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,6 +52,7 @@ Options:
   --max-lrr-sd FLOAT          Maximum LRR SD for HQ samples (default: ${MAX_LRR_SD})
   --min-cluster-samples INT   Minimum samples per genotype to recompute cluster (default: ${MIN_CLUSTER_SAMPLES})
   --threads INT               Number of threads (default: ${THREADS})
+  --force                     Force re-run of all steps, ignoring checkpoints
   --help                      Show this help message
 EOF
     exit 0
@@ -61,6 +65,7 @@ CSV=""
 REF_FASTA=""
 STAGE1_DIR=""
 OUTPUT_DIR=""
+FORCE="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -75,6 +80,7 @@ while [[ $# -gt 0 ]]; do
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
         --min-cluster-samples) MIN_CLUSTER_SAMPLES="$2"; shift 2 ;;
         --threads)        THREADS="$2"; shift 2 ;;
+        --force)          FORCE="true"; shift ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -105,7 +111,21 @@ GTC_DIR="${OUTPUT_DIR}/gtc"
 VCF_DIR="${OUTPUT_DIR}/vcf"
 QC_DIR="${OUTPUT_DIR}/qc"
 CLUSTER_DIR="${OUTPUT_DIR}/clusters"
-mkdir -p "${GTC_DIR}" "${VCF_DIR}" "${QC_DIR}" "${CLUSTER_DIR}"
+CHECKPOINT_DIR="${OUTPUT_DIR}/.checkpoints"
+mkdir -p "${GTC_DIR}" "${VCF_DIR}" "${QC_DIR}" "${CLUSTER_DIR}" "${CHECKPOINT_DIR}"
+
+# Helper: check if a step is already complete
+step_done() {
+    local step_name="$1"
+    [[ "${FORCE}" == "true" ]] && return 1
+    [[ -f "${CHECKPOINT_DIR}/${step_name}.done" ]]
+}
+
+# Helper: mark a step as complete
+mark_done() {
+    local step_name="$1"
+    date -u "+%Y-%m-%dT%H:%M:%SZ" > "${CHECKPOINT_DIR}/${step_name}.done"
+}
 
 echo "============================================"
 echo "Stage 2: Recluster and Reprocess"
@@ -128,180 +148,220 @@ echo "--- Step 1/5: Identifying high-quality samples ---"
 HQ_SAMPLES="${QC_DIR}/high_quality_samples.txt"
 EXCLUDED_SAMPLES="${QC_DIR}/excluded_samples.txt"
 
-awk -F'\t' -v min_cr="${MIN_CALL_RATE}" -v max_sd="${MAX_LRR_SD}" '
-    NR == 1 { next }
-    {
-        sample = $1
-        call_rate = $2
-        lrr_sd = $3
-        if (call_rate+0 >= min_cr+0 && (lrr_sd == "NA" || lrr_sd+0 <= max_sd+0)) {
-            print sample > "/dev/fd/3"
-        } else {
-            print sample > "/dev/fd/4"
-        }
-    }
-' "${STAGE1_QC}" 3>"${HQ_SAMPLES}" 4>"${EXCLUDED_SAMPLES}"
-
-n_total=$(( $(wc -l < "${STAGE1_QC}") - 1 ))
-n_hq=$(wc -l < "${HQ_SAMPLES}")
-n_excluded=$(wc -l < "${EXCLUDED_SAMPLES}")
-
-echo "  Total samples:            ${n_total}"
-echo "  High-quality samples:     ${n_hq}"
-echo "  Excluded samples:         ${n_excluded}"
-
-# Diagnostic: show QC threshold evaluation details
-echo "  [diag] QC thresholds: call_rate >= ${MIN_CALL_RATE}, lrr_sd <= ${MAX_LRR_SD}"
-echo "  [diag] Stage 1 QC file first 5 lines:"
-head -5 "${STAGE1_QC}" | sed 's/^/    [diag]   /'
-if [[ "${n_excluded}" -gt 0 ]]; then
-    echo "  [diag] First 5 excluded samples with values:"
+if step_done "stage2_hq_select" && [[ -f "${HQ_SAMPLES}" ]]; then
+    n_hq=$(wc -l < "${HQ_SAMPLES}")
+    echo "  [checkpoint] HQ sample selection already complete (${n_hq} samples). Skipping."
+    echo ""
+else
     awk -F'\t' -v min_cr="${MIN_CALL_RATE}" -v max_sd="${MAX_LRR_SD}" '
         NR == 1 { next }
         {
-            cr = $2; sd = $3
-            fail_cr = (cr+0 < min_cr+0) ? "FAIL" : "ok"
-            fail_sd = (sd != "NA" && sd+0 > max_sd+0) ? "FAIL" : "ok"
-            if (fail_cr == "FAIL" || fail_sd == "FAIL") {
-                n++
-                if (n <= 5) printf "    [diag]   %s: call_rate=%s(%s) lrr_sd=%s(%s)\n", $1, cr, fail_cr, sd, fail_sd
+            sample = $1
+            call_rate = $2
+            lrr_sd = $3
+            if (call_rate+0 >= min_cr+0 && (lrr_sd == "NA" || lrr_sd+0 <= max_sd+0)) {
+                print sample > "/dev/fd/3"
+            } else {
+                print sample > "/dev/fd/4"
             }
-        }' "${STAGE1_QC}"
-fi
-echo ""
+        }
+    ' "${STAGE1_QC}" 3>"${HQ_SAMPLES}" 4>"${EXCLUDED_SAMPLES}"
 
-if [[ "${n_hq}" -lt 10 ]]; then
-    echo "Warning: Only ${n_hq} high-quality samples found. Reclustering may not be reliable." >&2
-    echo "Consider relaxing --min-call-rate or --max-lrr-sd thresholds." >&2
+    n_total=$(( $(wc -l < "${STAGE1_QC}") - 1 ))
+    n_hq=$(wc -l < "${HQ_SAMPLES}")
+    n_excluded=$(wc -l < "${EXCLUDED_SAMPLES}")
+
+    echo "  Total samples:            ${n_total}"
+    echo "  High-quality samples:     ${n_hq}"
+    echo "  Excluded samples:         ${n_excluded}"
+
+    # Diagnostic: show QC threshold evaluation details
+    echo "  [diag] QC thresholds: call_rate >= ${MIN_CALL_RATE}, lrr_sd <= ${MAX_LRR_SD}"
+    echo "  [diag] Stage 1 QC file first 5 lines:"
+    head -5 "${STAGE1_QC}" | sed 's/^/    [diag]   /'
+    if [[ "${n_excluded}" -gt 0 ]]; then
+        echo "  [diag] First 5 excluded samples with values:"
+        awk -F'\t' -v min_cr="${MIN_CALL_RATE}" -v max_sd="${MAX_LRR_SD}" '
+            NR == 1 { next }
+            {
+                cr = $2; sd = $3
+                fail_cr = (cr+0 < min_cr+0) ? "FAIL" : "ok"
+                fail_sd = (sd != "NA" && sd+0 > max_sd+0) ? "FAIL" : "ok"
+                if (fail_cr == "FAIL" || fail_sd == "FAIL") {
+                    n++
+                    if (n <= 5) printf "    [diag]   %s: call_rate=%s(%s) lrr_sd=%s(%s)\n", $1, cr, fail_cr, sd, fail_sd
+                }
+            }' "${STAGE1_QC}"
+    fi
+    echo ""
+
+    if [[ "${n_hq}" -lt 10 ]]; then
+        echo "Warning: Only ${n_hq} high-quality samples found. Reclustering may not be reliable." >&2
+        echo "Consider relaxing --min-call-rate or --max-lrr-sd thresholds." >&2
+    fi
+
+    mark_done "stage2_hq_select"
 fi
 
 # ---------------------------------------------------------------
 # Step 2: Recompute EGT cluster file from high-quality samples
 # ---------------------------------------------------------------
 echo "--- Step 2/5: Recomputing EGT clusters from high-quality samples ---"
-STEP_START=${SECONDS}
 
 RECLUSTERED_EGT="${CLUSTER_DIR}/reclustered.egt"
 
-python3 "${SCRIPT_DIR}/recluster_egt.py" \
-    --egt "${EGT}" \
-    --bpm "${BPM}" \
-    --gtc-dir "${STAGE1_GTC_DIR}" \
-    --hq-samples "${HQ_SAMPLES}" \
-    --output-egt "${RECLUSTERED_EGT}" \
-    --min-cluster-samples "${MIN_CLUSTER_SAMPLES}"
+if step_done "stage2_recluster" && [[ -f "${RECLUSTERED_EGT}" ]]; then
+    echo "  [checkpoint] EGT reclustering already complete. Skipping."
+else
+    STEP_START=${SECONDS}
 
-echo "  Reclustered EGT: ${RECLUSTERED_EGT}"
-STEP_ELAPSED=$(( SECONDS - STEP_START ))
-echo "  Step 2/5 completed in ${STEP_ELAPSED}s"
+    python3 "${SCRIPT_DIR}/recluster_egt.py" \
+        --egt "${EGT}" \
+        --bpm "${BPM}" \
+        --gtc-dir "${STAGE1_GTC_DIR}" \
+        --hq-samples "${HQ_SAMPLES}" \
+        --output-egt "${RECLUSTERED_EGT}" \
+        --min-cluster-samples "${MIN_CLUSTER_SAMPLES}"
+
+    echo "  Reclustered EGT: ${RECLUSTERED_EGT}"
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 2/5 completed in ${STEP_ELAPSED}s"
+    mark_done "stage2_recluster"
+fi
 
 # ---------------------------------------------------------------
 # Step 3: Re-run idat2gtc with the new EGT clusters
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 3/5: Re-genotyping all samples with new clusters ---"
-STEP_START=${SECONDS}
 
-# Build interleaved green/red IDAT pairs.
-# idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
-ALL_IDAT_PAIRS=()
-while IFS= read -r -d '' grn; do
-    red="${grn/_Grn.idat/_Red.idat}"
-    if [[ -f "${red}" ]]; then
-        ALL_IDAT_PAIRS+=("${grn}")
-        ALL_IDAT_PAIRS+=("${red}")
-    else
-        echo "Warning: Red IDAT not found for $(basename "${grn}"), skipping" >&2
-    fi
-done < <(find "${IDAT_DIR}" \( -name "*_Grn.idat" -o -name "*_Grn.idat.gz" \) -print0 | sort -z)
+if step_done "stage2_idat2gtc"; then
+    n_existing=$(find "${GTC_DIR}" -name '*.gtc' 2>/dev/null | wc -l)
+    echo "  [checkpoint] Re-genotyping already complete (${n_existing} files). Skipping."
+else
+    STEP_START=${SECONDS}
 
-n_pairs=$(( ${#ALL_IDAT_PAIRS[@]} / 2 ))
-echo "  Re-calling genotypes for ${n_pairs} samples with reclustered EGT..."
+    # Build interleaved green/red IDAT pairs.
+    # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
+    ALL_IDAT_PAIRS=()
+    while IFS= read -r -d '' grn; do
+        red="${grn/_Grn.idat/_Red.idat}"
+        if [[ -f "${red}" ]]; then
+            ALL_IDAT_PAIRS+=("${grn}")
+            ALL_IDAT_PAIRS+=("${red}")
+        else
+            echo "Warning: Red IDAT not found for $(basename "${grn}"), skipping" >&2
+        fi
+    done < <(find "${IDAT_DIR}" \( -name "*_Grn.idat" -o -name "*_Grn.idat.gz" \) -print0 | sort -z)
 
-bcftools +idat2gtc \
-    --bpm "${BPM}" \
-    --egt "${RECLUSTERED_EGT}" \
-    --output "${GTC_DIR}" \
-    "${ALL_IDAT_PAIRS[@]}" 2>&1 | tail -3
+    n_pairs=$(( ${#ALL_IDAT_PAIRS[@]} / 2 ))
+    echo "  Re-calling genotypes for ${n_pairs} samples with reclustered EGT..."
 
-echo "  GTC re-calling complete."
-STEP_ELAPSED=$(( SECONDS - STEP_START ))
-echo "  Step 3/5 completed in ${STEP_ELAPSED}s"
+    bcftools +idat2gtc \
+        --bpm "${BPM}" \
+        --egt "${RECLUSTERED_EGT}" \
+        --output "${GTC_DIR}" \
+        "${ALL_IDAT_PAIRS[@]}" 2>&1 | tail -3
+
+    echo "  GTC re-calling complete."
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 3/5 completed in ${STEP_ELAPSED}s"
+    mark_done "stage2_idat2gtc"
+fi
 
 # ---------------------------------------------------------------
 # Step 4: Convert reclustered GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 4/5: Converting reclustered GTC files to VCF ---"
-STEP_START=${SECONDS}
 
 VCF_OUTPUT="${VCF_DIR}/stage2_reclustered.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata_stage2.tsv"
 
-# Convert reclustered GTC to VCF (pre-normalization)
-PRE_NORM_BCF="${VCF_DIR}/stage2_pre_norm.bcf"
+if step_done "stage2_gtc2vcf" && [[ -f "${VCF_OUTPUT}" ]]; then
+    echo "  [checkpoint] VCF conversion already complete. Skipping."
+else
+    STEP_START=${SECONDS}
 
-bcftools +gtc2vcf \
-    --no-version -Ou \
-    --do-not-check-bpm \
-    --bpm "${BPM}" \
-    --csv "${CSV}" \
-    --egt "${RECLUSTERED_EGT}" \
-    --fasta-ref "${REF_FASTA}" \
-    --gtcs "${GTC_DIR}" \
-    --extra "${EXTRA_TSV}" \
-    --adjust-clusters \
-    --threads "${THREADS}" | \
-bcftools sort -Ob -T "${OUTPUT_DIR}/bcftools." \
-    -o "${PRE_NORM_BCF}" --write-index
+    # Convert reclustered GTC to VCF (pre-normalization)
+    PRE_NORM_BCF="${VCF_DIR}/stage2_pre_norm.bcf"
 
-# Diagnostic: count variants before normalization
-N_PRE_NORM=$(bcftools view -H "${PRE_NORM_BCF}" | wc -l)
-echo "  Variants before normalization: ${N_PRE_NORM}"
+    bcftools +gtc2vcf \
+        --no-version -Ou \
+        --do-not-check-bpm \
+        --bpm "${BPM}" \
+        --csv "${CSV}" \
+        --egt "${RECLUSTERED_EGT}" \
+        --fasta-ref "${REF_FASTA}" \
+        --gtcs "${GTC_DIR}" \
+        --extra "${EXTRA_TSV}" \
+        --adjust-clusters \
+        --threads "${THREADS}" | \
+    bcftools sort -Ob -T "${OUTPUT_DIR}/bcftools." \
+        -o "${PRE_NORM_BCF}" --write-index
 
-# Normalize with -c ws (warn and swap REF/ALT to match reference).
-# CRITICAL: Do NOT use -c x here. See stage1_initial_genotyping.sh for details.
-NORM_LOG="${QC_DIR}/norm_warnings_stage2.log"
+    # Diagnostic: count variants before normalization
+    N_PRE_NORM=$(bcftools view -H "${PRE_NORM_BCF}" | wc -l)
+    echo "  Variants before normalization: ${N_PRE_NORM}"
 
-bcftools norm --no-version -Ob -c ws -f "${REF_FASTA}" \
-    "${PRE_NORM_BCF}" \
-    -o "${VCF_OUTPUT}" --write-index 2>"${NORM_LOG}"
+    # Normalize with -c ws (warn and swap REF/ALT to match reference).
+    # CRITICAL: Do NOT use -c x here. See stage1_initial_genotyping.sh for details.
+    NORM_LOG="${QC_DIR}/norm_warnings_stage2.log"
 
-# Diagnostic: count variants after normalization and REF swaps
-N_POST_NORM=$(bcftools view -H "${VCF_OUTPUT}" | wc -l)
-N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
-echo "  Variants after normalization:  ${N_POST_NORM}"
-echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"
-if [[ "${N_REF_SWAPS}" -gt 0 ]]; then
-    PCT_SWAPS=$(awk -v s="${N_REF_SWAPS}" -v t="${N_PRE_NORM}" 'BEGIN { printf "%.1f", (t>0) ? s*100.0/t : 0 }')
-    echo "  REF swap percentage:           ${PCT_SWAPS}%"
+    bcftools norm --no-version -Ob -c ws -f "${REF_FASTA}" \
+        "${PRE_NORM_BCF}" \
+        -o "${VCF_OUTPUT}.tmp" --write-index 2>"${NORM_LOG}"
+
+    # Atomic move
+    mv "${VCF_OUTPUT}.tmp" "${VCF_OUTPUT}"
+    mv "${VCF_OUTPUT}.tmp.csi" "${VCF_OUTPUT}.csi" 2>/dev/null || true
+
+    # Diagnostic: count variants after normalization and REF swaps
+    N_POST_NORM=$(bcftools view -H "${VCF_OUTPUT}" | wc -l)
+    N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
+    echo "  Variants after normalization:  ${N_POST_NORM}"
+    echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"
+    if [[ "${N_REF_SWAPS}" -gt 0 ]]; then
+        PCT_SWAPS=$(awk -v s="${N_REF_SWAPS}" -v t="${N_PRE_NORM}" 'BEGIN { printf "%.1f", (t>0) ? s*100.0/t : 0 }')
+        echo "  REF swap percentage:           ${PCT_SWAPS}%"
+    fi
+    echo "  Norm warnings log: ${NORM_LOG}"
+
+    # Clean up pre-norm BCF
+    rm -f "${PRE_NORM_BCF}" "${PRE_NORM_BCF}.csi"
+
+    echo "  Reclustered VCF created: ${VCF_OUTPUT}"
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 4/5 completed in ${STEP_ELAPSED}s"
+    mark_done "stage2_gtc2vcf"
 fi
-echo "  Norm warnings log: ${NORM_LOG}"
-
-# Clean up pre-norm BCF
-rm -f "${PRE_NORM_BCF}" "${PRE_NORM_BCF}.csi"
-
-echo "  Reclustered VCF created: ${VCF_OUTPUT}"
-STEP_ELAPSED=$(( SECONDS - STEP_START ))
-echo "  Step 4/5 completed in ${STEP_ELAPSED}s"
 
 # ---------------------------------------------------------------
 # Step 5: Recompute QC metrics after reclustering
 # ---------------------------------------------------------------
 echo ""
 echo "--- Step 5/5: Recomputing QC metrics ---"
-STEP_START=${SECONDS}
 
-source "${SCRIPT_DIR}/collect_qc_metrics.sh"
-collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_DIR}/stage2_sample_qc.tsv"
-STEP_ELAPSED=$(( SECONDS - STEP_START ))
-echo "  Step 5/5 completed in ${STEP_ELAPSED}s"
+STAGE2_QC="${QC_DIR}/stage2_sample_qc.tsv"
+
+if step_done "stage2_qc" && [[ -f "${STAGE2_QC}" ]]; then
+    n_qc=$(( $(wc -l < "${STAGE2_QC}") - 1 ))
+    echo "  [checkpoint] QC metrics already computed (${n_qc} samples). Skipping."
+else
+    STEP_START=${SECONDS}
+
+    source "${SCRIPT_DIR}/collect_qc_metrics.sh"
+    collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${STAGE2_QC}"
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 5/5 completed in ${STEP_ELAPSED}s"
+    mark_done "stage2_qc"
+fi
 
 # Generate comparison report
 echo ""
 echo "--- QC Comparison (Stage 1 vs Stage 2) ---"
 
-paste "${STAGE1_QC}" "${QC_DIR}/stage2_sample_qc.tsv" | \
+paste "${STAGE1_QC}" "${STAGE2_QC}" | \
     awk -F'\t' 'NR==1 {next}
     {
         s1_cr = $2; s1_sd = $3

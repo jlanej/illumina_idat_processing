@@ -25,6 +25,7 @@ MIN_CALL_RATE=0.97
 MAX_LRR_SD=0.35
 SKIP_STAGE2="false"
 SKIP_DOWNLOAD="false"
+FORCE="false"
 
 usage() {
     cat <<EOF
@@ -54,6 +55,7 @@ Processing options:
   --max-lrr-sd FLOAT     Max LRR SD for Stage 2 HQ samples (default: ${MAX_LRR_SD})
   --skip-stage2          Skip Stage 2 (reclustering)
   --skip-download        Do not auto-download manifests or reference
+  --force                Force re-run of all steps, ignoring checkpoints
 
   --help                 Show this help message
 
@@ -100,6 +102,7 @@ while [[ $# -gt 0 ]]; do
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
         --skip-stage2)    SKIP_STAGE2="true"; shift ;;
         --skip-download)  SKIP_DOWNLOAD="true"; shift ;;
+        --force)          FORCE="true"; shift ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -232,21 +235,32 @@ echo ""
 REALIGN_DIR="${OUTPUT_DIR}/realigned_manifests"
 
 if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
-    echo "======================================================"
-    echo "  Realigning Manifest Probes Against Reference"
-    echo "======================================================"
-    echo ""
+    # Check if realignment was already completed
+    EXISTING_REALIGNED=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)
+    if [[ -n "${EXISTING_REALIGNED}" && -f "${EXISTING_REALIGNED}" && "${FORCE}" != "true" ]]; then
+        echo "======================================================"
+        echo "  Manifest Probe Realignment (cached)"
+        echo "======================================================"
+        echo ""
+        echo "Using existing realigned CSV: ${EXISTING_REALIGNED}"
+        CSV="${EXISTING_REALIGNED}"
+    else
+        echo "======================================================"
+        echo "  Realigning Manifest Probes Against Reference"
+        echo "======================================================"
+        echo ""
 
-    bash "${SCRIPT_DIR}/realign_manifest.sh" \
-        --csv "${CSV}" \
-        --ref-fasta "${REF_FASTA}" \
-        --output-dir "${REALIGN_DIR}"
+        bash "${SCRIPT_DIR}/realign_manifest.sh" \
+            --csv "${CSV}" \
+            --ref-fasta "${REF_FASTA}" \
+            --output-dir "${REALIGN_DIR}"
 
-    # Use the realigned CSV for all downstream steps
-    REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)
-    if [[ -n "${REALIGNED_CSV}" && -f "${REALIGNED_CSV}" ]]; then
-        echo "Using realigned CSV: ${REALIGNED_CSV}"
-        CSV="${REALIGNED_CSV}"
+        # Use the realigned CSV for all downstream steps
+        REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)
+        if [[ -n "${REALIGNED_CSV}" && -f "${REALIGNED_CSV}" ]]; then
+            echo "Using realigned CSV: ${REALIGNED_CSV}"
+            CSV="${REALIGNED_CSV}"
+        fi
     fi
 
     # Realignment quality gate: warn if too many probes are unmapped
@@ -286,14 +300,20 @@ echo "  Running Stage 1: Initial Genotyping"
 echo "======================================================"
 echo ""
 
-bash "${SCRIPT_DIR}/stage1_initial_genotyping.sh" \
-    --idat-dir "${IDAT_DIR}" \
-    --bpm "${BPM}" \
-    --egt "${EGT}" \
-    --csv "${CSV}" \
-    --ref-fasta "${REF_FASTA}" \
-    --output-dir "${STAGE1_DIR}" \
+STAGE1_ARGS=(
+    --idat-dir "${IDAT_DIR}"
+    --bpm "${BPM}"
+    --egt "${EGT}"
+    --csv "${CSV}"
+    --ref-fasta "${REF_FASTA}"
+    --output-dir "${STAGE1_DIR}"
     --threads "${THREADS}"
+)
+if [[ "${FORCE}" == "true" ]]; then
+    STAGE1_ARGS+=(--force)
+fi
+
+bash "${SCRIPT_DIR}/stage1_initial_genotyping.sh" "${STAGE1_ARGS[@]}"
 
 echo ""
 
@@ -312,17 +332,23 @@ else
     echo "======================================================"
     echo ""
 
-    bash "${SCRIPT_DIR}/stage2_recluster.sh" \
-        --idat-dir "${IDAT_DIR}" \
-        --bpm "${BPM}" \
-        --egt "${EGT}" \
-        --csv "${CSV}" \
-        --ref-fasta "${REF_FASTA}" \
-        --stage1-dir "${STAGE1_DIR}" \
-        --output-dir "${STAGE2_DIR}" \
-        --min-call-rate "${MIN_CALL_RATE}" \
-        --max-lrr-sd "${MAX_LRR_SD}" \
+    STAGE2_ARGS=(
+        --idat-dir "${IDAT_DIR}"
+        --bpm "${BPM}"
+        --egt "${EGT}"
+        --csv "${CSV}"
+        --ref-fasta "${REF_FASTA}"
+        --stage1-dir "${STAGE1_DIR}"
+        --output-dir "${STAGE2_DIR}"
+        --min-call-rate "${MIN_CALL_RATE}"
+        --max-lrr-sd "${MAX_LRR_SD}"
         --threads "${THREADS}"
+    )
+    if [[ "${FORCE}" == "true" ]]; then
+        STAGE2_ARGS+=(--force)
+    fi
+
+    bash "${SCRIPT_DIR}/stage2_recluster.sh" "${STAGE2_ARGS[@]}"
 
     FINAL_VCF="${STAGE2_DIR}/vcf/stage2_reclustered.bcf"
     FINAL_QC="${STAGE2_DIR}/qc/stage2_sample_qc.tsv"

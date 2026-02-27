@@ -37,6 +37,7 @@ THREADS=1
 SKIP_DOWNLOAD="false"
 SKIP_STAGE2="false"
 KEEP_ARCHIVE="false"
+FORCE="false"
 USER_BPM=""
 USER_EGT=""
 USER_CSV=""
@@ -64,6 +65,7 @@ Options:
   --skip-download        Skip downloading data (use existing files)
   --skip-stage2          Skip Stage 2 reclustering
   --keep-archive         Keep the downloaded .tgz archive after extraction
+  --force                Force re-run of all pipeline steps, ignoring checkpoints
   --help                 Show this help message
 
 Examples:
@@ -98,6 +100,7 @@ while [[ $# -gt 0 ]]; do
         --skip-download) SKIP_DOWNLOAD="true"; shift ;;
         --skip-stage2)   SKIP_STAGE2="true"; shift ;;
         --keep-archive)  KEEP_ARCHIVE="true"; shift ;;
+        --force)         FORCE="true"; shift ;;
         --help)          usage ;;
         *)               echo "Error: Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -457,6 +460,10 @@ PIPELINE_ARGS=(
 
 if [[ "${SKIP_STAGE2}" == "true" ]]; then
     PIPELINE_ARGS+=(--skip-stage2)
+fi
+
+if [[ "${FORCE}" == "true" ]]; then
+    PIPELINE_ARGS+=(--force)
 fi
 
 bash "${SCRIPT_DIR}/run_pipeline.sh" "${PIPELINE_ARGS[@]}"
