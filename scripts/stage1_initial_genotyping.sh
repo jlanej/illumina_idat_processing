@@ -164,19 +164,19 @@ for (( i=0; i<n_total; i+=BATCH_SIZE )); do
     batch_num=$(( i / BATCH_SIZE + 1 ))
     echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
 
-    # Build file arguments for this batch
-    GRN_ARGS=()
-    RED_ARGS=()
+    # Build interleaved green/red file arguments for this batch.
+    # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
+    IDAT_ARGS=()
     for (( j=i; j<batch_end; j++ )); do
-        GRN_ARGS+=("${GREEN_IDATS[j]}")
-        RED_ARGS+=("${RED_IDATS[j]}")
+        IDAT_ARGS+=("${GREEN_IDATS[j]}")
+        IDAT_ARGS+=("${RED_IDATS[j]}")
     done
 
     bcftools +idat2gtc \
         --bpm "${BPM}" \
         --egt "${EGT}" \
         --output "${GTC_DIR}" \
-        "${GRN_ARGS[@]}" 2>&1 | tail -1
+        "${IDAT_ARGS[@]}" 2>&1 | tail -1
 done
 
 echo "GTC conversion complete. Files in: ${GTC_DIR}"

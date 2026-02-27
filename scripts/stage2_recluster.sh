@@ -202,18 +202,27 @@ echo ""
 echo "--- Step 3/5: Re-genotyping all samples with new clusters ---"
 STEP_START=${SECONDS}
 
-ALL_GRN_IDATS=()
+# Build interleaved green/red IDAT pairs.
+# idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
+ALL_IDAT_PAIRS=()
 while IFS= read -r -d '' grn; do
-    ALL_GRN_IDATS+=("${grn}")
-done < <(find "${IDAT_DIR}" -name "*_Grn.idat" -print0 | sort -z)
+    red="${grn/_Grn.idat/_Red.idat}"
+    if [[ -f "${red}" ]]; then
+        ALL_IDAT_PAIRS+=("${grn}")
+        ALL_IDAT_PAIRS+=("${red}")
+    else
+        echo "Warning: Red IDAT not found for $(basename "${grn}"), skipping" >&2
+    fi
+done < <(find "${IDAT_DIR}" \( -name "*_Grn.idat" -o -name "*_Grn.idat.gz" \) -print0 | sort -z)
 
-echo "  Re-calling genotypes for ${#ALL_GRN_IDATS[@]} samples with reclustered EGT..."
+n_pairs=$(( ${#ALL_IDAT_PAIRS[@]} / 2 ))
+echo "  Re-calling genotypes for ${n_pairs} samples with reclustered EGT..."
 
 bcftools +idat2gtc \
     --bpm "${BPM}" \
     --egt "${RECLUSTERED_EGT}" \
     --output "${GTC_DIR}" \
-    "${ALL_GRN_IDATS[@]}" 2>&1 | tail -3
+    "${ALL_IDAT_PAIRS[@]}" 2>&1 | tail -3
 
 echo "  GTC re-calling complete."
 STEP_ELAPSED=$(( SECONDS - STEP_START ))
