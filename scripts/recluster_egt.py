@@ -394,8 +394,34 @@ class GTCFile:
 # BPM Reader (minimal, for normalization lookup table)
 # =============================================================================
 
+def _read_bpm_string(f):
+    """Read a .NET-style length-prefixed string from BPM, tolerating binary data.
+
+    Some BPM fields (e.g. SourceSeq, TopGenomicSeq) may contain raw bytes
+    that aren't valid UTF-8. Fall back to latin-1 for those.
+    """
+    total_length = 0
+    partial_length = read_byte(f)
+    num_bytes = 0
+    while partial_length & 0x80 > 0:
+        total_length += (partial_length & 0x7F) << (7 * num_bytes)
+        partial_length = struct.unpack("<B", f.read(1))[0]
+        num_bytes += 1
+    total_length += partial_length << (7 * num_bytes)
+    raw = f.read(total_length)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
+
+
 class BPMFile:
-    """Minimal BPM reader for normalization ID lookups."""
+    """Minimal BPM reader for normalization ID lookups.
+
+    Supports BPM versions 1–4+ with per-locus entry versions 4–8.
+    Based on the Illumina BeadArrayFiles reference implementation
+    (BeadPoolManifest.py / LocusEntry.py).
+    """
 
     def __init__(self, filepath):
         self.filepath = filepath
@@ -411,51 +437,87 @@ class BPMFile:
                 raise ValueError(f"Not a BPM file: {self.filepath}")
             _version = read_byte(f)
             _version_int = read_int(f)
-            manifest_name = read_string(f)
-            _controls = read_string(f)
+            manifest_name = _read_bpm_string(f)
+            _controls = _read_bpm_string(f)
             self.num_loci = read_int(f)
 
             print(f"  BPM version: {_version}.{_version_int}, manifest: {manifest_name}",
                   file=sys.stderr)
 
-            # Read locus entries (normalization IDs are in a separate section)
+            # Read locus entries — field layout depends on per-entry version.
+            # Reference: Illumina BeadArrayFiles LocusEntry.py
+            #
+            # Per-entry version field layout:
+            #   All versions (≥4):
+            #     version(int), ilmn_id(str), name(str),
+            #     3 strings (snp, ilmn_strand, customer_strand),
+            #     address_a(int), allele_a_probe_seq(str),
+            #     address_b(int), allele_b_probe_seq(str),
+            #     genome_build(str), chr(str), map_info(str),
+            #     ploidy(str), species(str), source(str),
+            #     source_version(str), source_strand(str),
+            #     source_seq(str), top_genomic_seq(str),
+            #     bead_set_id(int)
+            #   Version ≥ 7: + exp_clusters(byte), intensity_only(byte), assay_type(int)
+            #   Version = 6: + exp_clusters(byte), intensity_only(byte), assay_type(byte)
+            #   Version < 6 (4,5): + assay_type(byte)
+            #   All versions: + norm_id(byte) [inline per-locus]
             self.norm_ids = []
             self.names = []
             for idx in range(self.num_loci):
-                _version2 = read_int(f)
-                _ilmn_id = read_string(f)
-                name = read_string(f)
+                entry_version = read_int(f)
+
+                _ilmn_id = _read_bpm_string(f)
+                name = _read_bpm_string(f)
                 self.names.append(name)
-                # Skip 3 strings (SNP, ILMN strand, Customer strand)
+
+                # 3 strings: SNP, ILMN strand, Customer strand
                 for __ in range(3):
-                    read_string(f)
-                read_int(f)     # address_a
-                read_string(f)  # allele_a_probe_seq
-                read_int(f)     # address_b (0 for Infinium II)
-                read_string(f)  # allele_b_probe_seq
-                read_string(f)  # genome_build
-                read_string(f)  # chrom
-                read_string(f)  # map_info
-                read_string(f)  # snp (e.g., [A/G])
-                read_string(f)  # ref_strand
-                read_byte(f)    # assay_type
+                    _read_bpm_string(f)
+
+                read_int(f)              # address_a
+                _read_bpm_string(f)      # allele_a_probe_seq
+                read_int(f)              # address_b (0 for Infinium II)
+                _read_bpm_string(f)      # allele_b_probe_seq
+
+                _read_bpm_string(f)      # genome_build
+                _read_bpm_string(f)      # chr
+                _read_bpm_string(f)      # map_info (MapInfo / position)
+                _read_bpm_string(f)      # ploidy
+                _read_bpm_string(f)      # species
+                _read_bpm_string(f)      # source
+                _read_bpm_string(f)      # source_version
+                _read_bpm_string(f)      # source_strand
+                _read_bpm_string(f)      # source_seq  (may be binary/long)
+                _read_bpm_string(f)      # top_genomic_seq (may be binary/long)
+                read_int(f)              # bead_set_id
+
+                if entry_version >= 7:
+                    read_byte(f)         # exp_clusters
+                    read_byte(f)         # intensity_only
+                    read_int(f)          # assay_type (int in v7+)
+                elif entry_version == 6:
+                    read_byte(f)         # exp_clusters
+                    read_byte(f)         # intensity_only
+                    read_byte(f)         # assay_type (byte in v6)
+                else:
+                    # entry_version 4, 5
+                    read_byte(f)         # assay_type
+
+                # Normalization ID is stored inline per locus entry
+                norm_id = read_byte(f)
+                self.norm_ids.append(norm_id)
 
                 if (idx + 1) % 500000 == 0 or idx == 0:
+                    if idx == 0:
+                        print(f"    Locus entry version: {entry_version}",
+                              file=sys.stderr)
                     print(f"    Read {idx + 1}/{self.num_loci} locus entries...",
                           file=sys.stderr)
 
             print(f"  Read all {self.num_loci} locus entries", file=sys.stderr)
-
-            # Normalization IDs are stored in a separate section after all locus entries
-            if _version >= 4:
-                for _ in range(self.num_loci):
-                    self.norm_ids.append(read_byte(f))
-                print(f"  Read {len(self.norm_ids)} normalization IDs", file=sys.stderr)
-            else:
-                # Older BPM versions may not have normalization IDs
-                self.norm_ids = [0] * self.num_loci
-                print(f"  BPM version {_version} < 4: using default normalization IDs",
-                      file=sys.stderr)
+            print(f"  Read {len(self.norm_ids)} normalization IDs (inline)",
+                  file=sys.stderr)
 
 
 def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
