@@ -28,9 +28,11 @@ collect_qc_metrics() {
     bcftools query -l "${vcf_file}" > "${samples_file}"
 
     # Compute call rate per sample: fraction of non-missing genotypes
-    # Use per-sample genotype counting for correct per-sample call rates
+    # Exclude intensity-only probes (no genotype, only BAF/LRR) from the
+    # denominator so call rate reflects genotypeable loci only.
     echo "  Computing call rate per sample..."
-    bcftools query -f '[%SAMPLE\t%GT\n]' "${vcf_file}" | \
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' "${vcf_file}" | \
+    bcftools query -f '[%SAMPLE\t%GT\n]' | \
         awk -F'\t' '{
             total[$1]++
             if ($2 != "./." && $2 != "." && $2 != ".|.") called[$1]++
@@ -52,9 +54,11 @@ collect_qc_metrics() {
     fi
 
     # Compute LRR standard deviation per sample
+    # Filter out non-numeric values (nan, -nan, inf, -inf) that gtc2vcf
+    # outputs for probes with zero intensities or failed normalization.
     echo "  Computing LRR standard deviation per sample..."
     bcftools query -f '[%SAMPLE\t%LRR\n]' "${vcf_file}" 2>/dev/null | \
-        awk -F'\t' '$2 != "." && $2 != "" {
+        awk -F'\t' '$2 != "." && $2 != "" && $2 ~ /^-?[0-9]/ {
             n[$1]++
             sum[$1] += $2
             sum2[$1] += $2 * $2
@@ -83,9 +87,16 @@ collect_qc_metrics() {
     fi
 
     # Extract computed gender from metadata if available
+    # The gtc2vcf --extra TSV uses "gtc" (filename) as the sample identifier
+    # column, not "sample_id". Strip the .gtc extension to match VCF sample names.
     if [[ -f "${metadata_tsv}" ]] && head -1 "${metadata_tsv}" | grep -q "computed_gender"; then
-        awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) {if($i=="sample_id") si=i; if($i=="computed_gender") gi=i}}
-                     NR>1 {print $si "\t" $gi}' "${metadata_tsv}" | sort -k1,1 > "${gender_file}"
+        awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) {if($i=="sample_id"||$i=="gtc") si=i; if($i=="computed_gender") gi=i}}
+                     NR>1 && si && gi {
+                         id = $si
+                         sub(/\.gtc$/, "", id)
+                         sub(/.*\//, "", id)
+                         print id "\t" $gi
+                     }' "${metadata_tsv}" | sort -k1,1 > "${gender_file}"
     else
         # Placeholder
         while read -r s; do echo -e "${s}\tNA"; done < "${samples_file}" > "${gender_file}"

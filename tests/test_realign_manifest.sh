@@ -744,6 +744,105 @@ else
     (( FAIL++ )) || true
 fi
 
+# ---------------------------------------------------------------
+# Test 13: LRR SD awk filters out nan/inf values
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 13: LRR SD awk filters nan/inf values ---"
+
+# Simulate bcftools query output with nan/-nan/inf values mixed in
+printf 'S1\t0.1\nS1\t-nan\nS1\t0.2\nS1\tnan\nS1\t0.3\nS1\tinf\nS1\t-inf\nS2\t-nan\nS2\tnan\nS2\t.\n' > "${TMP_DIR}/lrr_data.txt"
+
+lrr_out=$(awk -F'\t' '$2 != "." && $2 != "" && $2 ~ /^-?[0-9]/ {
+    n[$1]++
+    sum[$1] += $2
+    sum2[$1] += $2 * $2
+} END {
+    for (s in n) {
+        if (n[s] > 1) {
+            mean = sum[s] / n[s]
+            var = (sum2[s] / n[s]) - (mean * mean)
+            if (var < 0) var = 0
+            sd = sqrt(var)
+            print s "\t" sd
+        } else {
+            print s "\tNA"
+        }
+    }
+}' "${TMP_DIR}/lrr_data.txt" | sort -k1,1)
+
+# S1 should have n=3 (0.1, 0.2, 0.3), mean=0.2, sd≈0.0816
+# S2 should not appear (no valid values)
+s1_ok=$(echo "${lrr_out}" | awk -F'\t' '/^S1/ {exit !($2+0 > 0.05 && $2+0 < 0.15)}' && echo "yes" || echo "no")
+s2_absent=$(echo "${lrr_out}" | grep -c '^S2' || true)
+
+if [[ "${s1_ok}" == "yes" ]] && [[ "${s2_absent}" -eq 0 ]]; then
+    s1_sd=$(echo "${lrr_out}" | grep '^S1' | awk -F'\t' '{printf "%.4f", $2}')
+    echo "  PASS: LRR SD correctly filters nan/inf (S1 sd=${s1_sd}, S2 excluded)"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: LRR SD filtering: output='${lrr_out}'"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 14: Gender extraction with gtc column name
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 14: Gender extraction with 'gtc' column name ---"
+
+# Simulate gtc2vcf --extra TSV output with "gtc" column (not "sample_id")
+printf 'gtc\tnumber_snps\tcomputed_gender\n' > "${TMP_DIR}/gtc_meta.tsv"
+printf 'SAMP001.gtc\t1000\tM\n' >> "${TMP_DIR}/gtc_meta.tsv"
+printf 'SAMP002.gtc\t1000\tF\n' >> "${TMP_DIR}/gtc_meta.tsv"
+
+gender_out2=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) {if($i=="sample_id"||$i=="gtc") si=i; if($i=="computed_gender") gi=i}}
+             NR>1 && si && gi {
+                 id = $si
+                 sub(/\.gtc$/, "", id)
+                 sub(/.*\//, "", id)
+                 print id "\t" $gi
+             }' "${TMP_DIR}/gtc_meta.tsv" | sort -k1,1)
+
+expected_gender2=$'SAMP001\tM\nSAMP002\tF'
+if [[ "${gender_out2}" == "${expected_gender2}" ]]; then
+    echo "  PASS: Gender extraction handles 'gtc' column and strips .gtc extension"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Gender extraction with gtc column: got '${gender_out2}', expected '${expected_gender2}'"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 15: Call rate awk excludes intensity-only entries
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 15: Call rate excludes intensity-only probes (concept) ---"
+
+# Simulate: 5 total sites, but 2 are intensity-only (all missing).
+# Without filtering: SAMP1 has 2/5 = 0.40 call rate
+# With filtering (excluding 2 intensity-only): SAMP1 has 2/3 = 0.667
+printf 'SAMP1\t0/0\nSAMP1\t0/1\nSAMP1\t./.\n' > "${TMP_DIR}/gt_filtered.txt"
+
+cr_filtered=$(awk -F'\t' '{
+    total[$1]++
+    if ($2 != "./." && $2 != "." && $2 != ".|.") called[$1]++
+} END {
+    for (s in total) {
+        cr = (total[s] > 0) ? called[s] / total[s] : 0
+        print s "\t" cr
+    }
+}' "${TMP_DIR}/gt_filtered.txt")
+
+cr_val=$(echo "${cr_filtered}" | awk -F'\t' '{printf "%.2f", $2}')
+if [[ "${cr_val}" == "0.67" ]]; then
+    echo "  PASS: Call rate on filtered (non-intensity-only) sites = ${cr_val}"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Call rate on filtered sites: got ${cr_val}, expected 0.67"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
