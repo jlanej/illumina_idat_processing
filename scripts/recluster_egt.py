@@ -33,6 +33,7 @@ import argparse
 import os
 import struct
 import sys
+import time
 from glob import glob
 
 import numpy as np
@@ -389,6 +390,50 @@ class GTCFile:
                 })
             return transforms
 
+    def read_all(self):
+        """Read genotypes, raw intensities, and transforms in a single file open.
+
+        Returns (genotypes, raw_x, raw_y, transforms) — same as calling
+        get_genotypes(), get_raw_x(), get_raw_y(), and
+        get_normalization_transforms() individually, but avoids opening
+        and closing the file four times per sample.
+        """
+        with open(self.filepath, "rb") as f:
+            # Genotypes
+            f.seek(self.toc[self._ID_GENOTYPES])
+            n = read_int(f)
+            genotypes = np.frombuffer(f.read(n), dtype=np.uint8)
+
+            # Raw X
+            f.seek(self.toc[self._ID_RAW_X])
+            n = read_int(f)
+            raw_x = np.frombuffer(f.read(n * 2), dtype=np.uint16)
+
+            # Raw Y
+            f.seek(self.toc[self._ID_RAW_Y])
+            n = read_int(f)
+            raw_y = np.frombuffer(f.read(n * 2), dtype=np.uint16)
+
+            # Normalization transforms
+            f.seek(self.toc[self._ID_NORMALIZATION_TRANSFORMS])
+            n = read_int(f)
+            transforms = []
+            for _ in range(n):
+                _ver = read_int(f)
+                offset_x = read_float(f)
+                offset_y = read_float(f)
+                scale_x = read_float(f)
+                scale_y = read_float(f)
+                shear = read_float(f)
+                theta = read_float(f)
+                transforms.append({
+                    "offset_x": offset_x, "offset_y": offset_y,
+                    "scale_x": scale_x, "scale_y": scale_y,
+                    "shear": shear, "theta": theta,
+                })
+
+        return genotypes, raw_x, raw_y, transforms
+
 
 # =============================================================================
 # BPM Reader (minimal, for normalization lookup table)
@@ -525,33 +570,36 @@ def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
     Apply Illumina normalization transforms to raw intensities.
 
     Returns normalized X, Y arrays and derived theta, R arrays.
+
+    Vectorized: groups probes by normalization ID and applies each
+    transform as a bulk NumPy operation instead of a per-probe loop.
     """
     n = len(raw_x)
-    norm_x = np.zeros(n, dtype=np.float64)
-    norm_y = np.zeros(n, dtype=np.float64)
 
-    for i in range(n):
-        nid = norm_ids[i] if i < len(norm_ids) else 0
-        if nid >= len(transforms):
-            nid = 0
-        t = transforms[nid]
+    # Build per-probe transform parameter arrays by normalization ID
+    nids = np.array(norm_ids[:n], dtype=np.int32) if len(norm_ids) >= n else \
+        np.zeros(n, dtype=np.int32)
+    num_transforms = len(transforms)
+    nids = np.clip(nids, 0, num_transforms - 1)
 
-        # Apply affine normalization (Illumina's approach)
-        x = float(raw_x[i]) - t["offset_x"]
-        y = float(raw_y[i]) - t["offset_y"]
+    # Pre-extract transform parameters into arrays for vectorized lookup
+    t_offset_x = np.array([t["offset_x"] for t in transforms], dtype=np.float64)
+    t_offset_y = np.array([t["offset_y"] for t in transforms], dtype=np.float64)
+    t_shear = np.array([t["shear"] for t in transforms], dtype=np.float64)
+    t_scale_x = np.array([t["scale_x"] for t in transforms], dtype=np.float64)
+    t_scale_y = np.array([t["scale_y"] for t in transforms], dtype=np.float64)
 
-        # Apply shear and scale
-        temp_x = x + t["shear"] * y
-        temp_y = y
+    # Vectorized normalization via fancy indexing
+    x = raw_x.astype(np.float64) - t_offset_x[nids]
+    y = raw_y.astype(np.float64) - t_offset_y[nids]
 
-        norm_x[i] = temp_x * t["scale_x"]
-        norm_y[i] = temp_y * t["scale_y"]
+    # Apply shear and scale
+    norm_x = (x + t_shear[nids] * y) * t_scale_x[nids]
+    norm_y = y * t_scale_y[nids]
 
-        # Clamp to non-negative
-        if norm_x[i] < 0:
-            norm_x[i] = 0.0
-        if norm_y[i] < 0:
-            norm_y[i] = 0.0
+    # Clamp to non-negative
+    np.maximum(norm_x, 0.0, out=norm_x)
+    np.maximum(norm_y, 0.0, out=norm_y)
 
     # Compute theta and R (Illumina polar coordinates)
     # theta = (2/pi) * arctan2(Y, X), so theta in [0, 1]
@@ -588,21 +636,23 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
     num_samples = len(gtc_files)
 
     print(f"  Reclustering {num_probes} probes using {num_samples} samples...", file=sys.stderr)
+    print(f"  Allocating intensity arrays ({num_probes} x {num_samples})...", file=sys.stderr)
 
     # Collect per-probe data across all HQ samples
     # Arrays: [num_probes, num_samples]
-    all_theta = np.zeros((num_probes, num_samples), dtype=np.float64)
-    all_r = np.zeros((num_probes, num_samples), dtype=np.float64)
+    # float32 is sufficient (Illumina intensities are single-precision origin)
+    # and halves memory vs float64 — critical for thousands of samples.
+    all_theta = np.zeros((num_probes, num_samples), dtype=np.float32)
+    all_r = np.zeros((num_probes, num_samples), dtype=np.float32)
     all_geno = np.zeros((num_probes, num_samples), dtype=np.uint8)
 
-    for sidx, gtc in enumerate(gtc_files):
-        if (sidx + 1) % 50 == 0 or sidx == 0:
-            print(f"    Reading sample {sidx + 1}/{num_samples}...", file=sys.stderr)
+    print(f"  Reading intensities from {num_samples} GTC files...", file=sys.stderr)
+    read_start = time.time()
 
-        genotypes = gtc.get_genotypes()
-        raw_x = gtc.get_raw_x()
-        raw_y = gtc.get_raw_y()
-        transforms = gtc.get_normalization_transforms()
+    for sidx, gtc in enumerate(gtc_files):
+        sample_start = time.time()
+
+        genotypes, raw_x, raw_y, transforms = gtc.read_all()
 
         _, _, theta, r = normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms)
 
@@ -610,6 +660,22 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
         all_theta[:n, sidx] = theta[:n]
         all_r[:n, sidx] = r[:n]
         all_geno[:n, sidx] = genotypes[:n]
+
+        sample_elapsed = time.time() - sample_start
+        total_elapsed = time.time() - read_start
+        if (sidx + 1) % 10 == 0 or sidx == 0 or sidx == num_samples - 1:
+            avg_per_sample = total_elapsed / (sidx + 1)
+            remaining = avg_per_sample * (num_samples - sidx - 1)
+            remaining_min = remaining / 60.0
+            print(f"    Sample {sidx + 1}/{num_samples} "
+                  f"({sample_elapsed:.1f}s this sample, "
+                  f"{total_elapsed:.1f}s elapsed, "
+                  f"~{remaining_min:.1f}min remaining) "
+                  f"[{os.path.basename(gtc.filepath)}]", file=sys.stderr)
+
+    total_read = time.time() - read_start
+    print(f"  Finished reading all {num_samples} samples in {total_read:.1f}s "
+          f"({total_read / num_samples:.1f}s/sample avg)", file=sys.stderr)
 
     # Create new EGT from template
     new_egt = EGTFile()
@@ -625,7 +691,64 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
     updated_count = 0
     fallback_count = 0
 
+    print(f"  Computing new cluster statistics for {num_probes} probes...", file=sys.stderr)
+    cluster_start = time.time()
+
+    # --- Vectorized cluster statistics computation ---
+    # Precompute per-probe, per-genotype counts, means, and stdevs in bulk
+    # instead of looping probe-by-probe with NumPy calls on tiny arrays.
+
+    # Per-genotype masks: (num_probes, num_samples) bool arrays
+    geno_counts = {}  # geno_code -> (num_probes,) int array
+    geno_theta_mean = {}
+    geno_theta_std = {}
+    geno_r_mean = {}
+    geno_r_std = {}
+
+    for geno_code in (1, 2, 3):
+        mask = all_geno == geno_code  # (num_probes, num_samples)
+        counts = mask.sum(axis=1)     # (num_probes,)
+        geno_counts[geno_code] = counts
+
+        # Compute means and stds using masked operations
+        # Use NaN-based approach: set non-matching to NaN, then nanmean/nanstd
+        theta_masked = np.where(mask, all_theta, np.nan)
+        r_masked = np.where(mask, all_r, np.nan)
+
+        with np.errstate(all="ignore"):
+            geno_theta_mean[geno_code] = np.nanmean(theta_masked, axis=1)
+            geno_theta_std[geno_code] = np.nanstd(theta_masked, axis=1, ddof=0)
+            geno_r_mean[geno_code] = np.nanmean(r_masked, axis=1)
+            geno_r_std[geno_code] = np.nanstd(r_masked, axis=1, ddof=0)
+
+        # Replace NaN results (from all-NaN slices) with 0
+        geno_theta_mean[geno_code] = np.nan_to_num(geno_theta_mean[geno_code], nan=0.0)
+        geno_theta_std[geno_code] = np.nan_to_num(geno_theta_std[geno_code], nan=0.0)
+        geno_r_mean[geno_code] = np.nan_to_num(geno_r_mean[geno_code], nan=0.0)
+        geno_r_std[geno_code] = np.nan_to_num(geno_r_std[geno_code], nan=0.0)
+
+    vectorized_elapsed = time.time() - cluster_start
+    print(f"    Bulk statistics computed in {vectorized_elapsed:.1f}s", file=sys.stderr)
+
+    # Determine which probes have at least one genotype class with enough samples
+    probe_has_update = np.zeros(num_probes, dtype=bool)
+    for geno_code in (1, 2, 3):
+        probe_has_update |= geno_counts[geno_code] >= min_samples_per_cluster
+
+    # --- Build cluster records (still a loop, but now only simple assignments) ---
+    record_start = time.time()
+
     for pidx in range(num_probes):
+        if (pidx + 1) % 500000 == 0 or pidx == num_probes - 1:
+            rec_elapsed = time.time() - record_start
+            if pidx > 0:
+                avg_per_probe = rec_elapsed / (pidx + 1)
+                remaining = avg_per_probe * (num_probes - pidx - 1)
+                print(f"    Building record {pidx + 1}/{num_probes} "
+                      f"({rec_elapsed:.1f}s elapsed, "
+                      f"~{remaining:.1f}s remaining)",
+                      file=sys.stderr)
+
         old_rec = egt.records[pidx]
         new_rec = ClusterRecord()
         new_rec.locus_name = old_rec.locus_name
@@ -638,32 +761,23 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
         new_rec.original_score = old_rec.original_score
         new_rec.edited = True  # Mark as reclustered
 
-        genos = all_geno[pidx, :]
-        thetas = all_theta[pidx, :]
-        rs = all_r[pidx, :]
+        probe_updated = probe_has_update[pidx]
 
-        probe_updated = False
-
-        # Compute new stats for each genotype class
+        # Assign cluster stats for each genotype class
         for geno_code, old_stats, label in [
-            (1, old_rec.aa, "AA"),
-            (2, old_rec.ab, "AB"),
-            (3, old_rec.bb, "BB"),
+            (1, old_rec.aa, "aa"),
+            (2, old_rec.ab, "ab"),
+            (3, old_rec.bb, "bb"),
         ]:
-            mask = genos == geno_code
-            n = int(np.sum(mask))
-
+            n = int(geno_counts[geno_code][pidx])
             if n >= min_samples_per_cluster:
-                t_vals = thetas[mask]
-                r_vals = rs[mask]
                 new_stats = ClusterStats(
-                    theta_mean=float(np.mean(t_vals)),
-                    theta_dev=float(np.std(t_vals, ddof=0)),
-                    r_mean=float(np.mean(r_vals)),
-                    r_dev=float(np.std(r_vals, ddof=0)),
+                    theta_mean=float(geno_theta_mean[geno_code][pidx]),
+                    theta_dev=float(geno_theta_std[geno_code][pidx]),
+                    r_mean=float(geno_r_mean[geno_code][pidx]),
+                    r_dev=float(geno_r_std[geno_code][pidx]),
                     N=n,
                 )
-                probe_updated = True
             else:
                 # Fall back to original cluster stats
                 new_stats = ClusterStats(
@@ -674,12 +788,7 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
                     N=old_stats.N,
                 )
 
-            if label == "AA":
-                new_rec.aa = new_stats
-            elif label == "AB":
-                new_rec.ab = new_stats
-            else:
-                new_rec.bb = new_stats
+            setattr(new_rec, label, new_stats)
 
         # Recompute cluster separation score
         if probe_updated:
@@ -697,6 +806,8 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
 
     print(f"  Probes updated: {updated_count}", file=sys.stderr)
     print(f"  Probes using original clusters (insufficient data): {fallback_count}", file=sys.stderr)
+    cluster_total = time.time() - cluster_start
+    print(f"  Cluster computation completed in {cluster_total:.1f}s", file=sys.stderr)
 
     return new_egt
 

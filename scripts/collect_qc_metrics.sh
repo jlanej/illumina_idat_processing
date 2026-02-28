@@ -15,74 +15,69 @@ collect_qc_metrics() {
 
     echo "Extracting per-sample QC metrics..."
 
-    # Extract computed gender and call rate from GTC metadata if available
-    local gender_file call_rate_file
+    local gender_file call_rate_file lrr_sd_file samples_file
     gender_file=$(mktemp)
     call_rate_file=$(mktemp)
     lrr_sd_file=$(mktemp)
-    trap 'rm -f "${gender_file}" "${call_rate_file}" "${lrr_sd_file}"' RETURN
+    samples_file=$(mktemp)
+    trap 'rm -f "${gender_file}" "${call_rate_file}" "${lrr_sd_file}" "${samples_file}"' RETURN
 
     # Get sample names from VCF
-    local samples_file
-    samples_file=$(mktemp)
     bcftools query -l "${vcf_file}" > "${samples_file}"
+    local n_samples_vcf
+    n_samples_vcf=$(wc -l < "${samples_file}" | tr -d ' ')
 
     # -----------------------------------------------------------------
-    # Diagnostic: Variant counts at each filtering stage
+    # Diagnostic: Variant counts (use index when possible)
     # -----------------------------------------------------------------
     echo "  [diag] === VCF variant diagnostics ==="
-    local n_total_vars n_intensity_only n_genotypeable n_missing_ref
-    n_total_vars=$(bcftools view -H "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
+    local n_total_vars n_intensity_only n_genotypeable
+    # Use bcftools index -n for instant count from CSI index
+    n_total_vars=$(bcftools index -n "${vcf_file}" 2>/dev/null || \
+        bcftools view -H "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
     n_intensity_only=$(bcftools view -i 'INFO/INTENSITY_ONLY=1' -H "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
     n_genotypeable=$(( n_total_vars - n_intensity_only ))
     echo "  [diag] Total variants in VCF:          ${n_total_vars}"
     echo "  [diag] Intensity-only probes:           ${n_intensity_only}"
     echo "  [diag] Genotypeable variants:            ${n_genotypeable}"
-
-    # Count variants with all-missing genotypes (indicator of norm -c x damage)
-    n_all_missing=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' "${vcf_file}" 2>/dev/null | \
-        bcftools view -e 'COUNT(GT!="mis")>0' -H 2>/dev/null | wc -l | tr -d ' ') || n_all_missing="N/A"
-    echo "  [diag] Variants with ALL samples missing: ${n_all_missing}"
-
-    # Check for first sample: how many genotypes are called vs missing
-    local first_sample
-    first_sample=$(head -1 "${samples_file}")
-    if [[ -n "${first_sample}" ]]; then
-        local n_called_first n_missing_first
-        n_called_first=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -s "${first_sample}" "${vcf_file}" 2>/dev/null | \
-            bcftools query -f '[%GT]\n' 2>/dev/null | grep -cv '^\./\.\|^\.\|^\./\.' || true)
-        n_missing_first=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -s "${first_sample}" "${vcf_file}" 2>/dev/null | \
-            bcftools query -f '[%GT]\n' 2>/dev/null | grep -c '^\./\.\|^\.\|^\./\.' || true)
-        echo "  [diag] Sample '${first_sample}' genotype breakdown:"
-        echo "  [diag]   Called:  ${n_called_first}"
-        echo "  [diag]   Missing: ${n_missing_first}"
-        if [[ "${n_genotypeable}" -gt 0 ]]; then
-            local pct_called
-            pct_called=$(awk -v c="${n_called_first}" -v t="${n_genotypeable}" 'BEGIN { printf "%.4f", (t>0) ? c/t : 0 }')
-            echo "  [diag]   Call rate: ${pct_called}"
-        fi
-    fi
+    echo "  [diag] Samples in VCF:                   ${n_samples_vcf}"
     echo "  [diag] ==================================="
 
-    # Compute call rate per sample: fraction of non-missing genotypes
-    # Exclude intensity-only probes (no genotype, only BAF/LRR) from the
-    # denominator so call rate reflects genotypeable loci only.
-    echo "  Computing call rate per sample..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' "${vcf_file}" | \
-    bcftools query -f '[%SAMPLE\t%GT\n]' | \
-        awk -F'\t' '{
-            total[$1]++
-            if ($2 != "./." && $2 != "." && $2 != ".|.") called[$1]++
-        } END {
-            for (s in total) {
-                cr = (total[s] > 0) ? called[s] / total[s] : 0
-                print s "\t" cr
+    # -----------------------------------------------------------------
+    # Compute call rate per sample using matrix output (single BCF pass).
+    #
+    # Instead of emitting one line per sample per variant (O(S×V) lines),
+    # output one tab-delimited row per variant with all samples' GT values.
+    # awk processes each row and accumulates per-column (per-sample) counts.
+    # For 5000 samples × 2.5M variants this reduces pipe volume ~5000×.
+    # -----------------------------------------------------------------
+    echo "  Computing call rate per sample (${n_samples_vcf} samples, ${n_genotypeable} variants)..."
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' "${vcf_file}" 2>/dev/null | \
+    bcftools query -f '[\t%GT]\n' 2>/dev/null | \
+        awk -F'\t' '
+        {
+            for (i = 2; i <= NF; i++) {
+                total[i]++
+                if ($i != "./." && $i != "." && $i != ".|.") called[i]++
             }
-        }' | sort -k1,1 > "${call_rate_file}" 2>/dev/null || true
+        }
+        END {
+            for (i = 2; i <= NF; i++) {
+                idx = i - 2
+                cr = (total[i] > 0) ? called[i] / total[i] : 0
+                print idx "\t" cr
+            }
+        }' > "${call_rate_file}.idx" 2>/dev/null || true
 
-    # Diagnostic: log call rate file stats
+    # Map column indices back to sample names
+    awk 'NR==FNR { names[NR-1] = $0; next }
+         { print names[$1+0] "\t" $2 }' \
+        "${samples_file}" "${call_rate_file}.idx" | \
+        sort -k1,1 > "${call_rate_file}"
+    rm -f "${call_rate_file}.idx"
+
     if [[ -s "${call_rate_file}" ]]; then
-        n_cr=$(wc -l < "${call_rate_file}")
+        n_cr=$(wc -l < "${call_rate_file}" | tr -d ' ')
         echo "  [diag] Call rate file: ${n_cr} samples"
         echo "  [diag] Call rate first 3 lines:"
         head -3 "${call_rate_file}" | sed 's/^/    [diag]   /'
@@ -90,38 +85,53 @@ collect_qc_metrics() {
         echo "  [diag] WARNING: Call rate file is empty"
     fi
 
+    # -----------------------------------------------------------------
     # Compute LRR standard deviation per sample (autosomes only).
-    # Restrict to autosomal chromosomes to avoid inflation from sex chromosome
-    # hemizygosity (males) and MT copy number variation, following MoChA practice.
-    # Also exclude intensity-only probes (no genotype, only BAF/LRR).
-    # Filter out non-numeric values (nan, -nan, inf, -inf) that gtc2vcf
-    # outputs for probes with zero intensities or failed normalization.
-    # Note: Both chr-prefixed (chrX,chrY,chrM) and non-prefixed (X,Y,MT)
-    # names are excluded to support different reference genome conventions.
+    #
+    # Same matrix approach: one row per variant, all samples' LRR values
+    # tab-delimited. awk accumulates running sum and sum-of-squares per
+    # column for online variance computation.
+    #
+    # Excludes sex chromosomes and MT to avoid inflation from hemizygosity.
+    # Filters non-numeric LRR values (nan, inf) that gtc2vcf can produce.
+    # -----------------------------------------------------------------
     echo "  Computing LRR standard deviation per sample..."
     bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT "${vcf_file}" 2>/dev/null | \
-    bcftools query -f '[%SAMPLE\t%LRR\n]' 2>/dev/null | \
-        awk -F'\t' '$2 != "." && $2 != "" && $2 ~ /^-?[0-9]/ {
-            n[$1]++
-            sum[$1] += $2
-            sum2[$1] += $2 * $2
-        } END {
-            for (s in n) {
-                if (n[s] > 1) {
-                    mean = sum[s] / n[s]
-                    var = (sum2[s] / n[s]) - (mean * mean)
-                    if (var < 0) var = 0
-                    sd = sqrt(var)
-                    print s "\t" sd
-                } else {
-                    print s "\tNA"
+    bcftools query -f '[\t%LRR]\n' 2>/dev/null | \
+        awk -F'\t' '
+        {
+            for (i = 2; i <= NF; i++) {
+                v = $i
+                if (v != "." && v != "" && v ~ /^-?[0-9]/) {
+                    n[i]++
+                    sum[i] += v
+                    sum2[i] += v * v
                 }
             }
-        }' | sort -k1,1 > "${lrr_sd_file}" 2>/dev/null || true
+        }
+        END {
+            for (i = 2; i <= NF; i++) {
+                idx = i - 2
+                if (n[i] > 1) {
+                    mean = sum[i] / n[i]
+                    var = (sum2[i] / n[i]) - (mean * mean)
+                    if (var < 0) var = 0
+                    print idx "\t" sqrt(var)
+                } else {
+                    print idx "\tNA"
+                }
+            }
+        }' > "${lrr_sd_file}.idx" 2>/dev/null || true
 
-    # Diagnostic: log LRR SD file stats
+    # Map column indices back to sample names
+    awk 'NR==FNR { names[NR-1] = $0; next }
+         { print names[$1+0] "\t" $2 }' \
+        "${samples_file}" "${lrr_sd_file}.idx" | \
+        sort -k1,1 > "${lrr_sd_file}"
+    rm -f "${lrr_sd_file}.idx"
+
     if [[ -s "${lrr_sd_file}" ]]; then
-        n_sd=$(wc -l < "${lrr_sd_file}")
+        n_sd=$(wc -l < "${lrr_sd_file}" | tr -d ' ')
         echo "  [diag] LRR SD file: ${n_sd} samples"
         echo "  [diag] LRR SD first 3 lines:"
         head -3 "${lrr_sd_file}" | sed 's/^/    [diag]   /'

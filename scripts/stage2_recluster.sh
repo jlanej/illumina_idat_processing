@@ -30,6 +30,7 @@ MIN_CALL_RATE=0.97
 MAX_LRR_SD=0.35
 THREADS=1
 MIN_CLUSTER_SAMPLES=5
+BATCH_SIZE=256
 
 usage() {
     cat <<EOF
@@ -52,6 +53,7 @@ Options:
   --max-lrr-sd FLOAT          Maximum LRR SD for HQ samples (default: ${MAX_LRR_SD})
   --min-cluster-samples INT   Minimum samples per genotype to recompute cluster (default: ${MIN_CLUSTER_SAMPLES})
   --threads INT               Number of threads (default: ${THREADS})
+  --batch-size INT            Batch size for IDAT to GTC conversion (default: ${BATCH_SIZE})
   --force                     Force re-run of all steps, ignoring checkpoints
   --help                      Show this help message
 EOF
@@ -80,6 +82,7 @@ while [[ $# -gt 0 ]]; do
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
         --min-cluster-samples) MIN_CLUSTER_SAMPLES="$2"; shift 2 ;;
         --threads)        THREADS="$2"; shift 2 ;;
+        --batch-size)     BATCH_SIZE="$2"; shift 2 ;;
         --force)          FORCE="true"; shift ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
@@ -243,25 +246,42 @@ else
 
     # Build interleaved green/red IDAT pairs.
     # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
-    ALL_IDAT_PAIRS=()
+    ALL_GREEN=()
+    ALL_RED=()
     while IFS= read -r -d '' grn; do
         red="${grn/_Grn.idat/_Red.idat}"
         if [[ -f "${red}" ]]; then
-            ALL_IDAT_PAIRS+=("${grn}")
-            ALL_IDAT_PAIRS+=("${red}")
+            ALL_GREEN+=("${grn}")
+            ALL_RED+=("${red}")
         else
             echo "Warning: Red IDAT not found for $(basename "${grn}"), skipping" >&2
         fi
     done < <(find "${IDAT_DIR}" \( -name "*_Grn.idat" -o -name "*_Grn.idat.gz" \) -print0 | sort -z)
 
-    n_pairs=$(( ${#ALL_IDAT_PAIRS[@]} / 2 ))
+    n_pairs=${#ALL_GREEN[@]}
     echo "  Re-calling genotypes for ${n_pairs} samples with reclustered EGT..."
+    echo "  Processing in batches of ${BATCH_SIZE}..."
 
-    bcftools +idat2gtc \
-        --bpm "${BPM}" \
-        --egt "${RECLUSTERED_EGT}" \
-        --output "${GTC_DIR}" \
-        "${ALL_IDAT_PAIRS[@]}" 2>&1 | tail -3
+    for (( i=0; i<n_pairs; i+=BATCH_SIZE )); do
+        batch_end=$(( i + BATCH_SIZE ))
+        if (( batch_end > n_pairs )); then
+            batch_end=${n_pairs}
+        fi
+        batch_num=$(( i / BATCH_SIZE + 1 ))
+        echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
+
+        IDAT_ARGS=()
+        for (( j=i; j<batch_end; j++ )); do
+            IDAT_ARGS+=("${ALL_GREEN[j]}")
+            IDAT_ARGS+=("${ALL_RED[j]}")
+        done
+
+        bcftools +idat2gtc \
+            --bpm "${BPM}" \
+            --egt "${RECLUSTERED_EGT}" \
+            --output "${GTC_DIR}" \
+            "${IDAT_ARGS[@]}" 2>&1 | tail -1
+    done
 
     echo "  GTC re-calling complete."
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
@@ -301,7 +321,8 @@ else
         -o "${PRE_NORM_BCF}" --write-index
 
     # Diagnostic: count variants before normalization
-    N_PRE_NORM=$(bcftools view -H "${PRE_NORM_BCF}" | wc -l)
+    N_PRE_NORM=$(bcftools index -n "${PRE_NORM_BCF}" 2>/dev/null || \
+        bcftools view -H "${PRE_NORM_BCF}" | wc -l)
     echo "  Variants before normalization: ${N_PRE_NORM}"
 
     # Normalize with -c ws (warn and swap REF/ALT to match reference).
@@ -317,7 +338,8 @@ else
     mv "${VCF_OUTPUT}.tmp.csi" "${VCF_OUTPUT}.csi" 2>/dev/null || true
 
     # Diagnostic: count variants after normalization and REF swaps
-    N_POST_NORM=$(bcftools view -H "${VCF_OUTPUT}" | wc -l)
+    N_POST_NORM=$(bcftools index -n "${VCF_OUTPUT}" 2>/dev/null || \
+        bcftools view -H "${VCF_OUTPUT}" | wc -l)
     N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
     echo "  Variants after normalization:  ${N_POST_NORM}"
     echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"

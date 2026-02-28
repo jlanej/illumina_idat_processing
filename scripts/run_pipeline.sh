@@ -253,7 +253,8 @@ if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
         bash "${SCRIPT_DIR}/realign_manifest.sh" \
             --csv "${CSV}" \
             --ref-fasta "${REF_FASTA}" \
-            --output-dir "${REALIGN_DIR}"
+            --output-dir "${REALIGN_DIR}" \
+            --threads "${THREADS}"
 
         # Use the realigned CSV for all downstream steps
         REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)

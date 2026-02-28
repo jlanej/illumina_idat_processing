@@ -258,7 +258,8 @@ else
         -o "${PRE_NORM_BCF}" --write-index
 
     # Diagnostic: count variants before normalization
-    N_PRE_NORM=$(bcftools view -H "${PRE_NORM_BCF}" | wc -l)
+    N_PRE_NORM=$(bcftools index -n "${PRE_NORM_BCF}" 2>/dev/null || \
+        bcftools view -H "${PRE_NORM_BCF}" | wc -l)
     echo "  Variants before normalization: ${N_PRE_NORM}"
 
     # Normalize with -c ws (warn and swap REF/ALT to match reference).
@@ -279,7 +280,8 @@ else
     mv "${VCF_OUTPUT}.tmp.csi" "${VCF_OUTPUT}.csi" 2>/dev/null || true
 
     # Diagnostic: count variants after normalization and REF swaps
-    N_POST_NORM=$(bcftools view -H "${VCF_OUTPUT}" | wc -l)
+    N_POST_NORM=$(bcftools index -n "${VCF_OUTPUT}" 2>/dev/null || \
+        bcftools view -H "${VCF_OUTPUT}" | wc -l)
     N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
     echo "  Variants after normalization:  ${N_POST_NORM}"
     echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"

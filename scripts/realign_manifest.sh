@@ -25,6 +25,7 @@ set -euo pipefail
 CSV=""
 REF_FASTA=""
 OUTPUT_DIR=""
+THREADS=1
 
 usage() {
     cat <<EOF
@@ -38,6 +39,7 @@ Required:
   --output-dir DIR       Directory for realigned manifest and reports
 
 Options:
+  --threads INT          Number of threads for BWA alignment (default: 1)
   --help                 Show this help message
 
 The BWA index (.bwt, .sa, .ann, .amb, .pac) must exist alongside the
@@ -55,6 +57,7 @@ while [[ $# -gt 0 ]]; do
         --csv)        CSV="$2"; shift 2 ;;
         --ref-fasta)  REF_FASTA="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        --threads)    THREADS="$2"; shift 2 ;;
         --help)       usage ;;
         *)            echo "Error: Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -149,7 +152,7 @@ echo ""
 # ---------------------------------------------------------------
 echo "--- Step 2/4: Aligning flank sequences to reference ---"
 
-bwa mem -M "${REF_FASTA}" "${FLANK_FASTA}" > "${FLANK_SAM}" 2>"${OUTPUT_DIR}/bwa_mem.log"
+bwa mem -M -t "${THREADS}" "${REF_FASTA}" "${FLANK_FASTA}" > "${FLANK_SAM}" 2>"${OUTPUT_DIR}/bwa_mem.log"
 
 echo "  Alignment complete"
 SAM_LINES=$(grep -cv '^@' "${FLANK_SAM}" 2>/dev/null || true)

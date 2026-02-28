@@ -243,7 +243,8 @@ task gtc_to_vcf {
       -o ~{filebase}.pre_norm.bcf --write-index
 
     # Diagnostic: count variants before normalization
-    N_PRE_NORM=$(bcftools view -H ~{filebase}.pre_norm.bcf | wc -l)
+    N_PRE_NORM=$(bcftools index -n ~{filebase}.pre_norm.bcf 2>/dev/null || \
+        bcftools view -H ~{filebase}.pre_norm.bcf | wc -l)
     echo "Variants before normalization: ${N_PRE_NORM}"
 
     # Normalize with -c ws (warn and swap REF/ALT to match reference).
@@ -254,7 +255,8 @@ task gtc_to_vcf {
       ~{filebase}.pre_norm.bcf \
       -o ~{filebase}.bcf --write-index 2>~{filebase}.norm_warnings.log
 
-    N_POST_NORM=$(bcftools view -H ~{filebase}.bcf | wc -l)
+    N_POST_NORM=$(bcftools index -n ~{filebase}.bcf 2>/dev/null || \
+        bcftools view -H ~{filebase}.bcf | wc -l)
     N_REF_SWAPS=$(grep -c "REF_MISMATCH" ~{filebase}.norm_warnings.log || true)
     echo "Variants after normalization: ${N_POST_NORM}"
     echo "REF/ALT swaps: ${N_REF_SWAPS}"
@@ -299,41 +301,67 @@ task compute_qc_metrics {
   command <<<
     set -euo pipefail
 
-    # Compute call rate and LRR standard deviation per sample
-    echo -e "sample_id\tcall_rate\tlrr_sd" > ~{filebase}.qc.tsv
+    # Compute call rate and LRR standard deviation per sample.
+    # Uses single-pass matrix output (one row per variant, all samples'
+    # values tab-delimited) instead of per-sample BCF scans.
 
     # Get sample list
     bcftools query -l ~{vcf_file} > samples.txt
+    n_samples=$(wc -l < samples.txt)
 
-    # Total genotypeable variants (excluding intensity-only probes)
-    n_total=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -H ~{vcf_file} | wc -l)
+    # Call rate: one row per variant, tab-delimited GT for all samples.
+    # awk accumulates per-column (per-sample) called/total counts.
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' ~{vcf_file} | \
+    bcftools query -f '[\t%GT]\n' | \
+    awk -F'\t' '
+    {
+        for (i = 2; i <= NF; i++) {
+            total[i]++
+            if ($i != "./." && $i != "." && $i != ".|.") called[i]++
+        }
+    }
+    END {
+        for (i = 2; i <= NF; i++) {
+            idx = i - 2
+            cr = (total[i] > 0) ? called[i] / total[i] : 0
+            printf "%d\t%.6f\n", idx, cr
+        }
+    }' > call_rates.idx.tsv
 
-    # Per-sample call rate: count non-missing genotypes (excluding intensity-only probes)
-    while read -r sample; do
-      n_called=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -s "${sample}" -H ~{vcf_file} | \
-        bcftools query -f '[%GT]\n' | grep -cv '^\./\.' || true)
-      if [[ "${n_total}" -gt 0 ]]; then
-        call_rate=$(awk "BEGIN {printf \"%.6f\", ${n_called}/${n_total}}")
-      else
-        call_rate="NA"
-      fi
+    # LRR SD on autosomes: same matrix approach, online variance computation.
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT ~{vcf_file} | \
+    bcftools query -f '[\t%LRR]\n' | \
+    awk -F'\t' '
+    {
+        for (i = 2; i <= NF; i++) {
+            v = $i
+            if (v != "." && v != "" && v ~ /^-?[0-9]/) {
+                n[i]++
+                sum[i] += v
+                sum2[i] += v * v
+            }
+        }
+    }
+    END {
+        for (i = 2; i <= NF; i++) {
+            idx = i - 2
+            if (n[i] > 1) {
+                mean = sum[i] / n[i]
+                var = (sum2[i] / n[i]) - (mean * mean)
+                if (var < 0) var = 0
+                printf "%d\t%.6f\n", idx, sqrt(var)
+            } else {
+                printf "%d\tNA\n", idx
+            }
+        }
+    }' > lrr_sd.idx.tsv
 
-      # LRR standard deviation on autosomes only (filter non-numeric values like nan/inf)
-      # Restrict to autosomes to avoid inflation from sex chromosome hemizygosity
-      lrr_sd=$(bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT -s "${sample}" ~{vcf_file} | \
-        bcftools query -f '[%LRR]\n' | \
-        awk '$1 != "." && $1 != "" && $1 ~ /^-?[0-9]/ {
-          n++; sum += $1; sum2 += $1*$1
-        } END {
-          if (n > 1) {
-            mean = sum/n; var = sum2/n - mean*mean
-            if (var < 0) var = 0
-            printf "%.6f", sqrt(var)
-          } else print "NA"
-        }')
-
-      echo -e "${sample}\t${call_rate}\t${lrr_sd}"
-    done < samples.txt >> ~{filebase}.qc.tsv
+    # Merge: map column indices to sample names and combine
+    echo -e "sample_id\tcall_rate\tlrr_sd" > ~{filebase}.qc.tsv
+    paste call_rates.idx.tsv lrr_sd.idx.tsv | \
+    awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
+                { print names[$1+0] "\t" $2 "\t" $4 }' \
+        samples.txt - >> ~{filebase}.qc.tsv
   >>>
 
   output {
