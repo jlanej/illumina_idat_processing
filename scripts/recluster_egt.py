@@ -415,65 +415,27 @@ def _read_bpm_string(f):
         return raw.decode("latin-1")
 
 
-def _read_locus_entry_v4plus(f, entry_version):
-    """Read a single locus entry for entry versions 4–8 (modern format).
-
-    Returns (name, norm_id).
-    """
-    _ilmn_id = _read_bpm_string(f)
-    name = _read_bpm_string(f)
-
-    # 3 strings: SNP, ILMN strand, Customer strand
-    for _ in range(3):
-        _read_bpm_string(f)
-
-    read_int(f)              # address_a
-    _read_bpm_string(f)      # allele_a_probe_seq
-    read_int(f)              # address_b (0 for Infinium II)
-    _read_bpm_string(f)      # allele_b_probe_seq
-
-    _read_bpm_string(f)      # genome_build
-    _read_bpm_string(f)      # chr
-    _read_bpm_string(f)      # map_info
-    _read_bpm_string(f)      # ploidy
-    _read_bpm_string(f)      # species
-    _read_bpm_string(f)      # source
-    _read_bpm_string(f)      # source_version
-    _read_bpm_string(f)      # source_strand
-    _read_bpm_string(f)      # source_seq  (may contain non-UTF8)
-    _read_bpm_string(f)      # top_genomic_seq (may contain non-UTF8)
-    read_int(f)              # bead_set_id
-
-    if entry_version >= 7:
-        read_byte(f)         # exp_clusters
-        read_byte(f)         # intensity_only
-        read_int(f)          # assay_type (int in v7+)
-    elif entry_version == 6:
-        read_byte(f)         # exp_clusters
-        read_byte(f)         # intensity_only
-        read_byte(f)         # assay_type (byte in v6)
-    else:
-        # entry_version 4, 5
-        read_byte(f)         # assay_type
-
-    # Normalization ID is inline per locus entry in v4+
-    norm_id = read_byte(f)
-    return name, norm_id
-
-
 class BPMFile:
     """Minimal BPM reader for normalization ID lookups.
 
-    Supports all known BPM file versions and locus entry versions.
-    Based on the Illumina BeadArrayFiles reference implementation
-    (BeadPoolManifest.py / LocusEntry.py).
+    Reads the Illumina BPM (Bead Pool Manifest) binary format to extract
+    locus names and normalization IDs needed for intensity normalization
+    during reclustering.
 
-    For old BPM formats (entry version < 4) where the locus entry
-    structure differs significantly, a fallback parsing strategy is
-    used. If that also fails, normalization IDs default to 0 for all
-    loci with a warning — this is acceptable for reclustering since
-    using a single normalization channel produces consistent (if
-    slightly less precise) theta/R values across samples.
+    BPM binary format (verified against HumanOmni2.5-4v1-Multi_B.bpm):
+      Header:
+        - magic: 3 bytes ("BPM")
+        - version: 1 byte
+        - version_flag: 4 bytes (int32)
+        - manifest_name: .NET length-prefixed string
+        - controls: .NET length-prefixed string (control probe config)
+        - num_loci: 4 bytes (int32)
+      Locus index array:
+        - indices: num_loci × 4 bytes (int32, 1-based sequential)
+      Locus name strings:
+        - names: num_loci × .NET length-prefixed strings
+      Normalization IDs:
+        - norm_ids: num_loci bytes (one byte per locus)
     """
 
     def __init__(self, filepath):
@@ -485,251 +447,77 @@ class BPMFile:
 
     def _read(self):
         with open(self.filepath, "rb") as f:
+            # --- Header ---
             magic = f.read(3).decode("utf-8")
             if magic != "BPM":
                 raise ValueError(f"Not a BPM file: {self.filepath}")
             _version = read_byte(f)
             _version_int = read_int(f)
             manifest_name = _read_bpm_string(f)
-
-            # The controls string only exists in BPM file version >= 4.
-            # For older versions (1-3), the num_loci int follows directly
-            # after manifest_name. Reading a spurious controls string in
-            # v1 would consume bytes from num_loci, corrupting all
-            # subsequent file offsets.
-            if _version >= 4:
-                _controls = _read_bpm_string(f)
-            else:
-                _controls = ""
-
+            _controls = _read_bpm_string(f)
             self.num_loci = read_int(f)
 
             print(f"  BPM version: {_version}.{_version_int}, manifest: {manifest_name}",
                   file=sys.stderr)
             print(f"  Num loci: {self.num_loci}", file=sys.stderr)
 
-            # Save position before locus entries for fallback
-            locus_block_start = f.tell()
+            if self.num_loci <= 0 or self.num_loci > 10_000_000:
+                raise ValueError(
+                    f"Invalid num_loci={self.num_loci} — BPM header may be "
+                    f"corrupt or in an unrecognized format"
+                )
 
-            self.norm_ids = []
+            # --- Locus index array ---
+            # Array of num_loci int32 values (1-based sequential indices).
+            # These are just sequential IDs (1, 2, 3, ..., num_loci) and
+            # can be skipped. We seek past them: 4 bytes × num_loci.
+            index_block_size = self.num_loci * 4
+            f.seek(index_block_size, 1)  # seek relative to current position
+            print(f"  Skipped {index_block_size} bytes of index array",
+                  file=sys.stderr)
+
+            # --- Locus names ---
+            # num_loci .NET length-prefixed strings (probe/locus names).
             self.names = []
-
-            # Try reading locus entries
             try:
-                self._read_locus_entries(f, _version)
-            except Exception as e:
-                print(f"  WARNING: Failed to parse locus entries: {e}",
-                      file=sys.stderr)
-                print(f"  Attempting fallback BPM parsing strategy...",
-                      file=sys.stderr)
-
-                # Reset and try fallback
-                f.seek(locus_block_start)
-                self.names = []
-                self.norm_ids = []
-
-                try:
-                    self._read_locus_entries_fallback(f)
-                except Exception as e2:
-                    print(f"  WARNING: Fallback parsing also failed: {e2}",
-                          file=sys.stderr)
-                    print(f"  Using default normalization IDs (all zeros).",
-                          file=sys.stderr)
-                    print(f"  Reclustering will use a single normalization channel.",
-                          file=sys.stderr)
-                    print(f"  This is acceptable but may be slightly less precise.",
-                          file=sys.stderr)
-                    self.names = [f"locus_{i}" for i in range(self.num_loci)]
-                    self.norm_ids = [0] * self.num_loci
-
-            print(f"  Loaded {len(self.names)} locus names, "
-                  f"{len(self.norm_ids)} normalization IDs", file=sys.stderr)
-
-    def _read_locus_entries(self, f, bpm_version):
-        """Try to read locus entries based on entry version."""
-        # Peek at first entry version to decide strategy
-        first_entry_pos = f.tell()
-        first_entry_version = read_int(f)
-        f.seek(first_entry_pos)
-
-        print(f"    Locus entry version: {first_entry_version}", file=sys.stderr)
-
-        if first_entry_version >= 4:
-            # Modern format: versions 4-8, normalization IDs inline
-            self._read_modern_entries(f, first_entry_version)
-        else:
-            # Old format: versions 1-3, different field layout
-            self._read_legacy_entries(f, first_entry_version, bpm_version)
-
-    def _read_modern_entries(self, f, expected_version):
-        """Read locus entries for entry versions 4-8 (modern format)."""
-        for idx in range(self.num_loci):
-            entry_version = read_int(f)
-            name, norm_id = _read_locus_entry_v4plus(f, entry_version)
-            self.names.append(name)
-            self.norm_ids.append(norm_id)
-
-            if (idx + 1) % 500000 == 0 or idx == 0:
-                print(f"    Read {idx + 1}/{self.num_loci} locus entries...",
-                      file=sys.stderr)
-
-        print(f"  Read all {self.num_loci} locus entries (modern format)",
-              file=sys.stderr)
-
-    def _read_legacy_entries(self, f, entry_version, bpm_version):
-        """Read locus entries for entry versions 1-3 (legacy format).
-
-        Legacy BPM locus entries have a simpler structure. The exact
-        fields depend on the entry version:
-
-        Version 1:
-            version(int), ilmn_id(str), source_strand(str), snp(str),
-            chrom(str), ploidy(str), species(str), map_info(str),
-            top_genomic_seq(str), customer_strand(str),
-            address_a(int), allele_a_probe_seq(str),
-            address_b(int), allele_b_probe_seq(str),
-            genome_build(str), source(str)
-
-        Version 2 adds: source_version(str), source_seq(str)
-        Version 3 adds: bead_set_id(int), assay_type(byte)
-
-        Normalization IDs are NOT inline — they are in a separate
-        block after all locus entries (for BPM file version >= 4)
-        or not present at all.
-        """
-        for idx in range(self.num_loci):
-            ev = read_int(f)
-
-            ilmn_id = _read_bpm_string(f)
-            # Use IlmnID as the name since there's no separate Name field in v1
-            self.names.append(ilmn_id)
-
-            _read_bpm_string(f)      # source_strand
-            _read_bpm_string(f)      # snp
-            _read_bpm_string(f)      # chrom
-            _read_bpm_string(f)      # ploidy
-            _read_bpm_string(f)      # species
-            _read_bpm_string(f)      # map_info
-            _read_bpm_string(f)      # top_genomic_seq
-            _read_bpm_string(f)      # customer_strand
-            read_int(f)              # address_a
-            _read_bpm_string(f)      # allele_a_probe_seq
-            read_int(f)              # address_b
-            _read_bpm_string(f)      # allele_b_probe_seq
-            _read_bpm_string(f)      # genome_build
-            _read_bpm_string(f)      # source
-
-            if ev >= 2:
-                _read_bpm_string(f)  # source_version
-                _read_bpm_string(f)  # source_seq
-
-            if ev >= 3:
-                read_int(f)          # bead_set_id
-                read_byte(f)         # assay_type
-
-            if (idx + 1) % 500000 == 0 or idx == 0:
-                print(f"    Read {idx + 1}/{self.num_loci} locus entries (legacy v{ev})...",
-                      file=sys.stderr)
-
-        print(f"  Read all {self.num_loci} locus entries (legacy format)",
-              file=sys.stderr)
-
-        # For legacy entries, normalization IDs are in a trailing block
-        # (only for BPM file version >= 4), or default to 0.
-        try:
-            remaining = f.read()
-            if len(remaining) >= self.num_loci:
-                # The normalization IDs are stored as a byte array
-                # at the end of the file after all locus entries
-                self.norm_ids = list(remaining[:self.num_loci])
-                # Validate: norm IDs should be small values (typically 0-100)
-                max_nid = max(self.norm_ids) if self.norm_ids else 0
-                if max_nid > 200:
-                    print(f"  WARNING: Unusually large norm IDs detected "
-                          f"(max={max_nid}). Using defaults.", file=sys.stderr)
-                    self.norm_ids = [0] * self.num_loci
-                else:
-                    print(f"  Read {len(self.norm_ids)} normalization IDs "
-                          f"from trailing block (max={max_nid})", file=sys.stderr)
-            else:
-                print(f"  No trailing normalization ID block found "
-                      f"({len(remaining)} bytes remaining, need {self.num_loci}). "
-                      f"Using default IDs.", file=sys.stderr)
-                self.norm_ids = [0] * self.num_loci
-        except Exception as e:
-            print(f"  WARNING: Could not read normalization IDs: {e}. "
-                  f"Using defaults.", file=sys.stderr)
-            self.norm_ids = [0] * self.num_loci
-
-    def _read_locus_entries_fallback(self, f):
-        """Last-resort fallback: skip locus entries entirely.
-
-        Scans through the file looking for patterns that indicate
-        the end of the locus entry block. Extracts just the locus
-        names from the data we can identify, and defaults norm IDs.
-        """
-        # Strategy: try each entry version format, reading one entry
-        # at a time. If we get through all num_loci, we succeeded.
-        # Start by trying to detect the entry version from the first int.
-        first_pos = f.tell()
-        test_version = read_int(f)
-        f.seek(first_pos)
-
-        # Try all known legacy versions
-        for try_version in [test_version, 1, 2, 3]:
-            f.seek(first_pos)
-            try:
-                self.names = []
                 for idx in range(self.num_loci):
-                    ev = read_int(f)
-                    ilmn_id = _read_bpm_string(f)
-                    self.names.append(ilmn_id)
+                    name = _read_bpm_string(f)
+                    self.names.append(name)
 
-                    _read_bpm_string(f)  # source_strand
-                    _read_bpm_string(f)  # snp
-                    _read_bpm_string(f)  # chrom
-                    _read_bpm_string(f)  # ploidy
-                    _read_bpm_string(f)  # species
-                    _read_bpm_string(f)  # map_info
-                    _read_bpm_string(f)  # top_genomic_seq
-                    _read_bpm_string(f)  # customer_strand
-                    read_int(f)          # address_a
-                    _read_bpm_string(f)  # allele_a_probe_seq
-                    read_int(f)          # address_b
-                    _read_bpm_string(f)  # allele_b_probe_seq
-                    _read_bpm_string(f)  # genome_build
-                    _read_bpm_string(f)  # source
+                    if (idx + 1) % 500000 == 0 or idx == 0:
+                        print(f"    Read {idx + 1}/{self.num_loci} locus names...",
+                              file=sys.stderr)
 
-                    if ev >= 2:
-                        _read_bpm_string(f)
-                        _read_bpm_string(f)
+                print(f"  Read all {self.num_loci} locus names", file=sys.stderr)
+                if self.names:
+                    print(f"    First: {self.names[0]}, Last: {self.names[-1]}",
+                          file=sys.stderr)
+            except Exception as e:
+                print(f"  WARNING: Failed reading locus names at entry "
+                      f"{len(self.names)}: {e}", file=sys.stderr)
+                # Fill remaining names with placeholders
+                while len(self.names) < self.num_loci:
+                    self.names.append(f"locus_{len(self.names)}")
 
-                    if ev >= 3:
-                        read_int(f)
-                        read_byte(f)
-
-                # If we got here, parsing succeeded
-                print(f"  Fallback: successfully parsed {len(self.names)} "
-                      f"entries with legacy format", file=sys.stderr)
-
-                # Try reading trailing norm IDs
-                remaining = f.read()
-                if len(remaining) >= self.num_loci:
-                    self.norm_ids = list(remaining[:self.num_loci])
+            # --- Normalization IDs ---
+            # Stored as a contiguous array of num_loci bytes immediately
+            # after the locus names block.
+            try:
+                norm_bytes = f.read(self.num_loci)
+                if len(norm_bytes) == self.num_loci:
+                    self.norm_ids = list(norm_bytes)
                     max_nid = max(self.norm_ids) if self.norm_ids else 0
-                    if max_nid <= 200:
-                        print(f"  Read {len(self.norm_ids)} normalization IDs "
-                              f"(max={max_nid})", file=sys.stderr)
-                        return
+                    print(f"  Read {len(self.norm_ids)} normalization IDs "
+                          f"(range: 0-{max_nid})", file=sys.stderr)
+                else:
+                    print(f"  WARNING: Expected {self.num_loci} norm ID bytes, "
+                          f"got {len(norm_bytes)}. Using defaults.",
+                          file=sys.stderr)
+                    self.norm_ids = [0] * self.num_loci
+            except Exception as e:
+                print(f"  WARNING: Could not read normalization IDs: {e}. "
+                      f"Using defaults.", file=sys.stderr)
                 self.norm_ids = [0] * self.num_loci
-                return
-
-            except Exception:
-                continue
-
-        # All attempts failed
-        raise ValueError(f"Could not parse BPM locus entries "
-                         f"(tried versions {test_version}, 1, 2, 3)")
 
 
 def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
