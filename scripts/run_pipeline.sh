@@ -249,12 +249,19 @@ if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
         echo "  Realigning Manifest Probes Against Reference"
         echo "======================================================"
         echo ""
+        echo "This step validates probe coordinates by aligning flank sequences"
+        echo "against the reference genome. For large arrays (>1M probes) this"
+        echo "may take 15-45 minutes."
+        echo ""
 
+        REALIGN_START=${SECONDS}
         bash "${SCRIPT_DIR}/realign_manifest.sh" \
             --csv "${CSV}" \
             --ref-fasta "${REF_FASTA}" \
             --output-dir "${REALIGN_DIR}" \
             --threads "${THREADS}"
+        REALIGN_ELAPSED=$(( SECONDS - REALIGN_START ))
+        echo "Manifest realignment completed in $(( REALIGN_ELAPSED / 60 ))m $(( REALIGN_ELAPSED % 60 ))s"
 
         # Use the realigned CSV for all downstream steps
         REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)

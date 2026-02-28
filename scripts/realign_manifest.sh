@@ -109,6 +109,8 @@ REALIGNED_CSV="${OUTPUT_DIR}/${CSV_BASENAME}.realigned.csv"
 SUMMARY_FILE="${OUTPUT_DIR}/realign_summary.txt"
 FLANK_FASTA="${OUTPUT_DIR}/flanks.fasta"
 FLANK_SAM="${OUTPUT_DIR}/flanks.sam"
+FLANK_LOG="${OUTPUT_DIR}/fasta_flank.log"
+BWA_LOG="${OUTPUT_DIR}/bwa_mem.log"
 
 echo "============================================"
 echo "  Manifest Probe Realignment"
@@ -127,7 +129,12 @@ echo "--- Step 1/4: Extracting flank sequences from CSV manifest ---"
 bcftools +gtc2vcf \
     --csv "${CSV}" \
     --fasta-flank \
-    -o "${FLANK_FASTA}" 2>&1 | head -20
+    -o "${FLANK_FASTA}" 2>"${FLANK_LOG}" || true
+
+# Show first few lines of plugin output for diagnostics
+if [[ -f "${FLANK_LOG}" ]]; then
+    head -20 "${FLANK_LOG}" | sed 's/^/  /'
+fi
 
 # Count sequence headers: FASTA uses '>' prefix, gtc2vcf --fasta-flank uses '@' prefix
 N_FLANKS=$(grep -c '^[>@]' "${FLANK_FASTA}" 2>/dev/null || true)
@@ -151,15 +158,22 @@ echo ""
 # Step 2: Align flank sequences to reference genome
 # ---------------------------------------------------------------
 echo "--- Step 2/4: Aligning flank sequences to reference ---"
+echo "  This step aligns ${N_FLANKS} probe flanks against the reference genome."
+echo "  With ${THREADS} threads, this may take 10-30+ minutes for large arrays."
+echo "  Running: bwa mem -M -t ${THREADS} ..."
 
-bwa mem -M -t "${THREADS}" "${REF_FASTA}" "${FLANK_FASTA}" > "${FLANK_SAM}" 2>"${OUTPUT_DIR}/bwa_mem.log"
+BWA_START=${SECONDS}
+bwa mem -M -t "${THREADS}" "${REF_FASTA}" "${FLANK_FASTA}" > "${FLANK_SAM}" 2>"${BWA_LOG}"
+BWA_ELAPSED=$(( SECONDS - BWA_START ))
+BWA_MINS=$(( BWA_ELAPSED / 60 ))
+BWA_SECS=$(( BWA_ELAPSED % 60 ))
 
-echo "  Alignment complete"
+echo "  Alignment complete (${BWA_MINS}m ${BWA_SECS}s)"
 SAM_LINES=$(grep -cv '^@' "${FLANK_SAM}" 2>/dev/null || true)
 SAM_LINES="${SAM_LINES:-0}"
 echo "  SAM alignment records: ${SAM_LINES}"
 echo "  BWA log tail:"
-tail -3 "${OUTPUT_DIR}/bwa_mem.log" | sed 's/^/    /'
+tail -3 "${BWA_LOG}" | sed 's/^/    /'
 echo ""
 
 # ---------------------------------------------------------------
@@ -393,4 +407,4 @@ echo "  Full summary: ${SUMMARY_FILE}"
 echo ""
 
 # Clean up intermediate files
-rm -f "${FLANK_FASTA}" "${FLANK_SAM}" "${OUTPUT_DIR}/bwa_mem.log"
+rm -f "${FLANK_FASTA}" "${FLANK_SAM}" "${BWA_LOG}" "${FLANK_LOG}"
