@@ -112,6 +112,18 @@ FLANK_SAM="${OUTPUT_DIR}/flanks.sam"
 FLANK_LOG="${OUTPUT_DIR}/fasta_flank.log"
 BWA_LOG="${OUTPUT_DIR}/bwa_mem.log"
 
+# Idempotency: skip if realigned CSV already exists and is non-empty
+if [[ -f "${REALIGNED_CSV}" && -s "${REALIGNED_CSV}" && -f "${SUMMARY_FILE}" ]]; then
+    echo "============================================"
+    echo "  Manifest Probe Realignment (cached)"
+    echo "============================================"
+    echo "  Realigned CSV already exists: ${REALIGNED_CSV}"
+    echo "  Summary: ${SUMMARY_FILE}"
+    echo "  Skipping realignment. Delete these files to force re-run."
+    echo ""
+    exit 0
+fi
+
 echo "============================================"
 echo "  Manifest Probe Realignment"
 echo "============================================"

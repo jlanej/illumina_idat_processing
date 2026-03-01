@@ -166,13 +166,22 @@ if step_done "stage1_idat2gtc"; then
 else
     STEP_START=${SECONDS}
 
-    # Collect all green and red IDAT files
+    # Collect all green and red IDAT files, skipping samples with existing GTC
     GREEN_IDATS=()
     RED_IDATS=()
+    n_skipped=0
     while IFS=$'\t' read -r sample_id grn red; do
         [[ "${sample_id}" == "sample_id" ]] && continue
         grn_path="${IDAT_DIR}/${grn}"
         red_path="${IDAT_DIR}/${red}"
+
+        # Check if GTC output already exists for this sample
+        gtc_file="${GTC_DIR}/${sample_id}.gtc"
+        if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+            (( n_skipped++ )) || true
+            continue
+        fi
+
         if [[ -f "${grn_path}" ]] && [[ -f "${red_path}" ]]; then
             GREEN_IDATS+=("${grn_path}")
             RED_IDATS+=("${red_path}")
@@ -185,30 +194,38 @@ else
     done < "${SAMPLE_SHEET}"
 
     n_total=${#GREEN_IDATS[@]}
-    echo "Processing ${n_total} samples in batches of ${BATCH_SIZE}..."
+    if [[ "${n_skipped}" -gt 0 ]]; then
+        echo "  Skipping ${n_skipped} samples with existing GTC files."
+    fi
 
-    for (( i=0; i<n_total; i+=BATCH_SIZE )); do
-        batch_end=$(( i + BATCH_SIZE ))
-        if (( batch_end > n_total )); then
-            batch_end=${n_total}
-        fi
-        batch_num=$(( i / BATCH_SIZE + 1 ))
-        echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
+    if [[ "${n_total}" -eq 0 ]]; then
+        echo "  All samples already have GTC files. Nothing to convert."
+    else
+        echo "Processing ${n_total} samples in batches of ${BATCH_SIZE}..."
 
-        # Build interleaved green/red file arguments for this batch.
-        # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
-        IDAT_ARGS=()
-        for (( j=i; j<batch_end; j++ )); do
-            IDAT_ARGS+=("${GREEN_IDATS[j]}")
-            IDAT_ARGS+=("${RED_IDATS[j]}")
+        for (( i=0; i<n_total; i+=BATCH_SIZE )); do
+            batch_end=$(( i + BATCH_SIZE ))
+            if (( batch_end > n_total )); then
+                batch_end=${n_total}
+            fi
+            batch_num=$(( i / BATCH_SIZE + 1 ))
+            echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
+
+            # Build interleaved green/red file arguments for this batch.
+            # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
+            IDAT_ARGS=()
+            for (( j=i; j<batch_end; j++ )); do
+                IDAT_ARGS+=("${GREEN_IDATS[j]}")
+                IDAT_ARGS+=("${RED_IDATS[j]}")
+            done
+
+            bcftools +idat2gtc \
+                --bpm "${BPM}" \
+                --egt "${EGT}" \
+                --output "${GTC_DIR}" \
+                "${IDAT_ARGS[@]}" 2>&1 | tail -1
         done
-
-        bcftools +idat2gtc \
-            --bpm "${BPM}" \
-            --egt "${EGT}" \
-            --output "${GTC_DIR}" \
-            "${IDAT_ARGS[@]}" 2>&1 | tail -1
-    done
+    fi
 
     echo "GTC conversion complete. Files in: ${GTC_DIR}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
@@ -230,6 +247,9 @@ if step_done "stage1_gtc2vcf" && [[ -f "${VCF_OUTPUT}" ]]; then
     echo "  VCF: ${VCF_OUTPUT}"
 else
     STEP_START=${SECONDS}
+
+    # Clean up any leftover temp files from a previous interrupted run
+    rm -f "${VCF_OUTPUT}.tmp" "${VCF_OUTPUT}.tmp.csi"
 
     # Debug: show manifest and GTC file details for troubleshooting
     echo "  BPM file: ${BPM} ($(wc -c < "${BPM}") bytes)"

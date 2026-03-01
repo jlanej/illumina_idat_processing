@@ -63,7 +63,13 @@ echo "=== Downloading reference resources for ${GENOME} ==="
 echo "Output directory: ${OUTPUT_DIR}"
 
 # Reference FASTA
-if [[ ! -f "${OUTPUT_DIR}/${FASTA_NAME}" ]]; then
+if [[ -f "${OUTPUT_DIR}/${FASTA_NAME}" && -f "${OUTPUT_DIR}/${FASTA_NAME}.fai" ]]; then
+    echo "Reference genome already exists: ${OUTPUT_DIR}/${FASTA_NAME}"
+elif [[ -f "${OUTPUT_DIR}/${FASTA_NAME}" && ! -f "${OUTPUT_DIR}/${FASTA_NAME}.fai" ]]; then
+    echo "Reference genome found but not indexed (possibly incomplete). Re-indexing..."
+    samtools faidx "${OUTPUT_DIR}/${FASTA_NAME}"
+    echo "  Indexing complete."
+else
     echo "Downloading reference genome (this may take several minutes)..."
     DL_START=${SECONDS}
     (
@@ -88,8 +94,6 @@ if [[ ! -f "${OUTPUT_DIR}/${FASTA_NAME}" ]]; then
     samtools faidx "${OUTPUT_DIR}/${FASTA_NAME}"
     IDX_ELAPSED=$(( SECONDS - IDX_START ))
     echo "  Indexing complete in ${IDX_ELAPSED}s"
-else
-    echo "Reference genome already exists: ${OUTPUT_DIR}/${FASTA_NAME}"
 fi
 
 # BWA index (needed for manifest realignment)

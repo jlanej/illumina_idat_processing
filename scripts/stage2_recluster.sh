@@ -244,13 +244,21 @@ if step_done "stage2_idat2gtc"; then
 else
     STEP_START=${SECONDS}
 
-    # Build interleaved green/red IDAT pairs.
+    # Build interleaved green/red IDAT pairs, skipping samples with existing GTC.
     # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
     ALL_GREEN=()
     ALL_RED=()
+    n_skipped=0
     while IFS= read -r -d '' grn; do
         red="${grn/_Grn.idat/_Red.idat}"
         if [[ -f "${red}" ]]; then
+            # Check if GTC output already exists for this sample
+            sample_id=$(basename "${grn}" | sed 's/_Grn\.idat\(\.gz\)\?$//')
+            gtc_file="${GTC_DIR}/${sample_id}.gtc"
+            if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+                (( n_skipped++ )) || true
+                continue
+            fi
             ALL_GREEN+=("${grn}")
             ALL_RED+=("${red}")
         else
@@ -259,29 +267,37 @@ else
     done < <(find "${IDAT_DIR}" \( -name "*_Grn.idat" -o -name "*_Grn.idat.gz" \) -print0 | sort -z)
 
     n_pairs=${#ALL_GREEN[@]}
-    echo "  Re-calling genotypes for ${n_pairs} samples with reclustered EGT..."
-    echo "  Processing in batches of ${BATCH_SIZE}..."
+    if [[ "${n_skipped}" -gt 0 ]]; then
+        echo "  Skipping ${n_skipped} samples with existing GTC files."
+    fi
 
-    for (( i=0; i<n_pairs; i+=BATCH_SIZE )); do
-        batch_end=$(( i + BATCH_SIZE ))
-        if (( batch_end > n_pairs )); then
-            batch_end=${n_pairs}
-        fi
-        batch_num=$(( i / BATCH_SIZE + 1 ))
-        echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
+    if [[ "${n_pairs}" -eq 0 ]]; then
+        echo "  All samples already have GTC files. Nothing to convert."
+    else
+        echo "  Re-calling genotypes for ${n_pairs} samples with reclustered EGT..."
+        echo "  Processing in batches of ${BATCH_SIZE}..."
 
-        IDAT_ARGS=()
-        for (( j=i; j<batch_end; j++ )); do
-            IDAT_ARGS+=("${ALL_GREEN[j]}")
-            IDAT_ARGS+=("${ALL_RED[j]}")
+        for (( i=0; i<n_pairs; i+=BATCH_SIZE )); do
+            batch_end=$(( i + BATCH_SIZE ))
+            if (( batch_end > n_pairs )); then
+                batch_end=${n_pairs}
+            fi
+            batch_num=$(( i / BATCH_SIZE + 1 ))
+            echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
+
+            IDAT_ARGS=()
+            for (( j=i; j<batch_end; j++ )); do
+                IDAT_ARGS+=("${ALL_GREEN[j]}")
+                IDAT_ARGS+=("${ALL_RED[j]}")
+            done
+
+            bcftools +idat2gtc \
+                --bpm "${BPM}" \
+                --egt "${RECLUSTERED_EGT}" \
+                --output "${GTC_DIR}" \
+                "${IDAT_ARGS[@]}" 2>&1 | tail -1
         done
-
-        bcftools +idat2gtc \
-            --bpm "${BPM}" \
-            --egt "${RECLUSTERED_EGT}" \
-            --output "${GTC_DIR}" \
-            "${IDAT_ARGS[@]}" 2>&1 | tail -1
-    done
+    fi
 
     echo "  GTC re-calling complete."
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
@@ -302,6 +318,9 @@ if step_done "stage2_gtc2vcf" && [[ -f "${VCF_OUTPUT}" ]]; then
     echo "  [checkpoint] VCF conversion already complete. Skipping."
 else
     STEP_START=${SECONDS}
+
+    # Clean up any leftover temp files from a previous interrupted run
+    rm -f "${VCF_OUTPUT}.tmp" "${VCF_OUTPUT}.tmp.csi"
 
     # Convert reclustered GTC to VCF (pre-normalization)
     PRE_NORM_BCF="${VCF_DIR}/stage2_pre_norm.bcf"
