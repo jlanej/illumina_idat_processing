@@ -147,8 +147,6 @@ workflow illumina_idat_processing {
       input:
         stage1_qc_tsv = stage1_qc.qc_tsv,
         stage2_qc_tsv = stage2_qc.qc_tsv,
-        stage1_variant_qc_summary = stage1_variant_qc.variant_qc_summary,
-        stage2_variant_qc_summary = stage2_variant_qc.variant_qc_summary,
         filebase = sample_set_id,
         docker = docker,
     }
@@ -627,8 +625,6 @@ task compare_qc {
   input {
     File stage1_qc_tsv
     File stage2_qc_tsv
-    File? stage1_variant_qc_summary
-    File? stage2_variant_qc_summary
     String filebase
 
     String docker

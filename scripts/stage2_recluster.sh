@@ -429,7 +429,9 @@ else
     fi
 
     if command -v python3 &>/dev/null; then
-        python3 "${SCRIPT_DIR}/plot_qc_comparison.py" "${COMPARISON_ARGS[@]}" 2>&1 || true
+        if ! python3 "${SCRIPT_DIR}/plot_qc_comparison.py" "${COMPARISON_ARGS[@]}" 2>&1; then
+            echo "  Warning: QC comparison script failed. Check logs for details." >&2
+        fi
     else
         echo "  Warning: python3 not found; skipping QC comparison plots."
     fi

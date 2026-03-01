@@ -113,7 +113,7 @@ def compute_stats(values):
     mean = sum(values) / n
     sorted_v = sorted(values)
     median = sorted_v[n // 2] if n % 2 == 1 else (sorted_v[n // 2 - 1] + sorted_v[n // 2]) / 2
-    variance = sum((v - mean) ** 2 for v in values) / n if n > 1 else 0
+    variance = sum((v - mean) ** 2 for v in values) / (n - 1) if n > 1 else 0
     return {
         'n': n,
         'mean': mean,
@@ -197,11 +197,6 @@ def generate_comparison_report(s1_data, s2_data, s1_vqc_dir, s2_vqc_dir):
         ("HWE p-value", read_hardy, [1e-6, 1e-10, 1e-20], "above"),
         ("Minor Allele Frequency", read_afreq, [0.01, 0.05], "above"),
     ]:
-        s1_file = os.path.join(s1_vqc_dir or "", f"variant_qc.{qc_name.split()[0].lower()}"
-                               if s1_vqc_dir else "")
-        s2_file = os.path.join(s2_vqc_dir or "", f"variant_qc.{qc_name.split()[0].lower()}"
-                               if s2_vqc_dir else "")
-
         # Map to actual plink2 file extensions
         ext_map = {"Variant Missingness": "vmiss", "HWE p-value": "hardy",
                     "Minor Allele Frequency": "afreq"}
