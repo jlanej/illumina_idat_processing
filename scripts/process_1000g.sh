@@ -36,6 +36,7 @@ OUTPUT_DIR=""
 THREADS=1
 SKIP_DOWNLOAD="false"
 SKIP_STAGE2="false"
+SKIP_FAILURES="true"   # default on for 1000G: some samples may have incomplete downloads
 KEEP_ARCHIVE="false"
 FORCE="false"
 USER_BPM=""
@@ -64,6 +65,10 @@ Options:
   --threads INT          Number of threads (default: ${THREADS})
   --skip-download        Skip downloading data (use existing files)
   --skip-stage2          Skip Stage 2 reclustering
+  --skip-failures        Continue past corrupt/truncated IDAT files (default for
+                         1000G data, where a small number of samples may have
+                         incomplete downloads).  Disable with --no-skip-failures.
+  --no-skip-failures     Halt on IDAT read errors instead of skipping
   --keep-archive         Keep the downloaded .tgz archive after extraction
   --force                Force re-run of all pipeline steps, ignoring checkpoints
   --help                 Show this help message
@@ -99,6 +104,8 @@ while [[ $# -gt 0 ]]; do
         --manifest-dir)  USER_MANIFEST_DIR="$2"; shift 2 ;;
         --skip-download) SKIP_DOWNLOAD="true"; shift ;;
         --skip-stage2)   SKIP_STAGE2="true"; shift ;;
+        --skip-failures) SKIP_FAILURES="true"; shift ;;
+        --no-skip-failures) SKIP_FAILURES="false"; shift ;;
         --keep-archive)  KEEP_ARCHIVE="true"; shift ;;
         --force)         FORCE="true"; shift ;;
         --help)          usage ;;
@@ -460,6 +467,10 @@ PIPELINE_ARGS=(
 
 if [[ "${SKIP_STAGE2}" == "true" ]]; then
     PIPELINE_ARGS+=(--skip-stage2)
+fi
+
+if [[ "${SKIP_FAILURES}" == "true" ]]; then
+    PIPELINE_ARGS+=(--skip-failures)
 fi
 
 if [[ "${FORCE}" == "true" ]]; then

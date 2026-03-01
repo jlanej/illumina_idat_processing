@@ -25,6 +25,7 @@ MIN_CALL_RATE=0.97
 MAX_LRR_SD=0.35
 SKIP_STAGE2="false"
 SKIP_DOWNLOAD="false"
+SKIP_FAILURES="false"
 FORCE="false"
 
 usage() {
@@ -55,6 +56,9 @@ Processing options:
   --max-lrr-sd FLOAT     Max LRR SD for Stage 2 HQ samples (default: ${MAX_LRR_SD})
   --skip-stage2          Skip Stage 2 (reclustering)
   --skip-download        Do not auto-download manifests or reference
+  --skip-failures        Continue past corrupt/truncated IDAT files instead of
+                         halting.  Failed samples are logged and excluded from
+                         downstream outputs.
   --force                Force re-run of all steps, ignoring checkpoints
 
   --help                 Show this help message
@@ -102,6 +106,7 @@ while [[ $# -gt 0 ]]; do
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
         --skip-stage2)    SKIP_STAGE2="true"; shift ;;
         --skip-download)  SKIP_DOWNLOAD="true"; shift ;;
+        --skip-failures)  SKIP_FAILURES="true"; shift ;;
         --force)          FORCE="true"; shift ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
@@ -320,6 +325,9 @@ STAGE1_ARGS=(
 if [[ "${FORCE}" == "true" ]]; then
     STAGE1_ARGS+=(--force)
 fi
+if [[ "${SKIP_FAILURES}" == "true" ]]; then
+    STAGE1_ARGS+=(--skip-failures)
+fi
 
 bash "${SCRIPT_DIR}/stage1_initial_genotyping.sh" "${STAGE1_ARGS[@]}"
 
@@ -354,6 +362,9 @@ else
     )
     if [[ "${FORCE}" == "true" ]]; then
         STAGE2_ARGS+=(--force)
+    fi
+    if [[ "${SKIP_FAILURES}" == "true" ]]; then
+        STAGE2_ARGS+=(--skip-failures)
     fi
 
     bash "${SCRIPT_DIR}/stage2_recluster.sh" "${STAGE2_ARGS[@]}"

@@ -42,6 +42,11 @@ Options:
                          (auto-generated from IDAT dir if not provided)
   --threads INT          Number of threads (default: ${THREADS})
   --batch-size INT       Batch size for IDAT to GTC conversion (default: ${BATCH_SIZE})
+  --skip-failures        Continue past corrupt/truncated IDAT files instead of
+                         halting.  Failed samples are logged to
+                         <output-dir>/qc/failed_idat2gtc.tsv and excluded from
+                         downstream outputs.  Without this flag the pipeline
+                         stops immediately on the first IDAT read error.
   --force                Force re-run of all steps, ignoring checkpoints
   --help                 Show this help message
 EOF
@@ -56,6 +61,7 @@ REF_FASTA=""
 OUTPUT_DIR=""
 SAMPLE_SHEET=""
 FORCE="false"
+SKIP_FAILURES="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -68,6 +74,7 @@ while [[ $# -gt 0 ]]; do
         --sample-sheet)  SAMPLE_SHEET="$2"; shift 2 ;;
         --threads)       THREADS="$2"; shift 2 ;;
         --batch-size)    BATCH_SIZE="$2"; shift 2 ;;
+        --skip-failures) SKIP_FAILURES="true"; shift ;;
         --force)         FORCE="true"; shift ;;
         --help)          usage ;;
         *)               echo "Error: Unknown option: $1" >&2; exit 1 ;;
@@ -166,9 +173,16 @@ if step_done "stage1_idat2gtc"; then
 else
     STEP_START=${SECONDS}
 
+    # Failed-sample report — records every sample that could not be converted
+    # (e.g. truncated/corrupt IDAT files).  Downstream steps use this to
+    # understand why certain samples are absent from the final VCF.
+    FAILED_LOG="${QC_DIR}/failed_idat2gtc.tsv"
+    echo -e "sample_id\tgreen_idat\tred_idat\terror\ttimestamp" > "${FAILED_LOG}"
+
     # Collect all green and red IDAT files, skipping samples with existing GTC
     GREEN_IDATS=()
     RED_IDATS=()
+    SAMPLE_IDS=()
     n_skipped=0
     while IFS=$'\t' read -r sample_id grn red; do
         [[ "${sample_id}" == "sample_id" ]] && continue
@@ -185,15 +199,18 @@ else
         if [[ -f "${grn_path}" ]] && [[ -f "${red_path}" ]]; then
             GREEN_IDATS+=("${grn_path}")
             RED_IDATS+=("${red_path}")
+            SAMPLE_IDS+=("${sample_id}")
         elif [[ -f "${grn_path}.gz" ]] && [[ -f "${red_path}.gz" ]]; then
             GREEN_IDATS+=("${grn_path}.gz")
             RED_IDATS+=("${red_path}.gz")
+            SAMPLE_IDS+=("${sample_id}")
         else
             echo "Warning: Skipping ${sample_id} - IDAT files not found" >&2
         fi
     done < "${SAMPLE_SHEET}"
 
     n_total=${#GREEN_IDATS[@]}
+    n_failed=0
     if [[ "${n_skipped}" -gt 0 ]]; then
         echo "  Skipping ${n_skipped} samples with existing GTC files."
     fi
@@ -212,22 +229,82 @@ else
             echo "  Batch ${batch_num}: samples $((i+1))-${batch_end}"
 
             # Build interleaved green/red file arguments for this batch.
-            # idat2gtc expects pairs: <green1.idat> <red1.idat> [<green2.idat> <red2.idat> ...]
+            # idat2gtc expects pairs: <green1.idat> <red1.idat> …
             IDAT_ARGS=()
             for (( j=i; j<batch_end; j++ )); do
                 IDAT_ARGS+=("${GREEN_IDATS[j]}")
                 IDAT_ARGS+=("${RED_IDATS[j]}")
             done
 
-            bcftools +idat2gtc \
+            BATCH_LOG=$(mktemp)
+            if bcftools +idat2gtc \
                 --bpm "${BPM}" \
                 --egt "${EGT}" \
                 --output "${GTC_DIR}" \
-                "${IDAT_ARGS[@]}" 2>&1 | tail -1
+                "${IDAT_ARGS[@]}" > "${BATCH_LOG}" 2>&1; then
+                tail -1 "${BATCH_LOG}"
+            else
+                BATCH_RC=$?
+                # Batch failed — retry each sample individually to isolate
+                # the problematic file(s).
+                echo "  Batch ${batch_num} failed (exit ${BATCH_RC}). Retrying samples individually..."
+                for (( j=i; j<batch_end; j++ )); do
+                    SAMPLE_LOG=$(mktemp)
+                    if bcftools +idat2gtc \
+                        --bpm "${BPM}" \
+                        --egt "${EGT}" \
+                        --output "${GTC_DIR}" \
+                        "${GREEN_IDATS[j]}" "${RED_IDATS[j]}" > "${SAMPLE_LOG}" 2>&1; then
+                        : # success
+                    else
+                        SAMPLE_RC=$?
+                        ERROR_MSG=$(tail -1 "${SAMPLE_LOG}" | tr '\t' ' ')
+                        (( n_failed++ )) || true
+
+                        if [[ "${SKIP_FAILURES}" == "true" ]]; then
+                            echo "  WARNING: Skipping ${SAMPLE_IDS[j]} (exit ${SAMPLE_RC}): ${ERROR_MSG}" >&2
+                            echo -e "${SAMPLE_IDS[j]}\t$(basename "${GREEN_IDATS[j]}")\t$(basename "${RED_IDATS[j]}")\t${ERROR_MSG}\t$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+                                >> "${FAILED_LOG}"
+                            # Remove any partial/empty GTC left behind
+                            rm -f "${GTC_DIR}/${SAMPLE_IDS[j]}.gtc"
+                        else
+                            echo "  ERROR: Failed to convert ${SAMPLE_IDS[j]} (exit ${SAMPLE_RC}): ${ERROR_MSG}" >&2
+                            echo "  The IDAT file may be corrupt or truncated." >&2
+                            echo "  To skip failures and continue, re-run with --skip-failures" >&2
+                            rm -f "${SAMPLE_LOG}" "${BATCH_LOG}"
+                            exit 1
+                        fi
+                    fi
+                    rm -f "${SAMPLE_LOG}"
+                done
+            fi
+            rm -f "${BATCH_LOG}"
         done
     fi
 
-    echo "GTC conversion complete. Files in: ${GTC_DIR}"
+    # Report failed samples
+    n_failed_logged=$(( $(wc -l < "${FAILED_LOG}") - 1 ))
+    if [[ "${n_failed_logged}" -gt 0 ]]; then
+        echo ""
+        echo "  ============================================"
+        echo "  WARNING: ${n_failed_logged} sample(s) failed IDAT-to-GTC conversion"
+        echo "  ============================================"
+        echo "  These samples had corrupt or truncated IDAT files and were skipped."
+        echo "  They will be absent from downstream VCF and QC outputs."
+        echo "  Failed sample report: ${FAILED_LOG}"
+        echo ""
+        echo "  Failed samples:"
+        tail -n +2 "${FAILED_LOG}" | while IFS=$'\t' read -r sid grn red err ts; do
+            echo "    - ${sid}: ${err}"
+        done
+        echo ""
+    else
+        # No failures — remove the empty header-only log
+        rm -f "${FAILED_LOG}"
+    fi
+
+    n_gtc_created=$(find "${GTC_DIR}" -name '*.gtc' 2>/dev/null | wc -l)
+    echo "GTC conversion complete. ${n_gtc_created} files in: ${GTC_DIR}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
     echo "  Step 1/4 completed in ${STEP_ELAPSED}s"
     mark_done "stage1_idat2gtc"
