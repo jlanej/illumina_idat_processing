@@ -140,9 +140,9 @@ echo ""
 # ---------------------------------------------------------------
 if [[ -n "${MANIFEST_DIR}" ]]; then
     # Auto-detect BPM, EGT, CSV from manifest directory
-    [[ -z "${BPM}" ]] && BPM=$(find "${MANIFEST_DIR}" -name "*.bpm" -print -quit 2>/dev/null)
-    [[ -z "${EGT}" ]] && EGT=$(find "${MANIFEST_DIR}" -name "*.egt" -print -quit 2>/dev/null)
-    [[ -z "${CSV}" ]] && CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit 2>/dev/null)
+    [[ -z "${BPM}" ]] && BPM=$(find "${MANIFEST_DIR}" -name "*.bpm" -print -quit 2>/dev/null || true)
+    [[ -z "${EGT}" ]] && EGT=$(find "${MANIFEST_DIR}" -name "*.egt" -print -quit 2>/dev/null || true)
+    [[ -z "${CSV}" ]] && CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit 2>/dev/null || true)
 fi
 
 if [[ -z "${BPM}" || -z "${EGT}" || -z "${CSV}" ]]; then
@@ -166,9 +166,9 @@ if [[ -z "${BPM}" || -z "${EGT}" || -z "${CSV}" ]]; then
     bash "${SCRIPT_DIR}/download_manifests.sh" "${DOWNLOAD_ARGS[@]}"
     echo ""
 
-    [[ -z "${BPM}" ]] && BPM=$(find "${MANIFEST_DIR}" -name "*.bpm" -print -quit 2>/dev/null)
-    [[ -z "${EGT}" ]] && EGT=$(find "${MANIFEST_DIR}" -name "*.egt" -print -quit 2>/dev/null)
-    [[ -z "${CSV}" ]] && CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit 2>/dev/null)
+    [[ -z "${BPM}" ]] && BPM=$(find "${MANIFEST_DIR}" -name "*.bpm" -print -quit 2>/dev/null || true)
+    [[ -z "${EGT}" ]] && EGT=$(find "${MANIFEST_DIR}" -name "*.egt" -print -quit 2>/dev/null || true)
+    [[ -z "${CSV}" ]] && CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit 2>/dev/null || true)
 
     if [[ -z "${BPM}" || -z "${EGT}" || -z "${CSV}" ]]; then
         echo "Error: Could not find all manifest files after download." >&2
@@ -236,7 +236,7 @@ REALIGN_DIR="${OUTPUT_DIR}/realigned_manifests"
 
 if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
     # Check if realignment was already completed
-    EXISTING_REALIGNED=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)
+    EXISTING_REALIGNED=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null || true)
     if [[ -n "${EXISTING_REALIGNED}" && -f "${EXISTING_REALIGNED}" && "${FORCE}" != "true" ]]; then
         echo "======================================================"
         echo "  Manifest Probe Realignment (cached)"
@@ -264,7 +264,7 @@ if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
         echo "Manifest realignment completed in $(( REALIGN_ELAPSED / 60 ))m $(( REALIGN_ELAPSED % 60 ))s"
 
         # Use the realigned CSV for all downstream steps
-        REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null)
+        REALIGNED_CSV=$(find "${REALIGN_DIR}" -name "*.realigned.csv" -print -quit 2>/dev/null || true)
         if [[ -n "${REALIGNED_CSV}" && -f "${REALIGNED_CSV}" ]]; then
             echo "Using realigned CSV: ${REALIGNED_CSV}"
             CSV="${REALIGNED_CSV}"
@@ -272,7 +272,7 @@ if command -v bwa &>/dev/null && [[ -f "${REF_FASTA}.bwt" ]]; then
     fi
 
     # Realignment quality gate: warn if too many probes are unmapped
-    REALIGN_SUMMARY=$(find "${REALIGN_DIR}" -name "realign_summary.txt" -print -quit 2>/dev/null)
+    REALIGN_SUMMARY=$(find "${REALIGN_DIR}" -name "realign_summary.txt" -print -quit 2>/dev/null || true)
     if [[ -n "${REALIGN_SUMMARY}" && -f "${REALIGN_SUMMARY}" ]]; then
         MAPPED_PCT=$(awk '/Mapped:/ && /%/ { gsub(/[^0-9.]/, "", $NF); print $NF; exit }' "${REALIGN_SUMMARY}")
         if [[ -n "${MAPPED_PCT}" ]]; then

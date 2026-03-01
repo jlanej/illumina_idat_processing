@@ -134,9 +134,9 @@ mkdir -p "${MANIFEST_DIR}"
 
 # Handle user-provided manifest directory
 if [[ -n "${USER_MANIFEST_DIR}" ]]; then
-    [[ -z "${USER_BPM}" ]] && USER_BPM=$(find "${USER_MANIFEST_DIR}" -name "*.bpm" -print -quit)
-    [[ -z "${USER_EGT}" ]] && USER_EGT=$(find "${USER_MANIFEST_DIR}" -name "*.egt" -print -quit)
-    [[ -z "${USER_CSV}" ]] && USER_CSV=$(find "${USER_MANIFEST_DIR}" -name "*.csv" -print -quit)
+    [[ -z "${USER_BPM}" ]] && USER_BPM=$(find "${USER_MANIFEST_DIR}" -name "*.bpm" -print -quit 2>/dev/null || true)
+    [[ -z "${USER_EGT}" ]] && USER_EGT=$(find "${USER_MANIFEST_DIR}" -name "*.egt" -print -quit 2>/dev/null || true)
+    [[ -z "${USER_CSV}" ]] && USER_CSV=$(find "${USER_MANIFEST_DIR}" -name "*.csv" -print -quit 2>/dev/null || true)
 fi
 
 # Copy user-provided manifest files to the manifest directory
@@ -187,9 +187,9 @@ elif [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     echo ""
 fi
 
-BPM=$(find "${MANIFEST_DIR}" -name "*.bpm" -print -quit)
-EGT=$(find "${MANIFEST_DIR}" -name "*.egt" -print -quit)
-CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit)
+BPM=$(find "${MANIFEST_DIR}" -name "*.bpm" -print -quit 2>/dev/null || true)
+EGT=$(find "${MANIFEST_DIR}" -name "*.egt" -print -quit 2>/dev/null || true)
+CSV=$(find "${MANIFEST_DIR}" -name "*.csv" -print -quit 2>/dev/null || true)
 
 if [[ -z "${BPM}" || -z "${EGT}" || -z "${CSV}" ]]; then
     echo "Error: Manifest files not found in ${MANIFEST_DIR}" >&2
