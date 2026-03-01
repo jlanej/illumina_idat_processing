@@ -28,6 +28,7 @@ HELP_SCRIPTS=(
     scripts/stage1_initial_genotyping.sh
     scripts/stage2_recluster.sh
     scripts/process_1000g.sh
+    scripts/compute_variant_qc.sh
 )
 
 for relpath in "${HELP_SCRIPTS[@]}"; do
@@ -61,31 +62,25 @@ echo ""
 # Validate Python script
 # ---------------------------------------------------------------
 echo "--- Python script syntax ---"
-PYTHON_SCRIPT="${REPO_DIR}/scripts/recluster_egt.py"
-if [[ -f "${PYTHON_SCRIPT}" ]]; then
-    if python3 -c "import py_compile; py_compile.compile('${PYTHON_SCRIPT}', doraise=True)" 2>/dev/null; then
-        echo "  PASS: scripts/recluster_egt.py (compiles)"
-        (( PASS++ )) || true
-    else
-        echo "  FAIL: scripts/recluster_egt.py (syntax error)"
-        (( FAIL++ )) || true
-    fi
-
-    # Check --help (may fail if numpy not installed)
-    if output=$(python3 "${PYTHON_SCRIPT}" --help 2>&1); then
-        if echo "${output}" | grep -qi "usage\|recompute"; then
-            echo "  PASS: scripts/recluster_egt.py (--help)"
+PYTHON_SCRIPTS=(
+    scripts/recluster_egt.py
+    scripts/diagnose_qc.py
+    scripts/plot_qc_comparison.py
+)
+for relpath in "${PYTHON_SCRIPTS[@]}"; do
+    PYTHON_SCRIPT="${REPO_DIR}/${relpath}"
+    if [[ -f "${PYTHON_SCRIPT}" ]]; then
+        if python3 -c "import py_compile; py_compile.compile('${PYTHON_SCRIPT}', doraise=True)" 2>/dev/null; then
+            echo "  PASS: ${relpath} (compiles)"
             (( PASS++ )) || true
         else
-            echo "  WARN: scripts/recluster_egt.py (--help unexpected output)"
-            (( PASS++ )) || true
+            echo "  FAIL: ${relpath} (syntax error)"
+            (( FAIL++ )) || true
         fi
     else
-        echo "  SKIP: scripts/recluster_egt.py (--help requires numpy)"
+        echo "  SKIP: ${relpath} not found"
     fi
-else
-    echo "  SKIP: scripts/recluster_egt.py not found"
-fi
+done
 
 echo ""
 

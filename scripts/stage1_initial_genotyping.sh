@@ -158,7 +158,7 @@ fi
 # Step 2: Convert IDAT files to GTC files
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 1/3: Converting IDAT files to GTC ---"
+echo "--- Step 1/4: Converting IDAT files to GTC ---"
 
 if step_done "stage1_idat2gtc"; then
     n_existing=$(find "${GTC_DIR}" -name '*.gtc' 2>/dev/null | wc -l)
@@ -212,7 +212,7 @@ else
 
     echo "GTC conversion complete. Files in: ${GTC_DIR}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 1/3 completed in ${STEP_ELAPSED}s"
+    echo "  Step 1/4 completed in ${STEP_ELAPSED}s"
     mark_done "stage1_idat2gtc"
 fi
 
@@ -220,7 +220,7 @@ fi
 # Step 3: Convert GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 2/3: Converting GTC files to VCF ---"
+echo "--- Step 2/4: Converting GTC files to VCF ---"
 
 VCF_OUTPUT="${VCF_DIR}/stage1_initial.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata.tsv"
@@ -297,7 +297,7 @@ else
 
     echo "VCF created: ${VCF_OUTPUT}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 2/3 completed in ${STEP_ELAPSED}s"
+    echo "  Step 2/4 completed in ${STEP_ELAPSED}s"
     mark_done "stage1_gtc2vcf"
 fi
 
@@ -305,7 +305,7 @@ fi
 # Step 4: Compute per-sample QC metrics
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 3/3: Computing QC metrics ---"
+echo "--- Step 3/4: Computing QC metrics ---"
 
 QC_OUTPUT="${QC_DIR}/stage1_sample_qc.tsv"
 
@@ -316,10 +316,33 @@ else
     STEP_START=${SECONDS}
 
     source "${SCRIPT_DIR}/collect_qc_metrics.sh"
-    collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_OUTPUT}"
+    collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_OUTPUT}" "${THREADS}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 3/3 completed in ${STEP_ELAPSED}s"
+    echo "  Step 3/4 completed in ${STEP_ELAPSED}s"
     mark_done "stage1_qc"
+fi
+
+# ---------------------------------------------------------------
+# Step 4: Compute variant-level QC metrics
+# ---------------------------------------------------------------
+echo ""
+echo "--- Step 4/4: Computing variant QC metrics ---"
+
+VARIANT_QC_DIR="${QC_DIR}/variant_qc"
+
+if step_done "stage1_variant_qc" && [[ -d "${VARIANT_QC_DIR}" ]]; then
+    echo "  [checkpoint] Variant QC already computed. Skipping."
+else
+    STEP_START=${SECONDS}
+
+    bash "${SCRIPT_DIR}/compute_variant_qc.sh" \
+        --vcf "${VCF_OUTPUT}" \
+        --output-dir "${VARIANT_QC_DIR}" \
+        --threads "${THREADS}"
+
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 4/4 completed in ${STEP_ELAPSED}s"
+    mark_done "stage1_variant_qc"
 fi
 
 echo ""

@@ -66,6 +66,16 @@ workflow illumina_idat_processing {
       vcf_file = stage1_gtc2vcf.vcf_file,
       vcf_idx = stage1_gtc2vcf.vcf_idx,
       filebase = sample_set_id + ".stage1",
+      threads = threads,
+      docker = docker,
+  }
+
+  call compute_variant_qc as stage1_variant_qc {
+    input:
+      vcf_file = stage1_gtc2vcf.vcf_file,
+      vcf_idx = stage1_gtc2vcf.vcf_idx,
+      filebase = sample_set_id + ".stage1",
+      threads = threads,
       docker = docker,
   }
 
@@ -120,6 +130,24 @@ workflow illumina_idat_processing {
         vcf_file = stage2_gtc2vcf.vcf_file,
         vcf_idx = stage2_gtc2vcf.vcf_idx,
         filebase = sample_set_id + ".stage2",
+        threads = threads,
+        docker = docker,
+    }
+
+    call compute_variant_qc as stage2_variant_qc {
+      input:
+        vcf_file = stage2_gtc2vcf.vcf_file,
+        vcf_idx = stage2_gtc2vcf.vcf_idx,
+        filebase = sample_set_id + ".stage2",
+        threads = threads,
+        docker = docker,
+    }
+
+    call compare_qc {
+      input:
+        stage1_qc_tsv = stage1_qc.qc_tsv,
+        stage2_qc_tsv = stage2_qc.qc_tsv,
+        filebase = sample_set_id,
         docker = docker,
     }
   }
@@ -129,10 +157,14 @@ workflow illumina_idat_processing {
     File final_vcf_idx = select_first([stage2_gtc2vcf.vcf_idx, stage1_gtc2vcf.vcf_idx])
     File final_qc_tsv = select_first([stage2_qc.qc_tsv, stage1_qc.qc_tsv])
     File stage1_qc_tsv = stage1_qc.qc_tsv
+    File stage1_variant_qc_summary = stage1_variant_qc.variant_qc_summary
     Array[File] gtc_files = select_first([stage2_idat2gtc.gtc_files, stage1_idat2gtc.gtc_files])
     File? reclustered_egt_file = recluster_egt.reclustered_egt
     File? hq_samples_file = select_hq_samples.hq_samples
     File? excluded_samples_file = select_hq_samples.excluded_samples
+    File? qc_comparison_report = compare_qc.comparison_report
+    File? qc_comparison_plot = compare_qc.comparison_plot
+    File? stage2_variant_qc_summary_file = stage2_variant_qc.variant_qc_summary
   }
 
   meta {
@@ -289,9 +321,10 @@ task compute_qc_metrics {
     File vcf_file
     File vcf_idx
     String filebase
+    Int threads = 4
 
     String docker
-    Int cpu = 1
+    Int cpu = 4
     Int disk_size = 50
     Float memory = 8.0
     Int preemptible = 1
@@ -304,14 +337,14 @@ task compute_qc_metrics {
     # Compute call rate and LRR standard deviation per sample.
     # Uses single-pass matrix output (one row per variant, all samples'
     # values tab-delimited) instead of per-sample BCF scans.
+    # Restricted to autosomes to avoid sex-chromosome hemizygosity bias.
 
     # Get sample list
     bcftools query -l ~{vcf_file} > samples.txt
     n_samples=$(wc -l < samples.txt)
 
-    # Call rate: one row per variant, tab-delimited GT for all samples.
-    # awk accumulates per-column (per-sample) called/total counts.
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' ~{vcf_file} | \
+    # Call rate: autosomes only, excluding intensity-only probes.
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads ~{threads} ~{vcf_file} | \
     bcftools query -f '[\t%GT]\n' | \
     awk -F'\t' '
     {
@@ -329,7 +362,7 @@ task compute_qc_metrics {
     }' > call_rates.idx.tsv
 
     # LRR SD on autosomes: same matrix approach, online variance computation.
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT ~{vcf_file} | \
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads ~{threads} ~{vcf_file} | \
     bcftools query -f '[\t%LRR]\n' | \
     awk -F'\t' '
     {
@@ -470,6 +503,155 @@ task recluster_egt {
 
   output {
     File reclustered_egt = "~{filebase}.reclustered.egt"
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+# ============================================================
+# Task: Compute variant-level QC using plink2
+# ============================================================
+task compute_variant_qc {
+  input {
+    File vcf_file
+    File vcf_idx
+    String filebase
+    Int threads = 4
+
+    String docker
+    Int cpu = 4
+    Int disk_size = 50
+    Float memory = 8.0
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  command <<<
+    set -euo pipefail
+
+    # Filter intensity-only probes before variant QC
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads ~{threads} \
+      -Ob -o filtered.bcf ~{vcf_file}
+    bcftools index filtered.bcf
+
+    # Compute variant-level QC on autosomes using plink2
+    plink2 \
+      --bcf filtered.bcf \
+      --autosome \
+      --allow-extra-chr \
+      --threads ~{threads} \
+      --missing variant-only \
+      --hardy midp \
+      --freq \
+      --out ~{filebase}.variant_qc
+
+    rm -f filtered.bcf filtered.bcf.csi
+
+    # Generate summary
+    echo "Variant QC Summary" > ~{filebase}.variant_qc_summary.txt
+    if [ -f ~{filebase}.variant_qc.vmiss ]; then
+      n_variants=$(awk 'NR>1' ~{filebase}.variant_qc.vmiss | wc -l)
+      echo "Total autosomal variants: ${n_variants}" >> ~{filebase}.variant_qc_summary.txt
+      awk 'NR>1 {
+        n++; miss += $NF
+        if ($NF+0 > 0.05) n_05++
+        if ($NF+0 > 0.02) n_02++
+        if ($NF+0 > 0.01) n_01++
+      } END {
+        if (n>0) {
+          printf "Variants missingness >5%%: %d (%.2f%%)\n", n_05+0, (n_05+0)*100/n
+          printf "Variants missingness >2%%: %d (%.2f%%)\n", n_02+0, (n_02+0)*100/n
+          printf "Variants missingness >1%%: %d (%.2f%%)\n", n_01+0, (n_01+0)*100/n
+          printf "Mean variant missingness: %.6f\n", miss/n
+        }
+      }' ~{filebase}.variant_qc.vmiss >> ~{filebase}.variant_qc_summary.txt
+    fi
+    if [ -f ~{filebase}.variant_qc.hardy ]; then
+      awk 'NR>1 {
+        n++; p = $NF
+        if (p+0 < 1e-6) n_6++
+        if (p+0 < 1e-10) n_10++
+      } END {
+        if (n>0) {
+          printf "Variants failing HWE p<1e-6:  %d (%.2f%%)\n", n_6+0, (n_6+0)*100/n
+          printf "Variants failing HWE p<1e-10: %d (%.2f%%)\n", n_10+0, (n_10+0)*100/n
+        }
+      }' ~{filebase}.variant_qc.hardy >> ~{filebase}.variant_qc_summary.txt
+    fi
+    if [ -f ~{filebase}.variant_qc.afreq ]; then
+      awk 'NR>1 {
+        n++; af=$5+0; maf=(af>0.5)?1-af:af; maf_sum+=maf
+        if (maf<0.01) n_rare++
+        if (maf>=0.05) n_common++
+      } END {
+        if (n>0) {
+          printf "Rare variants (MAF<1%%): %d (%.2f%%)\n", n_rare+0, (n_rare+0)*100/n
+          printf "Common variants (MAF>=5%%): %d (%.2f%%)\n", n_common+0, (n_common+0)*100/n
+          printf "Mean MAF: %.4f\n", maf_sum/n
+        }
+      }' ~{filebase}.variant_qc.afreq >> ~{filebase}.variant_qc_summary.txt
+    fi
+  >>>
+
+  output {
+    File variant_qc_summary = "~{filebase}.variant_qc_summary.txt"
+    File? vmiss = "~{filebase}.variant_qc.vmiss"
+    File? hardy = "~{filebase}.variant_qc.hardy"
+    File? afreq = "~{filebase}.variant_qc.afreq"
+    File variant_qc_log = "~{filebase}.variant_qc.log"
+  }
+
+  runtime {
+    docker: docker
+    cpu: cpu
+    disks: "local-disk " + disk_size + " HDD"
+    memory: memory + " GiB"
+    preemptible: preemptible
+    maxRetries: maxRetries
+  }
+}
+
+# ============================================================
+# Task: Compare QC metrics pre vs post reclustering
+# ============================================================
+task compare_qc {
+  input {
+    File stage1_qc_tsv
+    File stage2_qc_tsv
+    String filebase
+
+    String docker
+    Int cpu = 1
+    Int disk_size = 10
+    Float memory = 4.0
+    Int preemptible = 1
+    Int maxRetries = 0
+  }
+
+  command <<<
+    set -euo pipefail
+
+    python3 /opt/scripts/plot_qc_comparison.py \
+      --stage1-sample-qc ~{stage1_qc_tsv} \
+      --stage2-sample-qc ~{stage2_qc_tsv} \
+      --output-dir .
+
+    mv qc_comparison_report.txt ~{filebase}.qc_comparison_report.txt
+    if [ -f qc_comparison_samples.png ]; then
+      mv qc_comparison_samples.png ~{filebase}.qc_comparison_samples.png
+    fi
+  >>>
+
+  output {
+    File comparison_report = "~{filebase}.qc_comparison_report.txt"
+    File? comparison_plot = "~{filebase}.qc_comparison_samples.png"
   }
 
   runtime {

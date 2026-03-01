@@ -146,7 +146,7 @@ echo ""
 # ---------------------------------------------------------------
 # Step 1: Identify high-quality samples from Stage 1 QC metrics
 # ---------------------------------------------------------------
-echo "--- Step 1/5: Identifying high-quality samples ---"
+echo "--- Step 1/7: Identifying high-quality samples ---"
 
 HQ_SAMPLES="${QC_DIR}/high_quality_samples.txt"
 EXCLUDED_SAMPLES="${QC_DIR}/excluded_samples.txt"
@@ -209,7 +209,7 @@ fi
 # ---------------------------------------------------------------
 # Step 2: Recompute EGT cluster file from high-quality samples
 # ---------------------------------------------------------------
-echo "--- Step 2/5: Recomputing EGT clusters from high-quality samples ---"
+echo "--- Step 2/7: Recomputing EGT clusters from high-quality samples ---"
 
 RECLUSTERED_EGT="${CLUSTER_DIR}/reclustered.egt"
 
@@ -228,7 +228,7 @@ else
 
     echo "  Reclustered EGT: ${RECLUSTERED_EGT}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 2/5 completed in ${STEP_ELAPSED}s"
+    echo "  Step 2/7 completed in ${STEP_ELAPSED}s"
     mark_done "stage2_recluster"
 fi
 
@@ -236,7 +236,7 @@ fi
 # Step 3: Re-run idat2gtc with the new EGT clusters
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 3/5: Re-genotyping all samples with new clusters ---"
+echo "--- Step 3/7: Re-genotyping all samples with new clusters ---"
 
 if step_done "stage2_idat2gtc"; then
     n_existing=$(find "${GTC_DIR}" -name '*.gtc' 2>/dev/null | wc -l)
@@ -285,7 +285,7 @@ else
 
     echo "  GTC re-calling complete."
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 3/5 completed in ${STEP_ELAPSED}s"
+    echo "  Step 3/7 completed in ${STEP_ELAPSED}s"
     mark_done "stage2_idat2gtc"
 fi
 
@@ -293,7 +293,7 @@ fi
 # Step 4: Convert reclustered GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 4/5: Converting reclustered GTC files to VCF ---"
+echo "--- Step 4/7: Converting reclustered GTC files to VCF ---"
 
 VCF_OUTPUT="${VCF_DIR}/stage2_reclustered.bcf"
 EXTRA_TSV="${QC_DIR}/gtc_metadata_stage2.tsv"
@@ -354,7 +354,7 @@ else
 
     echo "  Reclustered VCF created: ${VCF_OUTPUT}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 4/5 completed in ${STEP_ELAPSED}s"
+    echo "  Step 4/7 completed in ${STEP_ELAPSED}s"
     mark_done "stage2_gtc2vcf"
 fi
 
@@ -362,7 +362,7 @@ fi
 # Step 5: Recompute QC metrics after reclustering
 # ---------------------------------------------------------------
 echo ""
-echo "--- Step 5/5: Recomputing QC metrics ---"
+echo "--- Step 5/7: Recomputing QC metrics ---"
 
 STAGE2_QC="${QC_DIR}/stage2_sample_qc.tsv"
 
@@ -373,10 +373,72 @@ else
     STEP_START=${SECONDS}
 
     source "${SCRIPT_DIR}/collect_qc_metrics.sh"
-    collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${STAGE2_QC}"
+    collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${STAGE2_QC}" "${THREADS}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
-    echo "  Step 5/5 completed in ${STEP_ELAPSED}s"
+    echo "  Step 5/7 completed in ${STEP_ELAPSED}s"
     mark_done "stage2_qc"
+fi
+
+# ---------------------------------------------------------------
+# Step 6: Compute variant-level QC metrics after reclustering
+# ---------------------------------------------------------------
+echo ""
+echo "--- Step 6/7: Computing variant QC metrics ---"
+
+VARIANT_QC_DIR="${QC_DIR}/variant_qc"
+
+if step_done "stage2_variant_qc" && [[ -d "${VARIANT_QC_DIR}" ]]; then
+    echo "  [checkpoint] Variant QC already computed. Skipping."
+else
+    STEP_START=${SECONDS}
+
+    bash "${SCRIPT_DIR}/compute_variant_qc.sh" \
+        --vcf "${VCF_OUTPUT}" \
+        --output-dir "${VARIANT_QC_DIR}" \
+        --threads "${THREADS}"
+
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 6/7 completed in ${STEP_ELAPSED}s"
+    mark_done "stage2_variant_qc"
+fi
+
+# ---------------------------------------------------------------
+# Step 7: Generate QC comparison (Stage 1 vs Stage 2)
+# ---------------------------------------------------------------
+echo ""
+echo "--- Step 7/7: Generating QC comparison ---"
+
+COMPARISON_DIR="${QC_DIR}/comparison"
+STAGE1_VARIANT_QC="${STAGE1_DIR}/qc/variant_qc"
+
+if step_done "stage2_comparison" && [[ -d "${COMPARISON_DIR}" ]]; then
+    echo "  [checkpoint] QC comparison already generated. Skipping."
+else
+    STEP_START=${SECONDS}
+
+    COMPARISON_ARGS=(
+        --stage1-sample-qc "${STAGE1_QC}"
+        --stage2-sample-qc "${STAGE2_QC}"
+        --output-dir "${COMPARISON_DIR}"
+    )
+    if [[ -d "${STAGE1_VARIANT_QC}" ]]; then
+        COMPARISON_ARGS+=(--stage1-variant-qc-dir "${STAGE1_VARIANT_QC}")
+    fi
+    if [[ -d "${VARIANT_QC_DIR}" ]]; then
+        COMPARISON_ARGS+=(--stage2-variant-qc-dir "${VARIANT_QC_DIR}")
+    fi
+
+    if command -v python3 &>/dev/null; then
+        if ! python3 "${SCRIPT_DIR}/plot_qc_comparison.py" "${COMPARISON_ARGS[@]}" 2>&1; then
+            echo "  Warning: QC comparison script failed. Check logs for details." >&2
+        fi
+    else
+        echo "  Warning: python3 not found; skipping QC comparison plots."
+    fi
+
+    STEP_ELAPSED=$(( SECONDS - STEP_START ))
+    echo "  Step 7/7 completed in ${STEP_ELAPSED}s"
+    mark_done "stage2_comparison"
 fi
 
 # Generate comparison report
@@ -409,6 +471,8 @@ echo "============================================"
 echo "  Reclustered EGT:   ${RECLUSTERED_EGT}"
 echo "  VCF:               ${VCF_OUTPUT}"
 echo "  QC metrics:        ${QC_DIR}/stage2_sample_qc.tsv"
+echo "  Variant QC:        ${VARIANT_QC_DIR}/"
+echo "  QC comparison:     ${COMPARISON_DIR}/"
 echo "  HQ sample list:    ${HQ_SAMPLES}"
 echo "  Excluded samples:  ${EXCLUDED_SAMPLES}"
 echo ""

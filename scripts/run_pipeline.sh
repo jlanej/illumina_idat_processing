@@ -360,6 +360,7 @@ else
 
     FINAL_VCF="${STAGE2_DIR}/vcf/stage2_reclustered.bcf"
     FINAL_QC="${STAGE2_DIR}/qc/stage2_sample_qc.tsv"
+    COMPARISON_DIR="${STAGE2_DIR}/qc/comparison"
 fi
 
 echo ""
@@ -368,8 +369,11 @@ echo "  Pipeline Complete"
 echo "======================================================"
 echo ""
 echo "Final outputs:"
-echo "  VCF:        ${FINAL_VCF}"
-echo "  QC metrics: ${FINAL_QC}"
+echo "  VCF:            ${FINAL_VCF}"
+echo "  QC metrics:     ${FINAL_QC}"
+if [[ -n "${COMPARISON_DIR:-}" && -d "${COMPARISON_DIR:-}" ]]; then
+    echo "  QC comparison:  ${COMPARISON_DIR}/"
+fi
 echo ""
 echo "The VCF contains genotypes with BAF and LRR intensities"
 echo "ready for downstream analysis (phasing, MoChA, imputation)."
