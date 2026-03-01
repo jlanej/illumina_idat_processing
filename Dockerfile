@@ -23,8 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libssl-dev \
         make \
         python3 \
+        python3-matplotlib \
         python3-numpy \
         samtools \
+        unzip \
         wget \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -46,6 +48,12 @@ RUN wget -q "https://github.com/samtools/bcftools/releases/download/${BCFTOOLS_V
     cd / && rm -rf /tmp/build
 
 ENV BCFTOOLS_PLUGINS=/usr/local/libexec/bcftools
+
+# Install plink2 for variant-level QC (missingness, HWE, MAF)
+RUN wget -q "https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.zip" -O /tmp/plink2.zip && \
+    unzip -o /tmp/plink2.zip plink2 -d /usr/local/bin/ && \
+    chmod +x /usr/local/bin/plink2 && \
+    rm /tmp/plink2.zip
 
 # Copy pipeline scripts (includes diagnose_qc.py for QC troubleshooting)
 COPY scripts/ /opt/scripts/

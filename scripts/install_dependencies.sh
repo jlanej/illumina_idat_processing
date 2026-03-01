@@ -76,3 +76,12 @@ echo ""
 echo "Add the following to your shell profile:"
 echo "  export PATH=\"${INSTALL_PREFIX}:\$PATH\""
 echo "  export BCFTOOLS_PLUGINS=\"${INSTALL_PREFIX}\""
+echo ""
+
+# Install plink2 for variant-level QC
+echo "=== Installing plink2 ==="
+PLINK2_URL="https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.zip"
+wget -q "${PLINK2_URL}" -O "${WORK_DIR}/plink2.zip"
+unzip -o "${WORK_DIR}/plink2.zip" plink2 -d "${INSTALL_PREFIX}/"
+chmod +x "${INSTALL_PREFIX}/plink2"
+echo "plink2 installed to ${INSTALL_PREFIX}/plink2"

@@ -12,6 +12,7 @@ collect_qc_metrics() {
     local vcf_file="$1"
     local metadata_tsv="$2"
     local output_file="$3"
+    local threads="${4:-1}"
 
     echo "Extracting per-sample QC metrics..."
 
@@ -50,9 +51,12 @@ collect_qc_metrics() {
     # output one tab-delimited row per variant with all samples' GT values.
     # awk processes each row and accumulates per-column (per-sample) counts.
     # For 5000 samples × 2.5M variants this reduces pipe volume ~5000×.
+    #
+    # Restricted to autosomes only to avoid inflation from sex-chromosome
+    # hemizygosity in males (same as LRR SD computation below).
     # -----------------------------------------------------------------
-    echo "  Computing call rate per sample (${n_samples_vcf} samples, ${n_genotypeable} variants)..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' "${vcf_file}" 2>/dev/null | \
+    echo "  Computing call rate per sample (${n_samples_vcf} samples, autosomes only)..."
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
     bcftools query -f '[\t%GT]\n' 2>/dev/null | \
         awk -F'\t' '
         {
@@ -96,7 +100,7 @@ collect_qc_metrics() {
     # Filters non-numeric LRR values (nan, inf) that gtc2vcf can produce.
     # -----------------------------------------------------------------
     echo "  Computing LRR standard deviation per sample..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT "${vcf_file}" 2>/dev/null | \
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
     bcftools query -f '[\t%LRR]\n' 2>/dev/null | \
         awk -F'\t' '
         {
