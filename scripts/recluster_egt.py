@@ -151,6 +151,11 @@ class EGTFile:
 
             egt.manifest_name = read_string(f)
             egt.data_block_version = read_int(f)
+            if egt.data_block_version not in (5, 7, 8, 9):
+                raise ValueError(
+                    f"Data block version {egt.data_block_version} in cluster "
+                    f"file not supported (expected 5, 7, 8, or 9)"
+                )
             egt.opa = read_string(f)
             num_records = read_int(f)
 
@@ -174,21 +179,18 @@ class EGTFile:
                 rec.bb = ClusterStats(bb_t_mean, bb_t_dev, bb_r_mean, bb_r_dev, bb_n)
 
                 # Read extra fields based on data block version
+                # Matches clusterrecord_read() from gtc2vcf/idat2gtc.c:
+                #   version >= 7: intensity_threshold + 14 extra floats
+                #   version < 5:  no extra fields
+                #   version 5:    no extra fields
+                #   version 6:    unsupported in reference
                 extra = []
-                if egt.data_block_version == 9:
+                if egt.data_block_version >= 7:
                     rec.intensity_threshold = read_float(f)
                     for _ in range(14):
                         extra.append(read_float(f))
-                elif egt.data_block_version >= 6:
-                    rec.intensity_threshold = 0.0
-                    for _ in range(15):
-                        extra.append(read_float(f))
-                elif egt.data_block_version < 5:
-                    rec.intensity_threshold = 0.0
-                    extra.append(read_float(f))
-                    extra.append(read_float(f))
                 else:
-                    raise ValueError(f"Unsupported data block version {egt.data_block_version}")
+                    rec.intensity_threshold = 0.0
 
                 rec.extra_floats = extra
                 records.append(rec)
@@ -259,23 +261,13 @@ class EGTFile:
                 write_float(f, rec.ab.theta_mean)
                 write_float(f, rec.bb.theta_mean)
 
-                # Extra fields
-                if self.data_block_version == 9:
+                # Extra fields (matching corrected reader)
+                if self.data_block_version >= 7:
                     write_float(f, rec.intensity_threshold)
                     for val in rec.extra_floats[:14]:
                         write_float(f, val)
                     # Pad if needed
                     for _ in range(14 - len(rec.extra_floats)):
-                        write_float(f, 0.0)
-                elif self.data_block_version >= 6:
-                    for val in rec.extra_floats[:15]:
-                        write_float(f, val)
-                    for _ in range(15 - len(rec.extra_floats)):
-                        write_float(f, 0.0)
-                elif self.data_block_version < 5:
-                    for val in rec.extra_floats[:2]:
-                        write_float(f, val)
-                    for _ in range(2 - len(rec.extra_floats)):
                         write_float(f, 0.0)
 
             # Write cluster scores
@@ -367,14 +359,19 @@ class GTCFile:
             return np.frombuffer(f.read(n * 2), dtype=np.uint16)
 
     def get_normalization_transforms(self):
-        """Return list of normalization transforms."""
+        """Return list of normalization transforms.
+
+        Each XForm in the GTC file is 52 bytes:
+          version(int32) + offset_x(f) + offset_y(f) + scale_x(f) +
+          scale_y(f) + shear(f) + theta(f) + cvx(f) + cvy(f) +
+          nn12(f) + rr12(f) + taa(f) + tbb(f)
+        We must read all 52 bytes per transform to stay aligned.
+        """
         with open(self.filepath, "rb") as f:
             f.seek(self.toc[self._ID_NORMALIZATION_TRANSFORMS])
             n = read_int(f)
             transforms = []
             for _ in range(n):
-                # Each transform: version(int), offset_x(f), offset_y(f),
-                # scale_x(f), scale_y(f), shear(f), theta(f)
                 _ver = read_int(f)
                 offset_x = read_float(f)
                 offset_y = read_float(f)
@@ -382,7 +379,9 @@ class GTCFile:
                 scale_y = read_float(f)
                 shear = read_float(f)
                 theta = read_float(f)
-                # Reserved bytes (depends on version)
+                # Read remaining 6 floats (cvx, cvy, nn12, rr12, taa, tbb)
+                # to stay aligned for the next transform
+                f.read(6 * 4)  # skip 24 bytes
                 transforms.append({
                     "offset_x": offset_x, "offset_y": offset_y,
                     "scale_x": scale_x, "scale_y": scale_y,
@@ -414,7 +413,7 @@ class GTCFile:
             n = read_int(f)
             raw_y = np.frombuffer(f.read(n * 2), dtype=np.uint16)
 
-            # Normalization transforms
+            # Normalization transforms (52 bytes each)
             f.seek(self.toc[self._ID_NORMALIZATION_TRANSFORMS])
             n = read_int(f)
             transforms = []
@@ -426,6 +425,8 @@ class GTCFile:
                 scale_y = read_float(f)
                 shear = read_float(f)
                 theta = read_float(f)
+                # Skip remaining 6 floats (cvx, cvy, nn12, rr12, taa, tbb)
+                f.read(6 * 4)
                 transforms.append({
                     "offset_x": offset_x, "offset_y": offset_y,
                     "scale_x": scale_x, "scale_y": scale_y,
@@ -461,11 +462,20 @@ def _read_bpm_string(f):
 
 
 class BPMFile:
-    """Minimal BPM reader for normalization ID lookups.
+    """BPM reader for normalization ID lookups and assay type extraction.
 
     Reads the Illumina BPM (Bead Pool Manifest) binary format to extract
-    locus names and normalization IDs needed for intensity normalization
-    during reclustering.
+    locus names, normalization IDs, and assay types needed for intensity
+    normalization during reclustering.
+
+    Critical implementation detail (from gtc2vcf reference):
+      The raw norm_ids from the BPM are modified by assay_type before use:
+        norm_ids[idx] += 100 * assay_type
+      This separates Infinium I (A/T), Infinium I (G/C), and Infinium II
+      probes into distinct normalization bins. A norm_lookups table then
+      maps these modified IDs to compact sequential transform indices
+      (0, 1, 2, ...) which index into the normalization transforms stored
+      in GTC files.
 
     BPM binary format (verified against HumanOmni2.5-4v1-Multi_B.bpm):
       Header:
@@ -481,14 +491,30 @@ class BPMFile:
         - names: num_loci × .NET length-prefixed strings
       Normalization IDs:
         - norm_ids: num_loci bytes (one byte per locus)
+      Locus entries:
+        - per-locus records with assay_type, addresses, etc.
     """
 
     def __init__(self, filepath):
         self.filepath = filepath
         self.names = []
-        self.norm_ids = []
+        self.norm_ids = []        # raw norm_ids (before assay_type modification)
+        self.resolved_norm_ids = []  # compact transform indices (after norm_lookups)
+        self.norm_lookups = {}    # modified norm_id -> compact transform index
         self.num_loci = 0
         self._read()
+
+    @staticmethod
+    def _build_norm_lookups(modified_norm_ids):
+        """Build norm_lookups: map modified norm_ids to compact sequential indices.
+
+        Mirrors bpm_norm_lookups() from gtc2vcf/idat2gtc.c:
+          - Collect unique modified norm_ids
+          - Sort them
+          - Assign sequential indices 0, 1, 2, ...
+        """
+        unique_ids = sorted(set(modified_norm_ids))
+        return {nid: idx for idx, nid in enumerate(unique_ids)}
 
     def _read(self):
         with open(self.filepath, "rb") as f:
@@ -498,8 +524,11 @@ class BPMFile:
                 raise ValueError(f"Not a BPM file: {self.filepath}")
             _version = read_byte(f)
             _version_int = read_int(f)
+            if _version_int & 0x1000:
+                _version_int ^= 0x1000
             manifest_name = _read_bpm_string(f)
-            _controls = _read_bpm_string(f)
+            if _version_int > 1:
+                _controls = _read_bpm_string(f)
             self.num_loci = read_int(f)
 
             print(f"  BPM version: {_version}.{_version_int}, manifest: {manifest_name}",
@@ -514,12 +543,9 @@ class BPMFile:
 
             # --- Locus index array ---
             # Array of num_loci int32 values (1-based sequential indices).
-            # These are just sequential IDs (1, 2, 3, ..., num_loci) and
-            # can be skipped. We seek past them: 4 bytes × num_loci.
-            index_block_size = self.num_loci * 4
-            f.seek(index_block_size, 1)  # seek relative to current position
-            print(f"  Skipped {index_block_size} bytes of index array",
-                  file=sys.stderr)
+            index_data = struct.unpack(f"<{self.num_loci}i",
+                                       f.read(self.num_loci * 4))
+            print(f"  Read {self.num_loci} index entries", file=sys.stderr)
 
             # --- Locus names ---
             # num_loci .NET length-prefixed strings (probe/locus names).
@@ -547,36 +573,179 @@ class BPMFile:
             # --- Normalization IDs ---
             # Stored as a contiguous array of num_loci bytes immediately
             # after the locus names block.
+            raw_norm_ids = [0] * self.num_loci
             try:
                 norm_bytes = f.read(self.num_loci)
                 if len(norm_bytes) == self.num_loci:
-                    self.norm_ids = list(norm_bytes)
-                    max_nid = max(self.norm_ids) if self.norm_ids else 0
-                    print(f"  Read {len(self.norm_ids)} normalization IDs "
+                    raw_norm_ids = list(norm_bytes)
+                    max_nid = max(raw_norm_ids) if raw_norm_ids else 0
+                    print(f"  Read {len(raw_norm_ids)} normalization IDs "
                           f"(range: 0-{max_nid})", file=sys.stderr)
                 else:
                     print(f"  WARNING: Expected {self.num_loci} norm ID bytes, "
                           f"got {len(norm_bytes)}. Using defaults.",
                           file=sys.stderr)
-                    self.norm_ids = [0] * self.num_loci
             except Exception as e:
                 print(f"  WARNING: Could not read normalization IDs: {e}. "
                       f"Using defaults.", file=sys.stderr)
-                self.norm_ids = [0] * self.num_loci
+
+            # --- Locus entries ---
+            # Parse locus entries to extract assay_type and index per probe.
+            # This follows the locusentry_read() function from idat2gtc.c.
+            # assay_type: 0 = Infinium II, 1 = Infinium I (A/T), 2 = Infinium I (G/C)
+            modified_norm_ids = list(raw_norm_ids)  # will be modified in-place
+            assay_type_counts = {0: 0, 1: 0, 2: 0}
+            locus_entries_parsed = 0
+
+            try:
+                for _entry_idx in range(self.num_loci):
+                    # Read locus entry version
+                    entry_version = read_int(f)
+                    if entry_version < 4 or entry_version == 5 or entry_version > 8:
+                        print(f"  WARNING: Unsupported locus entry version "
+                              f"{entry_version} at entry {_entry_idx}. "
+                              f"Stopping locus entry parsing.", file=sys.stderr)
+                        break
+
+                    # ilmn_id
+                    _read_bpm_string(f)
+                    # name
+                    _read_bpm_string(f)
+                    # 3 skipped strings
+                    _read_bpm_string(f)
+                    _read_bpm_string(f)
+                    _read_bpm_string(f)
+                    # index (1-based)
+                    locus_index = read_int(f)
+                    idx = locus_index - 1
+                    # 1 skipped string
+                    _read_bpm_string(f)
+                    # ilmn_strand
+                    _read_bpm_string(f)
+                    # snp
+                    _read_bpm_string(f)
+                    # chrom
+                    _read_bpm_string(f)
+                    # ploidy
+                    _read_bpm_string(f)
+                    # species
+                    _read_bpm_string(f)
+                    # map_info
+                    _read_bpm_string(f)
+                    # top_genomic_seq (version 4 only, but present in all versions we support)
+                    _read_bpm_string(f)
+                    # customer_strand
+                    _read_bpm_string(f)
+                    # address_a (int32)
+                    _address_a = read_int(f)
+                    # address_b (int32)
+                    _address_b = read_int(f)
+                    # allele_a_probe_seq
+                    _read_bpm_string(f)
+                    # allele_b_probe_seq
+                    _read_bpm_string(f)
+                    # genome_build
+                    _read_bpm_string(f)
+                    # source
+                    _read_bpm_string(f)
+                    # source_version
+                    _read_bpm_string(f)
+                    # source_strand
+                    _read_bpm_string(f)
+                    # source_seq
+                    _read_bpm_string(f)
+
+                    assay_type = 0
+                    if entry_version >= 6:
+                        # 1 skipped byte
+                        f.read(1)
+                        # exp_clusters (1 byte)
+                        f.read(1)
+                        # intensity_only (1 byte)
+                        f.read(1)
+                        # assay_type (1 byte)
+                        assay_type = read_byte(f)
+
+                        if assay_type > 2:
+                            print(f"  WARNING: Invalid assay_type {assay_type} "
+                                  f"at entry {_entry_idx}. Defaulting to 0.",
+                                  file=sys.stderr)
+                            assay_type = 0
+                    else:
+                        # For older BPM versions, infer assay_type from address_b
+                        # address_b == 0 means Infinium II (assay_type=0)
+                        # address_b != 0 means Infinium I (assay_type inferred)
+                        if _address_b != 0:
+                            assay_type = 1  # default to Infinium I (A/T)
+
+                    if entry_version >= 7:
+                        # frac_a, frac_c, frac_g, frac_t (4 floats = 16 bytes)
+                        f.read(16)
+                    if entry_version == 8:
+                        # ref_strand string
+                        _read_bpm_string(f)
+
+                    # Modify norm_id by assay_type (matching idat2gtc.c)
+                    if 0 <= idx < self.num_loci:
+                        modified_norm_ids[idx] += 100 * assay_type
+                        assay_type_counts[assay_type] = \
+                            assay_type_counts.get(assay_type, 0) + 1
+
+                    locus_entries_parsed += 1
+                    if (locus_entries_parsed) % 500000 == 0:
+                        print(f"    Parsed {locus_entries_parsed}/{self.num_loci} "
+                              f"locus entries...", file=sys.stderr)
+
+                print(f"  Parsed {locus_entries_parsed} locus entries", file=sys.stderr)
+                print(f"  Assay types: Infinium II={assay_type_counts.get(0, 0)}, "
+                      f"Infinium I (A/T)={assay_type_counts.get(1, 0)}, "
+                      f"Infinium I (G/C)={assay_type_counts.get(2, 0)}",
+                      file=sys.stderr)
+
+            except Exception as e:
+                print(f"  WARNING: Failed parsing locus entries at entry "
+                      f"{locus_entries_parsed}: {e}", file=sys.stderr)
+                print(f"  Will use raw norm_ids without assay_type correction. "
+                      f"This may produce incorrect normalization.", file=sys.stderr)
+                if locus_entries_parsed == 0:
+                    modified_norm_ids = list(raw_norm_ids)
+
+            # Build norm_lookups mapping and resolved_norm_ids
+            self.norm_ids = raw_norm_ids
+            self.norm_lookups = self._build_norm_lookups(modified_norm_ids)
+            self.resolved_norm_ids = [
+                self.norm_lookups.get(nid, 0) for nid in modified_norm_ids
+            ]
+
+            n_unique = len(self.norm_lookups)
+            print(f"  Normalization bins: {n_unique} unique transform indices "
+                  f"(from {len(set(raw_norm_ids))} raw + assay_type expansion)",
+                  file=sys.stderr)
 
 
 def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
     """
     Apply Illumina normalization transforms to raw intensities.
 
+    Matches the reference implementation raw_x_y2norm_x_y() and
+    norm_x_y2ilmn_theta_r() from gtc2vcf/idat2gtc.c:
+
+      1. Subtract offset_x, offset_y
+      2. Rotate by theta (using cos/sin)
+      3. Apply shear correction
+      4. Divide by scale_x, scale_y
+      5. Clamp to non-negative
+
+    The norm_ids parameter should be the resolved/compact transform indices
+    (from BPMFile.resolved_norm_ids), NOT the raw normalization IDs.
+
     Returns normalized X, Y arrays and derived theta, R arrays.
 
-    Vectorized: groups probes by normalization ID and applies each
-    transform as a bulk NumPy operation instead of a per-probe loop.
+    Vectorized: uses fancy indexing for bulk operations.
     """
     n = len(raw_x)
 
-    # Build per-probe transform parameter arrays by normalization ID
+    # Build per-probe transform index array
     nids = np.array(norm_ids[:n], dtype=np.int32) if len(norm_ids) >= n else \
         np.zeros(n, dtype=np.int32)
     num_transforms = len(transforms)
@@ -588,27 +757,55 @@ def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
     t_shear = np.array([t["shear"] for t in transforms], dtype=np.float64)
     t_scale_x = np.array([t["scale_x"] for t in transforms], dtype=np.float64)
     t_scale_y = np.array([t["scale_y"] for t in transforms], dtype=np.float64)
+    t_theta = np.array([t["theta"] for t in transforms], dtype=np.float64)
 
-    # Vectorized normalization via fancy indexing
-    x = raw_x.astype(np.float64) - t_offset_x[nids]
-    y = raw_y.astype(np.float64) - t_offset_y[nids]
+    # Precompute cos/sin of rotation angle per transform
+    t_cos = np.cos(t_theta)
+    t_sin = np.sin(t_theta)
 
-    # Apply shear and scale
-    norm_x = (x + t_shear[nids] * y) * t_scale_x[nids]
-    norm_y = y * t_scale_y[nids]
+    # Step 1: Subtract offsets
+    temp_x = raw_x.astype(np.float64) - t_offset_x[nids]
+    temp_y = raw_y.astype(np.float64) - t_offset_y[nids]
 
-    # Clamp to non-negative
+    # Step 2: Rotation
+    cos_vals = t_cos[nids]
+    sin_vals = t_sin[nids]
+    rot_x = cos_vals * temp_x + sin_vals * temp_y
+    rot_y = -sin_vals * temp_x + cos_vals * temp_y
+
+    # Step 3: Shear correction
+    sheared_x = rot_x - t_shear[nids] * rot_y
+
+    # Step 4: Scale (divide, not multiply)
+    # Protect against division by zero
+    sx = t_scale_x[nids]
+    sy = t_scale_y[nids]
+    sx = np.where(sx == 0, 1.0, sx)
+    sy = np.where(sy == 0, 1.0, sy)
+    norm_x = sheared_x / sx
+    norm_y = rot_y / sy
+
+    # Step 5: Clamp to non-negative
     np.maximum(norm_x, 0.0, out=norm_x)
     np.maximum(norm_y, 0.0, out=norm_y)
 
     # Compute theta and R (Illumina polar coordinates)
-    # theta = (2/pi) * arctan2(Y, X), so theta in [0, 1]
-    # R = X + Y (total intensity)
+    # Matches norm_x_y2ilmn_theta_r() from idat2gtc.c:
+    #   theta = (2/pi) * arctan2(Y, X)
+    #   R = |X| + |Y|  (but if both < 0, R = FLT_MIN * FLT_EPSILON)
+    # After clamping, X and Y are >= 0, so R = X + Y
+    # Special case: if both are 0, theta and R are NaN
+    both_zero = (norm_x == 0.0) & (norm_y == 0.0)
+
     with np.errstate(divide="ignore", invalid="ignore"):
         theta = (2.0 / np.pi) * np.arctan2(norm_y, norm_x)
-        r = norm_x + norm_y
+        r = np.abs(norm_x) + np.abs(norm_y)
 
-    # Handle NaN/inf
+    # Set both-zero probes to NaN (matching reference)
+    theta[both_zero] = np.nan
+    r[both_zero] = np.nan
+
+    # For reclustering, replace NaN with 0 so they don't contribute
     theta = np.nan_to_num(theta, nan=0.0)
     r = np.nan_to_num(r, nan=0.0)
 
@@ -626,7 +823,10 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
     Args:
         egt: Original EGTFile (used as template and fallback)
         gtc_files: List of GTCFile objects for high-quality samples
-        norm_ids: List of normalization IDs per probe (from BPM)
+        norm_ids: List of resolved/compact normalization transform indices
+                  per probe (from BPMFile.resolved_norm_ids). These map
+                  directly into the normalization transforms array stored
+                  in each GTC file.
         min_samples_per_cluster: Minimum samples needed to recompute a cluster
 
     Returns:
@@ -906,7 +1106,7 @@ def main():
 
     # Perform reclustering
     print("Reclustering...", file=sys.stderr)
-    new_egt = recluster(egt, gtc_files, bpm.norm_ids, args.min_cluster_samples)
+    new_egt = recluster(egt, gtc_files, bpm.resolved_norm_ids, args.min_cluster_samples)
 
     # Write new EGT
     print(f"Writing reclustered EGT: {args.output_egt}", file=sys.stderr)
