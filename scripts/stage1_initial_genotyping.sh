@@ -351,7 +351,7 @@ else
         --gtcs "${GTC_DIR}" \
         --extra "${EXTRA_TSV}" \
         --threads "${THREADS}" | \
-    bcftools sort -Ob -T "${OUTPUT_DIR}/bcftools." \
+    bcftools sort -Ob -m 4G -T "${OUTPUT_DIR}/bcftools." \
         -o "${PRE_NORM_BCF}" --write-index
 
     # Diagnostic: count variants before normalization
@@ -369,6 +369,7 @@ else
     NORM_LOG="${QC_DIR}/norm_warnings.log"
 
     bcftools norm --no-version -Ob -c ws -f "${REF_FASTA}" \
+        --threads "${THREADS}" \
         "${PRE_NORM_BCF}" \
         -o "${VCF_OUTPUT}.tmp" --write-index 2>"${NORM_LOG}"
 
