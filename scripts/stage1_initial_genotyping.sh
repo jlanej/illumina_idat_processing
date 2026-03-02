@@ -294,7 +294,7 @@ else
         echo "  Failed sample report: ${FAILED_LOG}"
         echo ""
         echo "  Failed samples:"
-        tail -n +2 "${FAILED_LOG}" | while IFS=$'\t' read -r sid grn red err ts; do
+        tail -n +2 "${FAILED_LOG}" | while IFS=$'\t' read -r sid grn red err _; do
             echo "    - ${sid}: ${err}"
         done
         echo ""
