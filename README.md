@@ -18,22 +18,31 @@ The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstre
 
 ## Quick Start
 
-### Using Docker / Apptainer (recommended for HPC)
+### Apptainer (recommended for HPC)
 
-A pre-built container image is available from GitHub Container Registry:
+A pre-built container image is available from GitHub Container Registry.
+Run the pipeline directly via Apptainer — no local installation required:
 
 ```bash
-# Docker
-docker pull ghcr.io/jlanej/illumina_idat_processing:main
-docker run -v /path/to/data:/data ghcr.io/jlanej/illumina_idat_processing:main \
-    /opt/scripts/run_pipeline.sh \
-    --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
-
-# Apptainer / Singularity (HPC)
+# Pull the image (optional — Apptainer can also pull on-demand)
 apptainer pull docker://ghcr.io/jlanej/illumina_idat_processing:main
+
+# Run the full pipeline (auto-downloads manifests and reference for known arrays)
 apptainer exec --bind /path/to/data:/data illumina_idat_processing_main.sif \
     bash /opt/scripts/run_pipeline.sh \
-    --idat-dir /data/idats --array-name GSA-24v3-0_A1 --output-dir /data/output
+    --idat-dir /data/idats \
+    --array-name GSA-24v3-0_A1 \
+    --output-dir /data/output
+
+# With pre-downloaded manifests and reference
+apptainer exec --bind /path/to/data:/data illumina_idat_processing_main.sif \
+    bash /opt/scripts/run_pipeline.sh \
+    --idat-dir /data/idats \
+    --bpm /data/manifests/array.bpm \
+    --egt /data/manifests/array.egt \
+    --csv /data/manifests/array.csv \
+    --ref-fasta /data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+    --output-dir /data/output
 ```
 
 ### 1000 Genomes Example
@@ -41,52 +50,27 @@ apptainer exec --bind /path/to/data:/data illumina_idat_processing_main.sif \
 Process 1000 Genomes Omni2.5 IDAT data (downloads automatically):
 
 ```bash
-# Process 200 samples (quick test)
-bash scripts/process_1000g.sh --output-dir ./1000g_output --num-samples 200
-
 # Process all ~2141 samples on HPC with Apptainer
 apptainer exec --bind $PWD illumina_idat_processing_main.sif \
     bash /opt/scripts/process_1000g.sh \
     --output-dir $PWD/1000g_output --num-samples all --threads 8
 ```
 
-### From Source
-
-```bash
-# 1. Install dependencies (bcftools + plugins)
-bash scripts/install_dependencies.sh --prefix $HOME/bin
-export PATH="$HOME/bin:$PATH"
-export BCFTOOLS_PLUGINS="$HOME/bin"
-
-# 2. Run the pipeline (minimal arguments - auto-downloads manifests and reference)
-bash scripts/run_pipeline.sh \
-    --idat-dir /path/to/idat/files \
-    --array-name GSA-24v3-0_A1 \
-    --output-dir /path/to/output
-```
-
-The pipeline will:
-- Download the correct BPM, EGT, and CSV manifest files for the specified array
-- Download the GRCh38 reference genome
-- Run Stage 1 (initial genotyping + QC)
-- Run Stage 2 (recluster on high-quality samples + reprocess)
+> **Other run methods** (Docker, from source): see [docs/alternative_run_methods.md](docs/alternative_run_methods.md).
 
 ## Requirements
 
 - Linux (tested on Ubuntu/Debian, should work on any HPC)
-- GCC 5+ (for compiling bcftools and plugins)
-- Python 3.6+ with NumPy (for EGT reclustering in Stage 2)
-- Standard tools: `wget`, `samtools`, `make`
-- ~30 GB disk for GRCh38 reference genome
-
-All other dependencies (bcftools, gtc2vcf, idat2gtc) are installed by `scripts/install_dependencies.sh`.
+- [Apptainer](https://apptainer.org/) (formerly Singularity) for running the container
+- ~30 GB disk for GRCh38 reference genome (auto-downloaded on first run)
 
 ## Usage
 
-### Full Pipeline
+### Full Pipeline (via Apptainer)
 
 ```bash
-bash scripts/run_pipeline.sh [OPTIONS]
+apptainer exec --bind $PWD illumina_idat_processing_main.sif \
+    bash /opt/scripts/run_pipeline.sh [OPTIONS]
 ```
 
 **Required:**
@@ -120,20 +104,22 @@ bash scripts/run_pipeline.sh [OPTIONS]
 
 ### Individual Scripts
 
-Each stage can also be run independently:
+Each stage can also be run independently via Apptainer:
 
 ```bash
-# Install dependencies
-bash scripts/install_dependencies.sh --prefix /path/to/install
+SIF=illumina_idat_processing_main.sif
 
 # Download manifests for a known array
-bash scripts/download_manifests.sh --array-name GSA-24v3-0_A1 --output-dir manifests/
+apptainer exec --bind $PWD $SIF \
+    bash /opt/scripts/download_manifests.sh --array-name GSA-24v3-0_A1 --output-dir manifests/
 
 # Download reference genome
-bash scripts/download_reference.sh --genome GRCh38 --output-dir reference/
+apptainer exec --bind $PWD $SIF \
+    bash /opt/scripts/download_reference.sh --genome GRCh38 --output-dir reference/
 
 # Stage 1: Initial genotyping
-bash scripts/stage1_initial_genotyping.sh \
+apptainer exec --bind $PWD $SIF \
+    bash /opt/scripts/stage1_initial_genotyping.sh \
     --idat-dir /path/to/idats \
     --bpm manifests/GSA-24v3-0_A1.bpm \
     --egt manifests/GSA-24v3-0_A1_ClusterFile.egt \
@@ -142,7 +128,8 @@ bash scripts/stage1_initial_genotyping.sh \
     --output-dir output/stage1
 
 # Stage 2: Recluster and reprocess
-bash scripts/stage2_recluster.sh \
+apptainer exec --bind $PWD $SIF \
+    bash /opt/scripts/stage2_recluster.sh \
     --idat-dir /path/to/idats \
     --bpm manifests/GSA-24v3-0_A1.bpm \
     --egt manifests/GSA-24v3-0_A1_ClusterFile.egt \
@@ -154,19 +141,37 @@ bash scripts/stage2_recluster.sh \
 
 ### WDL Workflow
 
-An optional [WDL](https://openwdl.org/) workflow is provided at `wdl/illumina_idat_processing.wdl` for use with [Cromwell](https://cromwell.readthedocs.io/) or [Terra](https://terra.bio/):
+A [WDL](https://openwdl.org/) workflow is provided at `wdl/illumina_idat_processing.wdl` for use with [Cromwell](https://cromwell.readthedocs.io/) on HPC or cloud.
+The WDL calls `run_pipeline.sh` inside the pre-built container image, keeping the workflow simple and always in sync with the pipeline.
+
+**Quickstart** — download Cromwell and generate a template inputs file in one step:
+
+```bash
+bash wdl/quickstart.sh --output-dir ./cromwell_run
+```
+
+Then fill in `cromwell_run/inputs_template.json` with your data paths and run:
+
+```bash
+java -Dconfig.file=cromwell_run/cromwell_apptainer.conf \
+    -jar cromwell_run/cromwell-87.jar run \
+    wdl/illumina_idat_processing.wdl \
+    --inputs cromwell_run/inputs.json
+```
+
+Example inputs JSON:
 
 ```json
 {
-  "illumina_idat_processing.sample_set_id": "my_cohort",
-  "illumina_idat_processing.green_idat_files": ["gs://bucket/sample1_Grn.idat"],
-  "illumina_idat_processing.red_idat_files": ["gs://bucket/sample1_Red.idat"],
-  "illumina_idat_processing.sample_ids": ["sample1"],
-  "illumina_idat_processing.bpm_file": "gs://bucket/manifests/array.bpm",
-  "illumina_idat_processing.egt_file": "gs://bucket/manifests/array.egt",
-  "illumina_idat_processing.csv_file": "gs://bucket/manifests/array.csv",
-  "illumina_idat_processing.ref_fasta": "gs://bucket/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
-  "illumina_idat_processing.ref_fasta_fai": "gs://bucket/ref/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai"
+  "illumina_idat_processing.idat_files": [
+    "/data/sample1_Grn.idat", "/data/sample1_Red.idat",
+    "/data/sample2_Grn.idat", "/data/sample2_Red.idat"
+  ],
+  "illumina_idat_processing.bpm_file":      "/data/manifests/array.bpm",
+  "illumina_idat_processing.egt_file":      "/data/manifests/array.egt",
+  "illumina_idat_processing.csv_file":      "/data/manifests/array.csv",
+  "illumina_idat_processing.ref_fasta":     "/data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
+  "illumina_idat_processing.ref_fasta_fai": "/data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai"
 }
 ```
 
