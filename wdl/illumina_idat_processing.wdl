@@ -2,19 +2,17 @@ version 1.0
 
 ## Illumina IDAT Processing Pipeline
 ##
-## Two-stage processing of raw Illumina array IDAT data:
-##   Stage 1: Initial genotyping (IDAT → GTC → VCF) with per-sample QC
-##   Stage 2: Recluster on high-quality samples, reprocess all samples
+## Runs the two-stage Illumina IDAT processing pipeline by calling
+## run_pipeline.sh inside the pre-built container image:
+##   ghcr.io/jlanej/illumina_idat_processing
 ##
-## Inspired by mocha (https://github.com/freeseek/mocha) and mochawdl
-## (https://github.com/freeseek/mochawdl).
+## For a quickstart with Cromwell and Apptainer, run:
+##   bash wdl/quickstart.sh
 
 workflow illumina_idat_processing {
   input {
-    String sample_set_id
-    Array[File] green_idat_files
-    Array[File] red_idat_files
-    Array[String] sample_ids
+    # All IDAT files (green and red, all in one array)
+    Array[File] idat_files
 
     # Manifest files
     File bpm_file
@@ -30,636 +28,109 @@ workflow illumina_idat_processing {
     Float max_lrr_sd = 0.35
 
     # Processing options
-    Int threads = 4
+    Int     threads     = 4
     Boolean skip_stage2 = false
-    String docker = "us.gcr.io/mccarroll-mocha/bcftools:1.21-20250101"
+
+    String docker = "ghcr.io/jlanej/illumina_idat_processing:main"
   }
 
-  # Stage 1: Initial genotyping
-  call idat_to_gtc as stage1_idat2gtc {
+  call run_pipeline {
     input:
-      green_idat_files = green_idat_files,
-      red_idat_files = red_idat_files,
-      bpm_file = bpm_file,
-      egt_file = egt_file,
-      filebase = sample_set_id + ".stage1",
-      docker = docker,
-  }
-
-  call gtc_to_vcf as stage1_gtc2vcf {
-    input:
-      gtc_files = stage1_idat2gtc.gtc_files,
-      bpm_file = bpm_file,
-      csv_file = csv_file,
-      egt_file = egt_file,
-      ref_fasta = ref_fasta,
+      idat_files    = idat_files,
+      bpm_file      = bpm_file,
+      egt_file      = egt_file,
+      csv_file      = csv_file,
+      ref_fasta     = ref_fasta,
       ref_fasta_fai = ref_fasta_fai,
-      sample_ids = sample_ids,
-      adjust_clusters = false,
-      threads = threads,
-      filebase = sample_set_id + ".stage1",
-      docker = docker,
-  }
-
-  call compute_qc_metrics as stage1_qc {
-    input:
-      vcf_file = stage1_gtc2vcf.vcf_file,
-      vcf_idx = stage1_gtc2vcf.vcf_idx,
-      filebase = sample_set_id + ".stage1",
-      threads = threads,
-      docker = docker,
-  }
-
-  call compute_variant_qc as stage1_variant_qc {
-    input:
-      vcf_file = stage1_gtc2vcf.vcf_file,
-      vcf_idx = stage1_gtc2vcf.vcf_idx,
-      filebase = sample_set_id + ".stage1",
-      threads = threads,
-      docker = docker,
-  }
-
-  # Stage 2: Recluster on high-quality samples and reprocess
-  if (!skip_stage2) {
-    call select_hq_samples {
-      input:
-        qc_tsv = stage1_qc.qc_tsv,
-        min_call_rate = min_call_rate,
-        max_lrr_sd = max_lrr_sd,
-        filebase = sample_set_id,
-        docker = docker,
-    }
-
-    call recluster_egt {
-      input:
-        original_egt = egt_file,
-        bpm_file = bpm_file,
-        gtc_files = stage1_idat2gtc.gtc_files,
-        hq_samples = select_hq_samples.hq_samples,
-        filebase = sample_set_id,
-        docker = docker,
-    }
-
-    call idat_to_gtc as stage2_idat2gtc {
-      input:
-        green_idat_files = green_idat_files,
-        red_idat_files = red_idat_files,
-        bpm_file = bpm_file,
-        egt_file = recluster_egt.reclustered_egt,
-        filebase = sample_set_id + ".stage2",
-        docker = docker,
-    }
-
-    call gtc_to_vcf as stage2_gtc2vcf {
-      input:
-        gtc_files = stage2_idat2gtc.gtc_files,
-        bpm_file = bpm_file,
-        csv_file = csv_file,
-        egt_file = recluster_egt.reclustered_egt,
-        ref_fasta = ref_fasta,
-        ref_fasta_fai = ref_fasta_fai,
-        sample_ids = sample_ids,
-        adjust_clusters = true,
-        threads = threads,
-        filebase = sample_set_id + ".stage2",
-        docker = docker,
-    }
-
-    call compute_qc_metrics as stage2_qc {
-      input:
-        vcf_file = stage2_gtc2vcf.vcf_file,
-        vcf_idx = stage2_gtc2vcf.vcf_idx,
-        filebase = sample_set_id + ".stage2",
-        threads = threads,
-        docker = docker,
-    }
-
-    call compute_variant_qc as stage2_variant_qc {
-      input:
-        vcf_file = stage2_gtc2vcf.vcf_file,
-        vcf_idx = stage2_gtc2vcf.vcf_idx,
-        filebase = sample_set_id + ".stage2",
-        threads = threads,
-        docker = docker,
-    }
-
-    call compare_qc {
-      input:
-        stage1_qc_tsv = stage1_qc.qc_tsv,
-        stage2_qc_tsv = stage2_qc.qc_tsv,
-        filebase = sample_set_id,
-        docker = docker,
-    }
+      min_call_rate = min_call_rate,
+      max_lrr_sd    = max_lrr_sd,
+      threads       = threads,
+      skip_stage2   = skip_stage2,
+      docker        = docker,
   }
 
   output {
-    File final_vcf = select_first([stage2_gtc2vcf.vcf_file, stage1_gtc2vcf.vcf_file])
-    File final_vcf_idx = select_first([stage2_gtc2vcf.vcf_idx, stage1_gtc2vcf.vcf_idx])
-    File final_qc_tsv = select_first([stage2_qc.qc_tsv, stage1_qc.qc_tsv])
-    File stage1_qc_tsv = stage1_qc.qc_tsv
-    File stage1_variant_qc_summary = stage1_variant_qc.variant_qc_summary
-    Array[File] gtc_files = select_first([stage2_idat2gtc.gtc_files, stage1_idat2gtc.gtc_files])
-    File? reclustered_egt_file = recluster_egt.reclustered_egt
-    File? hq_samples_file = select_hq_samples.hq_samples
-    File? excluded_samples_file = select_hq_samples.excluded_samples
-    File? qc_comparison_report = compare_qc.comparison_report
-    File? qc_comparison_plot = compare_qc.comparison_plot
-    File? stage2_variant_qc_summary_file = stage2_variant_qc.variant_qc_summary
+    File  final_vcf            = run_pipeline.final_vcf
+    File  final_vcf_idx        = run_pipeline.final_vcf_idx
+    File  final_qc_tsv         = run_pipeline.final_qc_tsv
+    File  stage1_qc_tsv        = run_pipeline.stage1_qc_tsv
+    File? qc_diagnostic_report = run_pipeline.qc_diagnostic_report
   }
 
   meta {
-    description: "Two-stage Illumina IDAT processing pipeline: initial genotyping with QC, followed by reclustering on high-quality samples."
+    description: "Two-stage Illumina IDAT processing pipeline. Calls run_pipeline.sh inside the pre-built container image ghcr.io/jlanej/illumina_idat_processing."
   }
 }
 
 # ============================================================
-# Task: Convert IDAT files to GTC files
+# Task: Run the complete pipeline via run_pipeline.sh
 # ============================================================
-task idat_to_gtc {
+task run_pipeline {
   input {
-    Array[File] green_idat_files
-    Array[File] red_idat_files
+    Array[File] idat_files
     File bpm_file
     File egt_file
-    String filebase
-
-    String docker
-    Int cpu = 1
-    Int disk_size = 50
-    Float memory = 8.0
-    Int preemptible = 1
-    Int maxRetries = 0
-  }
-
-  command <<<
-    set -euo pipefail
-    mkdir -p gtc_output
-
-    green_files=(~{sep=' ' green_idat_files})
-    red_files=(~{sep=' ' red_idat_files})
-
-    # Build interleaved green/red IDAT pairs.
-    # idat2gtc expects pairs: <green.idat> <red.idat> [<green.idat> <red.idat> ...]
-    idat_args=()
-    for (( i=0; i<${#green_files[@]}; i++ )); do
-      idat_args+=("${green_files[i]}" "${red_files[i]}")
-    done
-
-    bcftools +idat2gtc \
-      --bpm ~{bpm_file} \
-      --egt ~{egt_file} \
-      --output gtc_output \
-      "${idat_args[@]}"
-
-    ls gtc_output/*.gtc > gtc_list.txt
-  >>>
-
-  output {
-    Array[File] gtc_files = read_lines("gtc_list.txt")
-  }
-
-  runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
-    preemptible: preemptible
-    maxRetries: maxRetries
-  }
-}
-
-# ============================================================
-# Task: Convert GTC files to VCF
-# ============================================================
-task gtc_to_vcf {
-  input {
-    Array[File] gtc_files
-    File bpm_file
     File csv_file
-    File egt_file
     File ref_fasta
     File ref_fasta_fai
-    Array[String] sample_ids
-    Boolean adjust_clusters
-    Int threads
-    String filebase
+    Float   min_call_rate
+    Float   max_lrr_sd
+    Int     threads
+    Boolean skip_stage2
 
     String docker
-    Int cpu = 4
-    Int disk_size = 100
-    Float memory = 16.0
-    Int preemptible = 1
-    Int maxRetries = 0
+    Int    cpu         = 8
+    Int    disk_size   = 500
+    Float  memory      = 32.0
+    Int    preemptible = 1
+    Int    maxRetries  = 0
   }
 
   command <<<
     set -euo pipefail
-    mkdir -p gtc_dir
 
-    # Link GTC files
-    for f in ~{sep=' ' gtc_files}; do
-      ln -s "$f" gtc_dir/
+    # Collect all IDAT files into a flat directory for run_pipeline.sh
+    mkdir -p idat_dir
+    for f in ~{sep=' ' idat_files}; do
+      ln -sf "$f" idat_dir/
     done
 
-    bcftools +gtc2vcf \
-      --no-version -Ou \
-      --bpm ~{bpm_file} \
-      --csv ~{csv_file} \
-      --egt ~{egt_file} \
-      --fasta-ref ~{ref_fasta} \
-      --gtcs gtc_dir \
-      --extra ~{filebase}.metadata.tsv \
-      ~{if adjust_clusters then "--adjust-clusters" else ""} \
-      --threads ~{threads} | \
-    bcftools sort -Ob -T ./bcftools. \
-      -o ~{filebase}.pre_norm.bcf --write-index
+    mkdir -p pipeline_output
 
-    # Diagnostic: count variants before normalization
-    N_PRE_NORM=$(bcftools index -n ~{filebase}.pre_norm.bcf 2>/dev/null || \
-        bcftools view -H ~{filebase}.pre_norm.bcf | wc -l)
-    echo "Variants before normalization: ${N_PRE_NORM}"
-
-    # Normalize with -c ws (warn and swap REF/ALT to match reference).
-    # CRITICAL: Do NOT use -c x. When processing cross-build data,
-    # -c x silently sets genotypes to missing for REF-mismatched probes,
-    # deflating call rates. -c ws swaps REF/ALT to match the reference.
-    bcftools norm --no-version -Ob -c ws -f ~{ref_fasta} \
-      ~{filebase}.pre_norm.bcf \
-      -o ~{filebase}.bcf --write-index 2>~{filebase}.norm_warnings.log
-
-    N_POST_NORM=$(bcftools index -n ~{filebase}.bcf 2>/dev/null || \
-        bcftools view -H ~{filebase}.bcf | wc -l)
-    N_REF_SWAPS=$(grep -c "REF_MISMATCH" ~{filebase}.norm_warnings.log || true)
-    echo "Variants after normalization: ${N_POST_NORM}"
-    echo "REF/ALT swaps: ${N_REF_SWAPS}"
-
-    rm -f ~{filebase}.pre_norm.bcf ~{filebase}.pre_norm.bcf.csi
+    bash /opt/scripts/run_pipeline.sh \
+      --idat-dir      idat_dir \
+      --bpm           ~{bpm_file} \
+      --egt           ~{egt_file} \
+      --csv           ~{csv_file} \
+      --ref-fasta     ~{ref_fasta} \
+      --output-dir    pipeline_output \
+      --threads       ~{threads} \
+      --min-call-rate ~{min_call_rate} \
+      --max-lrr-sd    ~{max_lrr_sd} \
+      --skip-download \
+      ~{if skip_stage2 then "--skip-stage2" else ""}
   >>>
 
   output {
-    File vcf_file = "~{filebase}.bcf"
-    File vcf_idx = "~{filebase}.bcf.csi"
-    File metadata_tsv = "~{filebase}.metadata.tsv"
-    File norm_warnings_log = "~{filebase}.norm_warnings.log"
+    File final_vcf = if skip_stage2
+      then "pipeline_output/stage1/vcf/stage1_initial.bcf"
+      else "pipeline_output/stage2/vcf/stage2_reclustered.bcf"
+    File final_vcf_idx = if skip_stage2
+      then "pipeline_output/stage1/vcf/stage1_initial.bcf.csi"
+      else "pipeline_output/stage2/vcf/stage2_reclustered.bcf.csi"
+    File final_qc_tsv = if skip_stage2
+      then "pipeline_output/stage1/qc/stage1_sample_qc.tsv"
+      else "pipeline_output/stage2/qc/stage2_sample_qc.tsv"
+    File  stage1_qc_tsv        = "pipeline_output/stage1/qc/stage1_sample_qc.tsv"
+    File? qc_diagnostic_report = "pipeline_output/qc_diagnostic_report.txt"
   }
 
   runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
+    docker:      docker
+    cpu:         cpu
+    disks:       "local-disk " + disk_size + " HDD"
+    memory:      memory + " GiB"
     preemptible: preemptible
-    maxRetries: maxRetries
-  }
-}
-
-# ============================================================
-# Task: Compute per-sample QC metrics (call rate, LRR SD)
-# ============================================================
-task compute_qc_metrics {
-  input {
-    File vcf_file
-    File vcf_idx
-    String filebase
-    Int threads = 4
-
-    String docker
-    Int cpu = 4
-    Int disk_size = 50
-    Float memory = 8.0
-    Int preemptible = 1
-    Int maxRetries = 0
-  }
-
-  command <<<
-    set -euo pipefail
-
-    # Compute call rate and LRR standard deviation per sample.
-    # Uses single-pass matrix output (one row per variant, all samples'
-    # values tab-delimited) instead of per-sample BCF scans.
-    # Restricted to autosomes to avoid sex-chromosome hemizygosity bias.
-
-    # Get sample list
-    bcftools query -l ~{vcf_file} > samples.txt
-    n_samples=$(wc -l < samples.txt)
-
-    # Call rate: autosomes only, excluding intensity-only probes.
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads ~{threads} ~{vcf_file} | \
-    bcftools query -f '[\t%GT]\n' | \
-    awk -F'\t' '
-    {
-        for (i = 2; i <= NF; i++) {
-            total[i]++
-            if ($i != "./." && $i != "." && $i != ".|.") called[i]++
-        }
-    }
-    END {
-        for (i = 2; i <= NF; i++) {
-            idx = i - 2
-            cr = (total[i] > 0) ? called[i] / total[i] : 0
-            printf "%d\t%.6f\n", idx, cr
-        }
-    }' > call_rates.idx.tsv
-
-    # LRR SD on autosomes: same matrix approach, online variance computation.
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads ~{threads} ~{vcf_file} | \
-    bcftools query -f '[\t%LRR]\n' | \
-    awk -F'\t' '
-    {
-        for (i = 2; i <= NF; i++) {
-            v = $i
-            if (v != "." && v != "" && v ~ /^-?[0-9]/) {
-                n[i]++
-                sum[i] += v
-                sum2[i] += v * v
-            }
-        }
-    }
-    END {
-        for (i = 2; i <= NF; i++) {
-            idx = i - 2
-            if (n[i] > 1) {
-                mean = sum[i] / n[i]
-                var = (sum2[i] / n[i]) - (mean * mean)
-                if (var < 0) var = 0
-                printf "%d\t%.6f\n", idx, sqrt(var)
-            } else {
-                printf "%d\tNA\n", idx
-            }
-        }
-    }' > lrr_sd.idx.tsv
-
-    # Merge: map column indices to sample names and combine
-    echo -e "sample_id\tcall_rate\tlrr_sd" > ~{filebase}.qc.tsv
-    paste call_rates.idx.tsv lrr_sd.idx.tsv | \
-    awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
-                { print names[$1+0] "\t" $2 "\t" $4 }' \
-        samples.txt - >> ~{filebase}.qc.tsv
-  >>>
-
-  output {
-    File qc_tsv = "~{filebase}.qc.tsv"
-  }
-
-  runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
-    preemptible: preemptible
-    maxRetries: maxRetries
-  }
-}
-
-# ============================================================
-# Task: Select high-quality samples based on QC thresholds
-# ============================================================
-task select_hq_samples {
-  input {
-    File qc_tsv
-    Float min_call_rate
-    Float max_lrr_sd
-    String filebase
-
-    String docker
-    Int cpu = 1
-    Int disk_size = 10
-    Float memory = 3.5
-    Int preemptible = 1
-    Int maxRetries = 0
-  }
-
-  command <<<
-    set -euo pipefail
-    awk -F'\t' -v min_cr=~{min_call_rate} -v max_sd=~{max_lrr_sd} '
-      NR == 1 { next }
-      $2+0 >= min_cr+0 && ($3 == "NA" || $3+0 <= max_sd+0) { print $1 }
-    ' ~{qc_tsv} > ~{filebase}.hq_samples.txt
-
-    awk -F'\t' -v min_cr=~{min_call_rate} -v max_sd=~{max_lrr_sd} '
-      NR == 1 { next }
-      !($2+0 >= min_cr+0 && ($3 == "NA" || $3+0 <= max_sd+0)) { print $1 }
-    ' ~{qc_tsv} > ~{filebase}.excluded_samples.txt
-
-    n_hq=$(wc -l < ~{filebase}.hq_samples.txt)
-    n_excl=$(wc -l < ~{filebase}.excluded_samples.txt)
-    echo "High-quality samples: ${n_hq}" >&2
-    echo "Excluded samples: ${n_excl}" >&2
-  >>>
-
-  output {
-    File hq_samples = "~{filebase}.hq_samples.txt"
-    File excluded_samples = "~{filebase}.excluded_samples.txt"
-  }
-
-  runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
-    preemptible: preemptible
-    maxRetries: maxRetries
-  }
-}
-
-# ============================================================
-# Task: Recompute EGT cluster file from high-quality samples
-# ============================================================
-task recluster_egt {
-  input {
-    File original_egt
-    File bpm_file
-    Array[File] gtc_files
-    File hq_samples
-    String filebase
-
-    Int min_cluster_samples = 5
-
-    String docker
-    Int cpu = 2
-    Int disk_size = 50
-    Float memory = 16.0
-    Int preemptible = 1
-    Int maxRetries = 0
-  }
-
-  command <<<
-    set -euo pipefail
-    mkdir -p gtc_dir
-
-    # Link GTC files
-    for f in ~{sep=' ' gtc_files}; do
-      ln -s "$f" gtc_dir/
-    done
-
-    python3 /opt/recluster_egt.py \
-      --egt ~{original_egt} \
-      --bpm ~{bpm_file} \
-      --gtc-dir gtc_dir \
-      --hq-samples ~{hq_samples} \
-      --output-egt ~{filebase}.reclustered.egt \
-      --min-cluster-samples ~{min_cluster_samples}
-  >>>
-
-  output {
-    File reclustered_egt = "~{filebase}.reclustered.egt"
-  }
-
-  runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
-    preemptible: preemptible
-    maxRetries: maxRetries
-  }
-}
-
-# ============================================================
-# Task: Compute variant-level QC using plink2
-# ============================================================
-task compute_variant_qc {
-  input {
-    File vcf_file
-    File vcf_idx
-    String filebase
-    Int threads = 4
-
-    String docker
-    Int cpu = 4
-    Int disk_size = 50
-    Float memory = 8.0
-    Int preemptible = 1
-    Int maxRetries = 0
-  }
-
-  command <<<
-    set -euo pipefail
-
-    # Filter intensity-only probes before variant QC
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads ~{threads} \
-      -Ob -o filtered.bcf ~{vcf_file}
-    bcftools index filtered.bcf
-
-    # Compute variant-level QC on autosomes using plink2
-    plink2 \
-      --bcf filtered.bcf \
-      --autosome \
-      --allow-extra-chr \
-      --threads ~{threads} \
-      --missing variant-only \
-      --hardy midp \
-      --freq \
-      --out ~{filebase}.variant_qc
-
-    rm -f filtered.bcf filtered.bcf.csi
-
-    # Generate summary
-    echo "Variant QC Summary" > ~{filebase}.variant_qc_summary.txt
-    if [ -f ~{filebase}.variant_qc.vmiss ]; then
-      n_variants=$(awk 'NR>1' ~{filebase}.variant_qc.vmiss | wc -l)
-      echo "Total autosomal variants: ${n_variants}" >> ~{filebase}.variant_qc_summary.txt
-      awk 'NR>1 {
-        n++; miss += $NF
-        if ($NF+0 > 0.05) n_05++
-        if ($NF+0 > 0.02) n_02++
-        if ($NF+0 > 0.01) n_01++
-      } END {
-        if (n>0) {
-          printf "Variants missingness >5%%: %d (%.2f%%)\n", n_05+0, (n_05+0)*100/n
-          printf "Variants missingness >2%%: %d (%.2f%%)\n", n_02+0, (n_02+0)*100/n
-          printf "Variants missingness >1%%: %d (%.2f%%)\n", n_01+0, (n_01+0)*100/n
-          printf "Mean variant missingness: %.6f\n", miss/n
-        }
-      }' ~{filebase}.variant_qc.vmiss >> ~{filebase}.variant_qc_summary.txt
-    fi
-    if [ -f ~{filebase}.variant_qc.hardy ]; then
-      awk 'NR>1 {
-        n++; p = $NF
-        if (p+0 < 1e-6) n_6++
-        if (p+0 < 1e-10) n_10++
-      } END {
-        if (n>0) {
-          printf "Variants failing HWE p<1e-6:  %d (%.2f%%)\n", n_6+0, (n_6+0)*100/n
-          printf "Variants failing HWE p<1e-10: %d (%.2f%%)\n", n_10+0, (n_10+0)*100/n
-        }
-      }' ~{filebase}.variant_qc.hardy >> ~{filebase}.variant_qc_summary.txt
-    fi
-    if [ -f ~{filebase}.variant_qc.afreq ]; then
-      awk 'NR>1 {
-        n++; af=$5+0; maf=(af>0.5)?1-af:af; maf_sum+=maf
-        if (maf<0.01) n_rare++
-        if (maf>=0.05) n_common++
-      } END {
-        if (n>0) {
-          printf "Rare variants (MAF<1%%): %d (%.2f%%)\n", n_rare+0, (n_rare+0)*100/n
-          printf "Common variants (MAF>=5%%): %d (%.2f%%)\n", n_common+0, (n_common+0)*100/n
-          printf "Mean MAF: %.4f\n", maf_sum/n
-        }
-      }' ~{filebase}.variant_qc.afreq >> ~{filebase}.variant_qc_summary.txt
-    fi
-  >>>
-
-  output {
-    File variant_qc_summary = "~{filebase}.variant_qc_summary.txt"
-    File? vmiss = "~{filebase}.variant_qc.vmiss"
-    File? hardy = "~{filebase}.variant_qc.hardy"
-    File? afreq = "~{filebase}.variant_qc.afreq"
-    File variant_qc_log = "~{filebase}.variant_qc.log"
-  }
-
-  runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
-    preemptible: preemptible
-    maxRetries: maxRetries
-  }
-}
-
-# ============================================================
-# Task: Compare QC metrics pre vs post reclustering
-# ============================================================
-task compare_qc {
-  input {
-    File stage1_qc_tsv
-    File stage2_qc_tsv
-    String filebase
-
-    String docker
-    Int cpu = 1
-    Int disk_size = 10
-    Float memory = 4.0
-    Int preemptible = 1
-    Int maxRetries = 0
-  }
-
-  command <<<
-    set -euo pipefail
-
-    python3 /opt/scripts/plot_qc_comparison.py \
-      --stage1-sample-qc ~{stage1_qc_tsv} \
-      --stage2-sample-qc ~{stage2_qc_tsv} \
-      --output-dir .
-
-    mv qc_comparison_report.txt ~{filebase}.qc_comparison_report.txt
-    if [ -f qc_comparison_samples.png ]; then
-      mv qc_comparison_samples.png ~{filebase}.qc_comparison_samples.png
-    fi
-  >>>
-
-  output {
-    File comparison_report = "~{filebase}.qc_comparison_report.txt"
-    File? comparison_plot = "~{filebase}.qc_comparison_samples.png"
-  }
-
-  runtime {
-    docker: docker
-    cpu: cpu
-    disks: "local-disk " + disk_size + " HDD"
-    memory: memory + " GiB"
-    preemptible: preemptible
-    maxRetries: maxRetries
+    maxRetries:  maxRetries
   }
 }
