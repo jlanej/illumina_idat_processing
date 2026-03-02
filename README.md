@@ -12,7 +12,7 @@ The pipeline runs in three phases:
 
 2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate** and **LRR standard deviation**.
 
-3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction.
+3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).
 
@@ -210,7 +210,11 @@ output/
 │   ├── qc/
 │   │   ├── stage2_sample_qc.tsv    # Updated QC metrics
 │   │   ├── high_quality_samples.txt # Samples used for reclustering
-│   │   └── excluded_samples.txt     # Low-quality samples
+│   │   ├── excluded_samples.txt     # Low-quality samples
+│   │   └── comparison/              # Pre/post reclustering QC comparison
+│   │       ├── qc_comparison_report.txt  # Summary statistics text report
+│   │       ├── qc_comparison_samples.png # Sample-level QC comparison plots
+│   │       └── qc_comparison_variants.png # Variant-level QC comparison plots
 │   └── clusters/
 │       └── reclustered.egt          # Study-specific EGT cluster file
 ├── manifests/                  # Downloaded manifest files (if auto-downloaded)
@@ -222,14 +226,22 @@ output/
 
 ### QC Metrics File Format
 
-The `*_sample_qc.tsv` files contain:
+The `*_sample_qc.tsv` files contain per-sample metrics:
 
 | Column | Description |
 |--------|-------------|
 | `sample_id` | Sample identifier |
-| `call_rate` | Fraction of variants with non-missing genotype calls |
-| `lrr_sd` | Standard deviation of Log R Ratio (lower is better) |
+| `call_rate` | Fraction of variants with non-missing genotype calls (autosomes only) |
+| `lrr_sd` | Standard deviation of Log R Ratio (autosomes only; lower is better) |
 | `computed_gender` | Inferred gender (1=male, 2=female) |
+
+The `comparison/` subdirectory (Stage 2 only) contains:
+
+| File | Description |
+|------|-------------|
+| `qc_comparison_report.txt` | Text summary of all QC metric changes pre/post reclustering |
+| `qc_comparison_samples.png` | Plots of per-sample call rate and LRR SD distributions before/after |
+| `qc_comparison_variants.png` | Plots of variant missingness, HWE, and MAF distributions before/after |
 
 ## Processing Rationale
 
@@ -259,7 +271,48 @@ Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a t
 
 3. **Convert to VCF**: Runs `gtc2vcf` with `--adjust-clusters` for additional median adjustment of BAF and LRR values.
 
+4. **QC comparison**: Automatically generates a before/after comparison report and plots (saved to `stage2/qc/comparison/`) quantifying the improvement in call rate, LRR SD, variant missingness, HWE conformance, and MAF distributions.
+
 This approach is fundamentally different from just using `--adjust-clusters` in `gtc2vcf` (which only adjusts BAF/LRR post-hoc without changing the underlying genotype calls). By recomputing the actual EGT cluster definitions, we improve the genotype calls themselves — analogous to the iterative clustering performed in Genome Studio, but fully automated for HPC.
+
+See **[docs/qc_comparison.md](docs/qc_comparison.md)** for a detailed explanation of the QC comparison outputs and how to interpret them.
+
+### Pre/Post Reclustering QC Comparison
+
+After Stage 2 completes, a QC comparison report and diagnostic plots are automatically generated in `stage2/qc/comparison/`. These quantify the improvement from reclustering across all samples and variants.
+
+**Example results on 1000 Genomes data (1,000 samples, HumanOmni2.5 array):**
+
+**Sample-level QC:**
+
+| Metric | Stage 1 (baseline) | Stage 2 (reclustered) | Change |
+|--------|-------------------|----------------------|--------|
+| Mean call rate | 0.9965 | 0.9971 | +0.0005 |
+| Median call rate | 0.9968 | 0.9975 | +0.0005 |
+| Mean LRR SD | 0.1997 | 0.1461 | **−0.0536** |
+| Median LRR SD | 0.1946 | 0.1355 | **−0.0573** |
+| Samples improved (call rate) | — | — | 938/1000 (93.8%) |
+| Samples improved (LRR SD) | — | — | 967/1000 (96.7%) |
+| Samples passing LRR SD ≤ 0.20 | 631 | **935** | **+304** |
+
+**Variant-level QC:**
+
+| Metric | Stage 1 | Stage 2 | Change |
+|--------|---------|---------|--------|
+| Variants with missingness ≤ 1% | 2,284,343 | 2,302,478 | +18,135 |
+| Variants with missingness ≤ 2% | 2,342,084 | 2,355,303 | +13,219 |
+| Variants passing HWE p ≥ 1e-6 | 2,204,543 | 2,205,649 | +1,106 |
+| Variants with MAF ≥ 1% | 1,889,522 | 1,890,989 | +1,467 |
+
+The most striking improvement is in **LRR SD** — the key metric for CNV/mosaic detection quality — where reclustering reduces the median from 0.1946 to 0.1355, and increases the fraction of samples passing the strict LRR SD ≤ 0.20 threshold from 63% to 94%.
+
+**Sample QC comparison plots (1000G, 1000 samples):**
+
+![Sample QC comparison](tests/data/comparison/qc_comparison_samples.png)
+
+**Variant QC comparison plots:**
+
+![Variant QC comparison](tests/data/comparison/qc_comparison_variants.png)
 
 ## Downstream Analysis
 
