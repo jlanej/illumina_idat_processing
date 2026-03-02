@@ -327,6 +327,53 @@ After running this pipeline, the output VCF can be used directly with:
 
 The pipeline's BAF and LRR output is directly suitable for CNV detection. See **[docs/cnv_calling_methods.md](docs/cnv_calling_methods.md)** for a detailed survey of compatible methods, including PennCNV, bcftools +mocha (already installed), QuantiSNP, and EnsembleCNV.
 
+## Experimental Machine Learning CNV Calling
+
+`scripts/ml_cnv_calling.py` provides an experimental state-of-the-art deep learning CNV caller designed to complement or replace traditional HMM-based approaches such as PennCNV.
+
+### Architecture
+
+The model (`CNVSegmenter`) is a sequence-to-sequence PyTorch network combining:
+
+- **1D CNN** — local smoothing and feature extraction to denoise LRR and BAF signals
+- **Bi-LSTM** — captures long-range sequence context to identify copy number transition boundaries
+
+It predicts 5 copy number classes (CN = 0, 1, 2, 3, 4) at each probe position.
+
+### Cross-Array Robustness
+
+Unlike HMM-based callers that assume fixed probe spacing, the model explicitly encodes a **log10-scaled inter-probe distance** as a third input channel alongside LRR and BAF. This allows the model to generalize across arrays with different probe densities (e.g., GSA vs. Omni2.5) without retraining.
+
+### Installation
+
+```bash
+pip install -r requirements_ml.txt
+```
+
+### Usage
+
+**Train** on a labelled cohort (requires a truth-set BED file with `chrom`, `start`, `end`, `copy_number` columns):
+
+```bash
+python3 scripts/ml_cnv_calling.py train \
+    --bcf output/stage2/vcf/stage2_reclustered.bcf \
+    --truth truth_cnvs.bed \
+    --output model.pt
+```
+
+**Predict** CNV regions for a new sample:
+
+```bash
+python3 scripts/ml_cnv_calling.py predict \
+    --bcf output/stage2/vcf/stage2_reclustered.bcf \
+    --model model.pt \
+    --output predicted_cnvs.bed
+```
+
+The predict command uses sliding window inference and collapses adjacent probes with the same non-diploid predicted state (CN ≠ 2) into BED intervals.
+
+Run `python3 scripts/ml_cnv_calling.py train --help` or `predict --help` for all options.
+
 ## References
 
 - Loh P., Genovese G., McCarroll S., Price A. et al. *Insights about clonal expansions from 8,342 mosaic chromosomal alterations.* Nature 559, 350–355 (2018). [DOI: 10.1038/s41586-018-0321-x](https://doi.org/10.1038/s41586-018-0321-x)
