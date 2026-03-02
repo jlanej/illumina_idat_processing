@@ -16,12 +16,11 @@ collect_qc_metrics() {
 
     echo "Extracting per-sample QC metrics..."
 
-    local gender_file call_rate_file lrr_sd_file samples_file
+    local gender_file qc_metrics_file samples_file
     gender_file=$(mktemp)
-    call_rate_file=$(mktemp)
-    lrr_sd_file=$(mktemp)
+    qc_metrics_file=$(mktemp)
     samples_file=$(mktemp)
-    trap 'rm -f "${gender_file}" "${call_rate_file}" "${lrr_sd_file}" "${samples_file}"' RETURN
+    trap 'rm -f "${gender_file}" "${qc_metrics_file}" "${samples_file}"' RETURN
 
     # Get sample names from VCF
     bcftools query -l "${vcf_file}" > "${samples_file}"
@@ -45,102 +44,70 @@ collect_qc_metrics() {
     echo "  [diag] ==================================="
 
     # -----------------------------------------------------------------
-    # Compute call rate per sample using matrix output (single BCF pass).
+    # Compute call rate AND LRR SD per sample in a single BCF pass.
     #
-    # Instead of emitting one line per sample per variant (O(S×V) lines),
-    # output one tab-delimited row per variant with all samples' GT values.
-    # awk processes each row and accumulates per-column (per-sample) counts.
-    # For 5000 samples × 2.5M variants this reduces pipe volume ~5000×.
+    # Instead of making two separate passes over the (potentially huge)
+    # BCF file — one for GT and one for LRR — we extract both fields at
+    # once with bcftools query -f '[\t%GT:%LRR]\n'.  The awk script
+    # splits each sample's GT:LRR pair and accumulates both call-rate
+    # counts and running LRR sum/sum-of-squares simultaneously.
+    #
+    # This halves the BCF decompression and I/O cost of QC computation.
     #
     # Restricted to autosomes only to avoid inflation from sex-chromosome
-    # hemizygosity in males (same as LRR SD computation below).
+    # hemizygosity in males.  Filters non-numeric LRR values (nan, inf)
+    # that gtc2vcf can produce for zero-intensity probes.
     # -----------------------------------------------------------------
-    echo "  Computing call rate per sample (${n_samples_vcf} samples, autosomes only)..."
+    echo "  Computing call rate and LRR SD per sample (${n_samples_vcf} samples, autosomes only)..."
     bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
-    bcftools query -f '[\t%GT]\n' 2>/dev/null | \
+    bcftools query -f '[\t%GT:%LRR]\n' 2>/dev/null | \
         awk -F'\t' '
         {
             for (i = 2; i <= NF; i++) {
+                split($i, a, ":")
+                gt = a[1]
+                lrr = a[2]
+                # Call rate: count called vs total genotypes
                 total[i]++
-                if ($i != "./." && $i != "." && $i != ".|.") called[i]++
+                if (gt != "./." && gt != "." && gt != ".|.") called[i]++
+                # LRR SD: accumulate sum and sum-of-squares
+                if (lrr != "." && lrr != "" && lrr ~ /^-?[0-9]/) {
+                    n_lrr[i]++
+                    sum_lrr[i] += lrr
+                    sum2_lrr[i] += lrr * lrr
+                }
             }
         }
         END {
             for (i = 2; i <= NF; i++) {
                 idx = i - 2
                 cr = (total[i] > 0) ? called[i] / total[i] : 0
-                print idx "\t" cr
-            }
-        }' > "${call_rate_file}.idx" 2>/dev/null || true
-
-    # Map column indices back to sample names
-    awk 'NR==FNR { names[NR-1] = $0; next }
-         { print names[$1+0] "\t" $2 }' \
-        "${samples_file}" "${call_rate_file}.idx" | \
-        sort -k1,1 > "${call_rate_file}"
-    rm -f "${call_rate_file}.idx"
-
-    if [[ -s "${call_rate_file}" ]]; then
-        n_cr=$(wc -l < "${call_rate_file}" | tr -d ' ')
-        echo "  [diag] Call rate file: ${n_cr} samples"
-        echo "  [diag] Call rate first 3 lines:"
-        head -3 "${call_rate_file}" | sed 's/^/    [diag]   /'
-    else
-        echo "  [diag] WARNING: Call rate file is empty"
-    fi
-
-    # -----------------------------------------------------------------
-    # Compute LRR standard deviation per sample (autosomes only).
-    #
-    # Same matrix approach: one row per variant, all samples' LRR values
-    # tab-delimited. awk accumulates running sum and sum-of-squares per
-    # column for online variance computation.
-    #
-    # Excludes sex chromosomes and MT to avoid inflation from hemizygosity.
-    # Filters non-numeric LRR values (nan, inf) that gtc2vcf can produce.
-    # -----------------------------------------------------------------
-    echo "  Computing LRR standard deviation per sample..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
-    bcftools query -f '[\t%LRR]\n' 2>/dev/null | \
-        awk -F'\t' '
-        {
-            for (i = 2; i <= NF; i++) {
-                v = $i
-                if (v != "." && v != "" && v ~ /^-?[0-9]/) {
-                    n[i]++
-                    sum[i] += v
-                    sum2[i] += v * v
-                }
-            }
-        }
-        END {
-            for (i = 2; i <= NF; i++) {
-                idx = i - 2
-                if (n[i] > 1) {
-                    mean = sum[i] / n[i]
-                    var = (sum2[i] / n[i]) - (mean * mean)
+                if (n_lrr[i] > 1) {
+                    mean = sum_lrr[i] / n_lrr[i]
+                    var = (sum2_lrr[i] / n_lrr[i]) - (mean * mean)
                     if (var < 0) var = 0
-                    print idx "\t" sqrt(var)
+                    sd = sqrt(var)
                 } else {
-                    print idx "\tNA"
+                    sd = "NA"
                 }
+                print idx "\t" cr "\t" sd
             }
-        }' > "${lrr_sd_file}.idx" 2>/dev/null || true
+        }' > "${qc_metrics_file}.idx" 2>/dev/null || true
 
-    # Map column indices back to sample names
+    # Map column indices back to sample names (combined call_rate + lrr_sd)
     awk 'NR==FNR { names[NR-1] = $0; next }
-         { print names[$1+0] "\t" $2 }' \
-        "${samples_file}" "${lrr_sd_file}.idx" | \
-        sort -k1,1 > "${lrr_sd_file}"
-    rm -f "${lrr_sd_file}.idx"
+         { print names[$1+0] "\t" $2 "\t" $3 }' \
+        "${samples_file}" "${qc_metrics_file}.idx" | \
+        sort -k1,1 > "${qc_metrics_file}"
+    rm -f "${qc_metrics_file}.idx"
 
-    if [[ -s "${lrr_sd_file}" ]]; then
-        n_sd=$(wc -l < "${lrr_sd_file}" | tr -d ' ')
-        echo "  [diag] LRR SD file: ${n_sd} samples"
-        echo "  [diag] LRR SD first 3 lines:"
-        head -3 "${lrr_sd_file}" | sed 's/^/    [diag]   /'
+    if [[ -s "${qc_metrics_file}" ]]; then
+        n_qm=$(wc -l < "${qc_metrics_file}" | tr -d ' ')
+        echo "  [diag] QC metrics file: ${n_qm} samples"
+        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd):"
+        head -3 "${qc_metrics_file}" | sed 's/^/    [diag]   /'
     else
-        echo "  [diag] WARNING: LRR SD file is empty (LRR FORMAT field may not exist in VCF)"
+        echo "  [diag] WARNING: QC metrics file is empty"
     fi
 
     # Extract computed gender from metadata if available
@@ -159,17 +126,16 @@ collect_qc_metrics() {
         while read -r s; do echo -e "${s}\tNA"; done < "${samples_file}" > "${gender_file}"
     fi
 
-    # Merge all metrics into a single output file
+    # Merge QC metrics with gender into a single output file
     echo "  Merging metrics..."
     {
         echo -e "sample_id\tcall_rate\tlrr_sd\tcomputed_gender"
-        join -t$'\t' -a1 -e 'NA' -o '0,1.2,2.2' "${call_rate_file}" "${lrr_sd_file}" | \
-            join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,2.2' - "${gender_file}"
+        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,2.2' "${qc_metrics_file}" "${gender_file}"
     } > "${output_file}" 2>/dev/null || {
         # Fallback: simpler merge approach
         echo -e "sample_id\tcall_rate\tlrr_sd\tcomputed_gender"
-        paste "${call_rate_file}" "${lrr_sd_file}" "${gender_file}" | \
-            awk -F'\t' '{print $1 "\t" $2 "\t" $4 "\t" $6}'
+        paste "${qc_metrics_file}" "${gender_file}" | \
+            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $5}'
     } > "${output_file}"
 
     n_samples=$(( $(wc -l < "${output_file}") - 1 ))
