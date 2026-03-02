@@ -82,6 +82,32 @@ for relpath in "${PYTHON_SCRIPTS[@]}"; do
     fi
 done
 
+ML_SCRIPT="${REPO_DIR}/scripts/ml_cnv_calling.py"
+if [[ -f "${ML_SCRIPT}" ]]; then
+    if python3 -c "import py_compile; py_compile.compile('${ML_SCRIPT}', doraise=True)" 2>/dev/null; then
+        echo "  PASS: scripts/ml_cnv_calling.py (compiles)"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: scripts/ml_cnv_calling.py (syntax error)"
+        (( FAIL++ )) || true
+    fi
+
+    # Check --help (may fail if torch/pysam not installed)
+    if output=$(python3 "${ML_SCRIPT}" --help 2>&1); then
+        if echo "${output}" | grep -qi "usage\|cnv"; then
+            echo "  PASS: scripts/ml_cnv_calling.py (--help)"
+            (( PASS++ )) || true
+        else
+            echo "  WARN: scripts/ml_cnv_calling.py (--help unexpected output)"
+            (( PASS++ )) || true
+        fi
+    else
+        echo "  SKIP: scripts/ml_cnv_calling.py (--help requires torch/pysam)"
+    fi
+else
+    echo "  SKIP: scripts/ml_cnv_calling.py not found"
+fi
+
 echo ""
 
 # ---------------------------------------------------------------

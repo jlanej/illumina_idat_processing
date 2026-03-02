@@ -327,6 +327,43 @@ After running this pipeline, the output VCF can be used directly with:
 
 The pipeline's BAF and LRR output is directly suitable for CNV detection. See **[docs/cnv_calling_methods.md](docs/cnv_calling_methods.md)** for a detailed survey of compatible methods, including PennCNV, bcftools +mocha (already installed), QuantiSNP, and EnsembleCNV.
 
+## Experimental Machine Learning CNV Calling
+
+An experimental deep learning-based CNV caller is provided in `scripts/ml_cnv_calling.py`. This is a state-of-the-art PyTorch **1D-CNN + Bidirectional LSTM** sequence-to-sequence model designed to replace traditional HMM-based callers (PennCNV, QuantiSNP) for predicting per-probe copy number states from the pipeline's BAF and LRR output.
+
+**Key design features:**
+
+- **1D CNN** layers provide local smoothing and feature extraction to denoise raw LRR/BAF signals.
+- **Bidirectional LSTM** captures long-range sequence context and identifies copy number transition boundaries.
+- **Inter-probe distance channel**: The model explicitly encodes log-scaled distance between consecutive probes as a 3rd input channel, making it robust to cross-array variability in probe density (e.g., GSA ~700K probes vs. Omni2.5 ~2.5M probes).
+- **Weighted Cross-Entropy Loss** handles the heavy class imbalance where CN=2 (diploid) dominates the genome.
+
+Training labels are derived from the highly curated **1000 Genomes Project structural variant truth sets** (e.g., the Phase 3 integrated SV call set), converted to a simple BED format (`chrom  start  end  cn_state`).
+
+### Installation
+
+```bash
+pip install -r requirements_ml.txt
+```
+
+### Usage
+
+```bash
+# Train on a BCF with 1000 Genomes truth-set labels
+python3 scripts/ml_cnv_calling.py train \
+    --bcf output/stage2/vcf/stage2_reclustered.bcf \
+    --truth-bed 1000g_cnv_truthset.bed \
+    --sample NA12878 \
+    --output-model cnv_model.pt
+
+# Predict CNVs using a trained model
+python3 scripts/ml_cnv_calling.py predict \
+    --bcf output/stage2/vcf/stage2_reclustered.bcf \
+    --model cnv_model.pt \
+    --sample NA12878 \
+    --output-bed predicted_cnvs.bed
+```
+
 ## References
 
 - Loh P., Genovese G., McCarroll S., Price A. et al. *Insights about clonal expansions from 8,342 mosaic chromosomal alterations.* Nature 559, 350–355 (2018). [DOI: 10.1038/s41586-018-0321-x](https://doi.org/10.1038/s41586-018-0321-x)
