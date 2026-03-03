@@ -29,12 +29,14 @@ import sys
 
 
 def read_sample_qc(filepath):
-    """Read sample QC TSV file. Returns dict of sample_id -> {call_rate, lrr_sd}."""
+    """Read sample QC TSV file. Returns dict of sample_id -> {call_rate, lrr_sd, lrr_mean, lrr_median}."""
     samples = {}
     with open(filepath) as f:
         header = f.readline().strip().split('\t')
         cr_idx = header.index('call_rate') if 'call_rate' in header else 1
         sd_idx = header.index('lrr_sd') if 'lrr_sd' in header else 2
+        mean_idx = header.index('lrr_mean') if 'lrr_mean' in header else None
+        median_idx = header.index('lrr_median') if 'lrr_median' in header else None
         for line in f:
             fields = line.strip().split('\t')
             if len(fields) < 3:
@@ -48,7 +50,22 @@ def read_sample_qc(filepath):
                 sd = float(fields[sd_idx]) if fields[sd_idx] != 'NA' else None
             except (ValueError, IndexError):
                 sd = None
-            samples[sample_id] = {'call_rate': cr, 'lrr_sd': sd}
+            lrr_mean = None
+            if mean_idx is not None:
+                try:
+                    lrr_mean = float(fields[mean_idx]) if fields[mean_idx] != 'NA' else None
+                except (ValueError, IndexError):
+                    pass
+            lrr_median = None
+            if median_idx is not None:
+                try:
+                    lrr_median = float(fields[median_idx]) if fields[median_idx] != 'NA' else None
+                except (ValueError, IndexError):
+                    pass
+            samples[sample_id] = {
+                'call_rate': cr, 'lrr_sd': sd,
+                'lrr_mean': lrr_mean, 'lrr_median': lrr_median,
+            }
     return samples
 
 

@@ -6,13 +6,21 @@ Inspired by [MoChA](https://github.com/freeseek/mocha) and [MoChA WDL](https://g
 
 ## Overview
 
-The pipeline runs in three phases:
+The pipeline runs in five phases:
 
 1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
-2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate** and **LRR standard deviation**.
+2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, and **LRR median**.
 
-3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering.
+3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering. A **sex check plot** (median chrX vs chrY LRR, colored by predicted sex) is also generated.
+
+4. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
+
+5. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, predicted sex) and ancestry PCs (default 20) for every sample.
+
+### Reference Genome
+
+The pipeline defaults to the **T2T-CHM13v2.0** reference genome — the first complete, telomere-to-telomere assembly of a human genome. CHM13 resolves gaps and errors present in GRCh38, providing improved probe mapping for Illumina arrays. GRCh38 and GRCh37 remain supported via `--genome GRCh38` or `--genome GRCh37`.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).
 
@@ -41,7 +49,7 @@ apptainer exec --bind /path/to/data:/data illumina_idat_processing_main.sif \
     --bpm /data/manifests/array.bpm \
     --egt /data/manifests/array.egt \
     --csv /data/manifests/array.csv \
-    --ref-fasta /data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+    --ref-fasta /data/reference/chm13v2.0.fa \
     --output-dir /data/output
 ```
 
@@ -62,7 +70,7 @@ apptainer exec --bind $PWD illumina_idat_processing_main.sif \
 
 - Linux (tested on Ubuntu/Debian, should work on any HPC)
 - [Apptainer](https://apptainer.org/) (formerly Singularity) for running the container
-- ~30 GB disk for GRCh38 reference genome (auto-downloaded on first run)
+- ~30 GB disk for CHM13 reference genome (auto-downloaded on first run)
 
 ## Usage
 
@@ -91,7 +99,7 @@ apptainer exec --bind $PWD illumina_idat_processing_main.sif \
 |--------|-------------|
 | `--ref-fasta FILE` | Reference FASTA (overrides auto-download) |
 | `--ref-dir DIR` | Directory with reference genome |
-| `--genome NAME` | Genome build: `GRCh37` or `GRCh38` (default: `GRCh38`) |
+| `--genome NAME` | Genome build: `CHM13`, `GRCh37`, or `GRCh38` (default: `CHM13`) |
 
 **Processing options:**
 | Option | Description |
@@ -113,9 +121,9 @@ SIF=illumina_idat_processing_main.sif
 apptainer exec --bind $PWD $SIF \
     bash /opt/scripts/download_manifests.sh --array-name GSA-24v3-0_A1 --output-dir manifests/
 
-# Download reference genome
+# Download reference genome (CHM13 by default)
 apptainer exec --bind $PWD $SIF \
-    bash /opt/scripts/download_reference.sh --genome GRCh38 --output-dir reference/
+    bash /opt/scripts/download_reference.sh --output-dir reference/
 
 # Stage 1: Initial genotyping
 apptainer exec --bind $PWD $SIF \
@@ -124,7 +132,7 @@ apptainer exec --bind $PWD $SIF \
     --bpm manifests/GSA-24v3-0_A1.bpm \
     --egt manifests/GSA-24v3-0_A1_ClusterFile.egt \
     --csv manifests/GSA-24v3-0_A1.csv \
-    --ref-fasta reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+    --ref-fasta reference/chm13v2.0.fa \
     --output-dir output/stage1
 
 # Stage 2: Recluster and reprocess
@@ -134,7 +142,7 @@ apptainer exec --bind $PWD $SIF \
     --bpm manifests/GSA-24v3-0_A1.bpm \
     --egt manifests/GSA-24v3-0_A1_ClusterFile.egt \
     --csv manifests/GSA-24v3-0_A1.csv \
-    --ref-fasta reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna \
+    --ref-fasta reference/chm13v2.0.fa \
     --stage1-dir output/stage1 \
     --output-dir output/stage2
 ```
@@ -170,8 +178,8 @@ Example inputs JSON:
   "illumina_idat_processing.bpm_file":      "/data/manifests/array.bpm",
   "illumina_idat_processing.egt_file":      "/data/manifests/array.egt",
   "illumina_idat_processing.csv_file":      "/data/manifests/array.csv",
-  "illumina_idat_processing.ref_fasta":     "/data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna",
-  "illumina_idat_processing.ref_fasta_fai": "/data/reference/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.fai"
+  "illumina_idat_processing.ref_fasta":     "/data/reference/chm13v2.0.fa",
+  "illumina_idat_processing.ref_fasta_fai": "/data/reference/chm13v2.0.fa.fai"
 }
 ```
 
@@ -201,7 +209,7 @@ output/
 │   ├── vcf/
 │   │   └── stage1_initial.bcf  # Initial VCF with BAF + LRR
 │   └── qc/
-│       ├── stage1_sample_qc.tsv  # Per-sample call rate and LRR SD
+│       ├── stage1_sample_qc.tsv  # Per-sample call rate, LRR SD/mean/median
 │       └── gtc_metadata.tsv      # GTC file metadata
 ├── stage2/
 │   ├── gtc/                    # Re-called GTC files (new clusters)
@@ -217,6 +225,14 @@ output/
 │   │       └── qc_comparison_variants.png # Variant-level QC comparison plots
 │   └── clusters/
 │       └── reclustered.egt          # Study-specific EGT cluster file
+├── sex_check/
+│   └── sex_check_chrXY_lrr.png     # Median chrX vs chrY LRR by predicted sex
+├── ancestry_pca/
+│   ├── pca_projections.tsv          # All-sample PC projections (20 PCs)
+│   ├── pca_eigenvalues.txt          # PCA eigenvalues
+│   ├── pca_qc_samples.txt           # QC'd sample set used for PCA
+│   └── qc_summary.txt               # QC filtering summary
+├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs)
 ├── manifests/                  # Downloaded manifest files (if auto-downloaded)
 ├── realigned_manifests/        # Realigned manifest and mapping summary
 │   ├── *.realigned.csv         # CSV with validated/remapped coordinates
@@ -233,6 +249,8 @@ The `*_sample_qc.tsv` files contain per-sample metrics:
 | `sample_id` | Sample identifier |
 | `call_rate` | Fraction of variants with non-missing genotype calls (autosomes only) |
 | `lrr_sd` | Standard deviation of Log R Ratio (autosomes only; lower is better) |
+| `lrr_mean` | Mean of Log R Ratio (autosomes only) |
+| `lrr_median` | Median of Log R Ratio (autosomes only) |
 | `computed_gender` | Inferred gender (1=male, 2=female) |
 
 The `comparison/` subdirectory (Stage 2 only) contains:
@@ -322,6 +340,7 @@ After running this pipeline, the output VCF can be used directly with:
 - **[SHAPEIT5](https://odelaneau.github.io/shapeit5/)** — Genotype phasing
 - **[IMPUTE5](https://jmarchini.org/software/)** / **[Beagle5](https://faculty.washington.edu/browning/beagle/)** — Genotype imputation
 - **[PLINK2](https://www.cog-genomics.org/plink/2.0/)** — GWAS and population genetics
+- **[flashpca2](https://github.com/gabraham/flashpca)** — Fast ancestry PCA computation (used in ancestry PCA step)
 
 ### Copy Number Variation (CNV) Calling
 

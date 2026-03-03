@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Defaults
-GENOME="GRCh38"
+GENOME="CHM13"
 THREADS=1
 MIN_CALL_RATE=0.97
 MAX_LRR_SD=0.35
@@ -48,7 +48,7 @@ Manifest options (one of the following):
 Reference options:
   --ref-dir DIR          Directory with reference genome (auto-downloads if missing)
   --ref-fasta FILE       Reference FASTA file (overrides --ref-dir)
-  --genome NAME          Genome build: GRCh37 or GRCh38 (default: ${GENOME})
+  --genome NAME          Genome build: CHM13, GRCh37, or GRCh38 (default: ${GENOME})
 
 Processing options:
   --threads INT          Number of threads (default: ${THREADS})
@@ -191,7 +191,9 @@ if [[ -z "${REF_FASTA}" ]]; then
     fi
 
     # Try to find existing reference
-    if [[ "${GENOME}" == "GRCh38" ]]; then
+    if [[ "${GENOME}" == "CHM13" ]]; then
+        REF_FASTA="${REF_DIR}/chm13v2.0.fa"
+    elif [[ "${GENOME}" == "GRCh38" ]]; then
         REF_FASTA="${REF_DIR}/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
     else
         REF_FASTA="${REF_DIR}/human_g1k_v37.fasta"
@@ -376,7 +378,7 @@ fi
 
 echo ""
 echo "======================================================"
-echo "  Pipeline Complete"
+echo "  Pipeline Complete (Stages 1-2)"
 echo "======================================================"
 echo ""
 echo "Final outputs:"
@@ -386,6 +388,74 @@ if [[ -n "${COMPARISON_DIR:-}" && -d "${COMPARISON_DIR:-}" ]]; then
     echo "  QC comparison:  ${COMPARISON_DIR}/"
 fi
 echo ""
+
+# ---------------------------------------------------------------
+# Sex check plot
+# ---------------------------------------------------------------
+echo "======================================================"
+echo "  Generating Sex Check Plot"
+echo "======================================================"
+echo ""
+
+SEX_CHECK_DIR="${OUTPUT_DIR}/sex_check"
+if command -v python3 &>/dev/null && [[ -f "${FINAL_VCF}" && -f "${FINAL_QC}" ]]; then
+    python3 "${SCRIPT_DIR}/plot_sex_check.py" \
+        --vcf "${FINAL_VCF}" \
+        --sample-qc "${FINAL_QC}" \
+        --output-dir "${SEX_CHECK_DIR}" \
+        --threads "${THREADS}" 2>&1 || true
+else
+    echo "Note: Skipping sex check plot (python3, VCF, or QC file not available)."
+fi
+echo ""
+
+# ---------------------------------------------------------------
+# Ancestry PCA: stringent QC + PCA computation
+# ---------------------------------------------------------------
+PCA_DIR="${OUTPUT_DIR}/ancestry_pca"
+
+echo "======================================================"
+echo "  Running Ancestry PCA"
+echo "======================================================"
+echo ""
+
+if [[ -f "${FINAL_VCF}" ]]; then
+    PCA_ARGS=(
+        --vcf "${FINAL_VCF}"
+        --output-dir "${PCA_DIR}"
+        --threads "${THREADS}"
+    )
+
+    bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
+else
+    echo "Note: Skipping ancestry PCA (final VCF not available)."
+fi
+echo ""
+
+# ---------------------------------------------------------------
+# Compile unified sample sheet
+# ---------------------------------------------------------------
+echo "======================================================"
+echo "  Compiling Sample Sheet"
+echo "======================================================"
+echo ""
+
+COMPILED_SHEET="${OUTPUT_DIR}/compiled_sample_sheet.tsv"
+if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
+    COMPILE_ARGS=(
+        --sample-qc "${FINAL_QC}"
+        --output "${COMPILED_SHEET}"
+    )
+    if [[ -f "${PCA_DIR}/pca_projections.tsv" ]]; then
+        COMPILE_ARGS+=(--pca-projections "${PCA_DIR}/pca_projections.tsv")
+    fi
+
+    python3 "${SCRIPT_DIR}/compile_sample_sheet.py" "${COMPILE_ARGS[@]}" 2>&1 || true
+else
+    echo "Note: Skipping sample sheet compilation (python3 or QC file not available)."
+fi
+echo ""
+
 echo "The VCF contains genotypes with BAF and LRR intensities"
 echo "ready for downstream analysis (phasing, MoChA, imputation)."
 
@@ -408,5 +478,23 @@ if command -v python3 &>/dev/null; then
 else
     echo "Note: python3 not found; skipping automated QC diagnostics."
     echo "Run manually: python3 scripts/diagnose_qc.py --output-dir ${OUTPUT_DIR}"
+fi
+
+echo ""
+echo "======================================================"
+echo "  All Steps Complete"
+echo "======================================================"
+echo ""
+echo "Final outputs:"
+echo "  VCF:              ${FINAL_VCF}"
+echo "  QC metrics:       ${FINAL_QC}"
+if [[ -f "${COMPILED_SHEET}" ]]; then
+    echo "  Sample sheet:     ${COMPILED_SHEET}"
+fi
+if [[ -d "${PCA_DIR}" ]]; then
+    echo "  Ancestry PCA:     ${PCA_DIR}/"
+fi
+if [[ -d "${SEX_CHECK_DIR}" ]]; then
+    echo "  Sex check:        ${SEX_CHECK_DIR}/"
 fi
 
