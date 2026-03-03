@@ -341,6 +341,18 @@ else
     # GRCh38-realigned CSV), so the coordinate check would falsely fail.
     PRE_NORM_BCF="${VCF_DIR}/stage1_pre_norm.bcf"
 
+    # Dynamically allocate sort memory: use ~50% of available RAM (capped at 64G)
+    SORT_MEM="4G"
+    if [[ -f /proc/meminfo ]]; then
+        SORT_MEM=$(awk '/MemAvailable/{
+            mem_gb = int($2 / 1024 / 1024 * 0.5)
+            if (mem_gb < 4) mem_gb = 4
+            if (mem_gb > 64) mem_gb = 64
+            printf "%dG", mem_gb
+        }' /proc/meminfo)
+    fi
+    echo "  Sort memory: ${SORT_MEM}"
+
     bcftools +gtc2vcf \
         --no-version -Ou \
         --do-not-check-bpm \
@@ -351,7 +363,7 @@ else
         --gtcs "${GTC_DIR}" \
         --extra "${EXTRA_TSV}" \
         --threads "${THREADS}" | \
-    bcftools sort -Ob -m 4G -T "${OUTPUT_DIR}/bcftools." \
+    bcftools sort -Ob -m "${SORT_MEM}" -T "${OUTPUT_DIR}/bcftools." \
         -o "${PRE_NORM_BCF}" --write-index
 
     # Diagnostic: count variants before normalization

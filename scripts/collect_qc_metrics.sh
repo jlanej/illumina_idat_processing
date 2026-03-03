@@ -3,7 +3,12 @@
 # collect_qc_metrics.sh
 #
 # Helper functions to extract per-sample QC metrics from genotyping output.
-# Computes call rate, LRR standard deviation, LRR mean, and LRR median per sample.
+# Computes call rate, LRR SD, LRR mean, LRR median, BAF SD, and
+# heterozygosity rate per sample in a SINGLE BCF pass.
+#
+# Performance: Previously required two separate BCF decompression passes
+# (one for call rate/LRR SD via awk, one for LRR median via Python).
+# Now uses a single pass with compute_sample_qc.py, halving I/O.
 #
 # Sourced by stage1 and stage2 scripts; not intended to be run directly.
 #
@@ -13,6 +18,9 @@ collect_qc_metrics() {
     local metadata_tsv="$2"
     local output_file="$3"
     local threads="${4:-1}"
+
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     echo "Extracting per-sample QC metrics..."
 
@@ -44,111 +52,42 @@ collect_qc_metrics() {
     echo "  [diag] ==================================="
 
     # -----------------------------------------------------------------
-    # Compute call rate AND LRR SD per sample in a single BCF pass.
+    # Compute ALL per-sample metrics in a SINGLE BCF pass.
     #
-    # Instead of making two separate passes over the (potentially huge)
-    # BCF file — one for GT and one for LRR — we extract both fields at
-    # once with bcftools query -f '[\t%GT:%LRR]\n'.  The awk script
-    # splits each sample's GT:LRR pair and accumulates both call-rate
-    # counts and running LRR sum/sum-of-squares simultaneously.
+    # Extracts GT:LRR:BAF triples per sample per variant, piped to
+    # compute_sample_qc.py which computes call_rate, lrr_sd, lrr_mean,
+    # lrr_median, baf_sd, and het_rate simultaneously.
     #
-    # This halves the BCF decompression and I/O cost of QC computation.
+    # This replaces the previous two-pass approach (awk + Python median),
+    # halving BCF decompression and I/O cost.
     #
     # Restricted to autosomes only to avoid inflation from sex-chromosome
-    # hemizygosity in males.  Filters non-numeric LRR values (nan, inf)
-    # that gtc2vcf can produce for zero-intensity probes.
+    # hemizygosity in males.
     # -----------------------------------------------------------------
-    echo "  Computing call rate and LRR SD per sample (${n_samples_vcf} samples, autosomes only)..."
+    echo "  Computing QC metrics per sample (${n_samples_vcf} samples, autosomes only, single pass)..."
     bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
-    bcftools query -f '[\t%GT:%LRR]\n' 2>/dev/null | \
-        awk -F'\t' '
-        {
-            for (i = 2; i <= NF; i++) {
-                split($i, a, ":")
-                gt = a[1]
-                lrr = a[2]
-                # Call rate: count called vs total genotypes
-                total[i]++
-                if (gt != "./." && gt != "." && gt != ".|.") called[i]++
-                # LRR SD: accumulate sum and sum-of-squares
-                if (lrr != "." && lrr != "" && lrr ~ /^-?[0-9]/) {
-                    n_lrr[i]++
-                    sum_lrr[i] += lrr
-                    sum2_lrr[i] += lrr * lrr
-                }
-            }
-        }
-        END {
-            for (i = 2; i <= NF; i++) {
-                idx = i - 2
-                cr = (total[i] > 0) ? called[i] / total[i] : 0
-                if (n_lrr[i] > 1) {
-                    mean = sum_lrr[i] / n_lrr[i]
-                    var = (sum2_lrr[i] / n_lrr[i]) - (mean * mean)
-                    if (var < 0) var = 0
-                    sd = sqrt(var)
-                } else {
-                    mean = "NA"
-                    sd = "NA"
-                }
-                print idx "\t" cr "\t" sd "\t" mean
-            }
-        }' > "${qc_metrics_file}.idx" 2>/dev/null || true
+    bcftools query -f '[\t%GT:%LRR:%BAF]\n' 2>/dev/null | \
+        python3 "${script_dir}/compute_sample_qc.py" \
+            --num-samples "${n_samples_vcf}" \
+            --output "${qc_metrics_file}.raw" 2>&1 | sed 's/^/  /'
 
-    # Compute LRR median per sample via a second pass
-    echo "  Computing LRR median per sample (autosomes only)..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
-    bcftools query -f '[\t%LRR]\n' 2>/dev/null | \
-        python3 -c "
-import sys
-
-_INVALID = {'.', '', 'nan', '-nan', 'inf', '-inf'}
-
-# Read all LRR values per sample column
-data = {}
-for line in sys.stdin:
-    fields = line.rstrip('\n').split('\t')[1:]  # skip leading empty field
-    for i, val in enumerate(fields):
-        if val.lower() not in _INVALID:
-            try:
-                v = float(val)
-                data.setdefault(i, []).append(v)
-            except ValueError:
-                pass
-
-# Output median per sample index
-for i in sorted(data.keys()):
-    vals = sorted(data[i])
-    n = len(vals)
-    if n == 0:
-        print(f'{i}\tNA')
-    elif n % 2 == 1:
-        print(f'{i}\t{vals[n // 2]:.6f}')
-    else:
-        print(f'{i}\t{(vals[n // 2 - 1] + vals[n // 2]) / 2:.6f}')
-# Output NA for samples with no data
-" > "${qc_metrics_file}.median" 2>/dev/null || true
-
-    # Merge median into main metrics file
-    # Map column indices back to sample names (combined call_rate + lrr_sd + lrr_mean + lrr_median)
-    if [[ -s "${qc_metrics_file}.median" ]]; then
-        awk 'NR==FNR { median[$1+0] = $2; next }
-             { idx = $1+0; print $0 "\t" (idx in median ? median[idx] : "NA") }' \
-            "${qc_metrics_file}.median" "${qc_metrics_file}.idx" > "${qc_metrics_file}.combined"
+    # Map column indices back to sample names
+    if [[ -s "${qc_metrics_file}.raw" ]]; then
+        # Skip header from compute_sample_qc.py, map idx to sample names
+        awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
+             FNR > 1 { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 }' \
+            "${samples_file}" "${qc_metrics_file}.raw" | \
+            sort -k1,1 > "${qc_metrics_file}"
+        rm -f "${qc_metrics_file}.raw"
     else
-        awk '{ print $0 "\tNA" }' "${qc_metrics_file}.idx" > "${qc_metrics_file}.combined"
+        echo "  [diag] WARNING: QC metrics computation returned empty output"
+        touch "${qc_metrics_file}"
     fi
-
-    awk 'NR==FNR { names[NR-1] = $0; next }
-         { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 }' \
-        "${samples_file}" "${qc_metrics_file}.combined" | \
-        sort -k1,1 > "${qc_metrics_file}"
-    rm -f "${qc_metrics_file}.idx" "${qc_metrics_file}.median" "${qc_metrics_file}.combined"
 
     if [[ -s "${qc_metrics_file}" ]]; then
         n_qm=$(wc -l < "${qc_metrics_file}" | tr -d ' ')
         echo "  [diag] QC metrics file: ${n_qm} samples"
-        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd, lrr_mean, lrr_median):"
+        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd, lrr_mean, lrr_median, baf_sd, het_rate):"
         head -3 "${qc_metrics_file}" | sed 's/^/    [diag]   /'
     else
         echo "  [diag] WARNING: QC metrics file is empty"
@@ -173,13 +112,13 @@ for i in sorted(data.keys()):
     # Merge QC metrics with gender into a single output file
     echo "  Merging metrics..."
     {
-        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tcomputed_gender"
-        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,1.4,1.5,2.2' "${qc_metrics_file}" "${gender_file}"
+        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_sd\thet_rate\tcomputed_gender"
+        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,1.4,1.5,1.6,1.7,2.2' "${qc_metrics_file}" "${gender_file}"
     } > "${output_file}" 2>/dev/null || {
         # Fallback: simpler merge approach
-        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tcomputed_gender"
+        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_sd\thet_rate\tcomputed_gender"
         paste "${qc_metrics_file}" "${gender_file}" | \
-            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $7}'
+            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $9}'
     } > "${output_file}"
 
     n_samples=$(( $(wc -l < "${output_file}") - 1 ))
@@ -205,21 +144,21 @@ for i in sorted(data.keys()):
             if (n>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
             else print "  [diag] WARNING: No valid LRR SD values found"
         }' "${output_file}"
-        awk -F'\t' 'NR>1 && $4 != "NA" {
-            n++; sum+=$4
-            if (n==1 || $4+0 < min) min=$4+0
-            if (n==1 || $4+0 > max) max=$4+0
+        awk -F'\t' 'NR>1 && $6 != "NA" {
+            n++; sum+=$6
+            if (n==1 || $6+0 < min) min=$6+0
+            if (n==1 || $6+0 > max) max=$6+0
         } END {
-            if (n>0) printf "  [diag] LRR mean range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-            else print "  [diag] WARNING: No valid LRR mean values found"
+            if (n>0) printf "  [diag] BAF SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+            else print "  [diag] WARNING: No valid BAF SD values found"
         }' "${output_file}"
-        awk -F'\t' 'NR>1 && $5 != "NA" {
-            n++; sum+=$5
-            if (n==1 || $5+0 < min) min=$5+0
-            if (n==1 || $5+0 > max) max=$5+0
+        awk -F'\t' 'NR>1 && $7 != "NA" {
+            n++; sum+=$7
+            if (n==1 || $7+0 < min) min=$7+0
+            if (n==1 || $7+0 > max) max=$7+0
         } END {
-            if (n>0) printf "  [diag] LRR median range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-            else print "  [diag] WARNING: No valid LRR median values found"
+            if (n>0) printf "  [diag] Het rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+            else print "  [diag] WARNING: No valid het rate values found"
         }' "${output_file}"
     fi
 

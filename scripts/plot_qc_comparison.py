@@ -37,6 +37,8 @@ def read_sample_qc(filepath):
         sd_idx = header.index('lrr_sd') if 'lrr_sd' in header else 2
         mean_idx = header.index('lrr_mean') if 'lrr_mean' in header else None
         median_idx = header.index('lrr_median') if 'lrr_median' in header else None
+        baf_sd_idx = header.index('baf_sd') if 'baf_sd' in header else None
+        het_rate_idx = header.index('het_rate') if 'het_rate' in header else None
         for line in f:
             fields = line.strip().split('\t')
             if len(fields) < 3:
@@ -62,9 +64,22 @@ def read_sample_qc(filepath):
                     lrr_median = float(fields[median_idx]) if fields[median_idx] != 'NA' else None
                 except (ValueError, IndexError):
                     pass
+            baf_sd = None
+            if baf_sd_idx is not None:
+                try:
+                    baf_sd = float(fields[baf_sd_idx]) if fields[baf_sd_idx] != 'NA' else None
+                except (ValueError, IndexError):
+                    pass
+            het_rate = None
+            if het_rate_idx is not None:
+                try:
+                    het_rate = float(fields[het_rate_idx]) if fields[het_rate_idx] != 'NA' else None
+                except (ValueError, IndexError):
+                    pass
             samples[sample_id] = {
                 'call_rate': cr, 'lrr_sd': sd,
                 'lrr_mean': lrr_mean, 'lrr_median': lrr_median,
+                'baf_sd': baf_sd, 'het_rate': het_rate,
             }
     return samples
 

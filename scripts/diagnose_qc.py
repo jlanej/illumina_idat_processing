@@ -253,6 +253,61 @@ def diagnose(output_dir=None, qc_file=None, report_file=None):
             findings.append(f"    Mean of medians: {statistics.mean(lrr_medians):.4f}")
             findings.append(f"    Median of medians: {statistics.median(lrr_medians):.4f}")
 
+        # BAF SD analysis
+        baf_sds = []
+        for s in samples:
+            try:
+                bs = float(s.get('baf_sd', 'NA'))
+                baf_sds.append(bs)
+            except (ValueError, TypeError):
+                pass
+
+        if baf_sds:
+            findings.append(f"\n  BAF SD Statistics (het sites):")
+            findings.append(f"    Mean:   {statistics.mean(baf_sds):.4f}")
+            findings.append(f"    Median: {statistics.median(baf_sds):.4f}")
+            findings.append(f"    Min:    {min(baf_sds):.4f}")
+            findings.append(f"    Max:    {max(baf_sds):.4f}")
+
+            # BAF SD > 0.15 may indicate contamination
+            n_high_baf = sum(1 for bs in baf_sds if bs > 0.15)
+            findings.append(f"    Samples with BAF SD > 0.15: {n_high_baf} ({n_high_baf*100/n_samples:.1f}%)")
+            if n_high_baf > 0:
+                warnings.append(
+                    f"{n_high_baf} sample(s) have BAF SD > 0.15 at het sites.\n"
+                    "  This may indicate sample contamination, DNA degradation,\n"
+                    "  or mosaicism. Review these samples individually."
+                )
+
+        # Heterozygosity rate analysis
+        het_rates = []
+        for s in samples:
+            try:
+                hr = float(s.get('het_rate', 'NA'))
+                het_rates.append(hr)
+            except (ValueError, TypeError):
+                pass
+
+        if het_rates:
+            hr_mean = statistics.mean(het_rates)
+            hr_sd = statistics.stdev(het_rates) if len(het_rates) > 1 else 0
+            findings.append(f"\n  Heterozygosity Rate Statistics:")
+            findings.append(f"    Mean:   {hr_mean:.4f}")
+            findings.append(f"    Median: {statistics.median(het_rates):.4f}")
+            findings.append(f"    Min:    {min(het_rates):.4f}")
+            findings.append(f"    Max:    {max(het_rates):.4f}")
+
+            if hr_sd > 0:
+                n_outlier = sum(1 for hr in het_rates
+                                if abs(hr - hr_mean) > 3 * hr_sd)
+                findings.append(f"    Outliers (>3 SD from mean): {n_outlier}")
+                if n_outlier > 0:
+                    warnings.append(
+                        f"{n_outlier} sample(s) have het rate > 3 SD from the mean.\n"
+                        "  High het rate may indicate contamination.\n"
+                        "  Low het rate may indicate inbreeding or population structure."
+                    )
+
     # ---------------------------------------------------------------
     # 2. Check norm warnings log
     # ---------------------------------------------------------------

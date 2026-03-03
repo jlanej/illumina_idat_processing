@@ -450,6 +450,15 @@ if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
         COMPILE_ARGS+=(--pca-projections "${PCA_DIR}/pca_projections.tsv")
     fi
 
+    # Include inbreeding coefficient from variant QC if available
+    for het_file in "${OUTPUT_DIR}/stage2/qc/variant_qc/variant_qc.het" \
+                    "${OUTPUT_DIR}/stage1/qc/variant_qc/variant_qc.het"; do
+        if [[ -f "${het_file}" ]]; then
+            COMPILE_ARGS+=(--het-file "${het_file}")
+            break
+        fi
+    done
+
     python3 "${SCRIPT_DIR}/compile_sample_sheet.py" "${COMPILE_ARGS[@]}" 2>&1 || true
 else
     echo "Note: Skipping sample sheet compilation (python3 or QC file not available)."
@@ -482,6 +491,30 @@ fi
 
 echo ""
 echo "======================================================"
+echo "  Generating Pipeline Report"
+echo "======================================================"
+echo ""
+
+REPORT_PATH="${OUTPUT_DIR}/pipeline_report.html"
+if command -v python3 &>/dev/null; then
+    python3 "${SCRIPT_DIR}/generate_report.py" \
+        --output-dir "${OUTPUT_DIR}" 2>&1 || true
+    echo ""
+    if [[ -f "${REPORT_PATH}" ]]; then
+        echo "Pipeline report:     ${REPORT_PATH}"
+    fi
+    if [[ -f "${OUTPUT_DIR}/summary_statistics.tsv" ]]; then
+        echo "Summary statistics:  ${OUTPUT_DIR}/summary_statistics.tsv"
+    fi
+    if [[ -f "${OUTPUT_DIR}/methods_text.txt" ]]; then
+        echo "Methods text:        ${OUTPUT_DIR}/methods_text.txt"
+    fi
+else
+    echo "Note: python3 not found; skipping report generation."
+fi
+
+echo ""
+echo "======================================================"
 echo "  All Steps Complete"
 echo "======================================================"
 echo ""
@@ -496,5 +529,14 @@ if [[ -d "${PCA_DIR}" ]]; then
 fi
 if [[ -d "${SEX_CHECK_DIR}" ]]; then
     echo "  Sex check:        ${SEX_CHECK_DIR}/"
+fi
+if [[ -f "${REPORT_PATH}" ]]; then
+    echo "  Pipeline report:  ${REPORT_PATH}"
+fi
+if [[ -f "${OUTPUT_DIR}/summary_statistics.tsv" ]]; then
+    echo "  Summary stats:    ${OUTPUT_DIR}/summary_statistics.tsv"
+fi
+if [[ -f "${OUTPUT_DIR}/methods_text.txt" ]]; then
+    echo "  Methods text:     ${OUTPUT_DIR}/methods_text.txt"
 fi
 

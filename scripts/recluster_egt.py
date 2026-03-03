@@ -812,7 +812,24 @@ def normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms):
     return norm_x, norm_y, theta, r
 
 
-def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
+def _read_single_gtc(args):
+    """Worker function for parallel GTC reading.
+
+    Reads a single GTC file and returns normalized theta, R, and genotypes.
+    Used by multiprocessing.Pool.map() to parallelize I/O-bound GTC reads.
+    """
+    gtc_path, norm_ids, num_probes, sidx = args
+    try:
+        gtc = GTCFile(gtc_path)
+        genotypes, raw_x, raw_y, transforms = gtc.read_all()
+        _, _, theta, r = normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms)
+        n = min(num_probes, len(theta))
+        return sidx, theta[:n].astype(np.float32), r[:n].astype(np.float32), genotypes[:n], None
+    except Exception as e:
+        return sidx, None, None, None, str(e)
+
+
+def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     """
     Recompute cluster statistics from high-quality GTC samples.
 
@@ -849,29 +866,67 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5):
     print(f"  Reading intensities from {num_samples} GTC files...", file=sys.stderr)
     read_start = time.time()
 
-    for sidx, gtc in enumerate(gtc_files):
-        sample_start = time.time()
+    # Determine number of workers for parallel GTC reading
+    import multiprocessing
+    if n_workers <= 0:
+        n_workers = min(multiprocessing.cpu_count(), num_samples, 24)
+    n_workers = max(1, n_workers)
 
-        genotypes, raw_x, raw_y, transforms = gtc.read_all()
+    if n_workers > 1 and num_samples >= 4:
+        print(f"  Using {n_workers} parallel workers for GTC reading", file=sys.stderr)
 
-        _, _, theta, r = normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms)
+        # Prepare arguments for parallel workers
+        worker_args = [
+            (gtc.filepath, norm_ids, num_probes, sidx)
+            for sidx, gtc in enumerate(gtc_files)
+        ]
 
-        n = min(num_probes, len(theta))
-        all_theta[:n, sidx] = theta[:n]
-        all_r[:n, sidx] = r[:n]
-        all_geno[:n, sidx] = genotypes[:n]
+        completed = 0
+        with multiprocessing.Pool(n_workers) as pool:
+            # Use imap_unordered for best throughput (results arrive as completed)
+            for sidx, theta, r, geno, error in pool.imap_unordered(
+                _read_single_gtc, worker_args, chunksize=max(1, num_samples // (n_workers * 4))
+            ):
+                if error:
+                    print(f"    WARNING: Failed to read GTC {sidx}: {error}", file=sys.stderr)
+                    continue
+                n = min(num_probes, len(theta))
+                all_theta[:n, sidx] = theta
+                all_r[:n, sidx] = r
+                all_geno[:n, sidx] = geno
+                completed += 1
+                if completed % 50 == 0 or completed == num_samples:
+                    elapsed = time.time() - read_start
+                    avg = elapsed / completed
+                    remaining = avg * (num_samples - completed) / 60.0
+                    print(f"    {completed}/{num_samples} samples read "
+                          f"({elapsed:.1f}s elapsed, ~{remaining:.1f}min remaining)",
+                          file=sys.stderr)
+    else:
+        # Serial fallback for small sample counts or single worker
+        for sidx, gtc in enumerate(gtc_files):
+            sample_start = time.time()
 
-        sample_elapsed = time.time() - sample_start
-        total_elapsed = time.time() - read_start
-        if (sidx + 1) % 10 == 0 or sidx == 0 or sidx == num_samples - 1:
-            avg_per_sample = total_elapsed / (sidx + 1)
-            remaining = avg_per_sample * (num_samples - sidx - 1)
-            remaining_min = remaining / 60.0
-            print(f"    Sample {sidx + 1}/{num_samples} "
-                  f"({sample_elapsed:.1f}s this sample, "
-                  f"{total_elapsed:.1f}s elapsed, "
-                  f"~{remaining_min:.1f}min remaining) "
-                  f"[{os.path.basename(gtc.filepath)}]", file=sys.stderr)
+            genotypes, raw_x, raw_y, transforms = gtc.read_all()
+
+            _, _, theta, r = normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms)
+
+            n = min(num_probes, len(theta))
+            all_theta[:n, sidx] = theta[:n]
+            all_r[:n, sidx] = r[:n]
+            all_geno[:n, sidx] = genotypes[:n]
+
+            sample_elapsed = time.time() - sample_start
+            total_elapsed = time.time() - read_start
+            if (sidx + 1) % 10 == 0 or sidx == 0 or sidx == num_samples - 1:
+                avg_per_sample = total_elapsed / (sidx + 1)
+                remaining = avg_per_sample * (num_samples - sidx - 1)
+                remaining_min = remaining / 60.0
+                print(f"    Sample {sidx + 1}/{num_samples} "
+                      f"({sample_elapsed:.1f}s this sample, "
+                      f"{total_elapsed:.1f}s elapsed, "
+                      f"~{remaining_min:.1f}min remaining) "
+                      f"[{os.path.basename(gtc.filepath)}]", file=sys.stderr)
 
     total_read = time.time() - read_start
     print(f"  Finished reading all {num_samples} samples in {total_read:.1f}s "
@@ -1046,6 +1101,8 @@ def main():
                         help="Output path for reclustered EGT file")
     parser.add_argument("--min-cluster-samples", type=int, default=5,
                         help="Minimum samples per genotype cluster to recompute (default: 5)")
+    parser.add_argument("--workers", type=int, default=0,
+                        help="Number of parallel workers for GTC reading (default: auto)")
     args = parser.parse_args()
 
     # Read original EGT
@@ -1106,7 +1163,8 @@ def main():
 
     # Perform reclustering
     print("Reclustering...", file=sys.stderr)
-    new_egt = recluster(egt, gtc_files, bpm.resolved_norm_ids, args.min_cluster_samples)
+    new_egt = recluster(egt, gtc_files, bpm.resolved_norm_ids,
+                        args.min_cluster_samples, n_workers=args.workers)
 
     # Write new EGT
     print(f"Writing reclustered EGT: {args.output_egt}", file=sys.stderr)

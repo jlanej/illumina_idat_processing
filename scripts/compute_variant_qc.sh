@@ -95,6 +95,7 @@ bcftools index "${FILTERED_VCF}" 2>/dev/null
 # --missing variant-only: per-variant missingness
 # --hardy midp: HWE test with mid-p adjustment (recommended for small samples)
 # --freq: allele frequency distribution
+# --het: per-sample inbreeding coefficient (F statistic)
 plink2 \
     --bcf "${FILTERED_VCF}" \
     --autosome \
@@ -103,7 +104,14 @@ plink2 \
     --missing variant-only \
     --hardy midp \
     --freq \
+    --het \
     --out "${PREFIX}" 2>&1 | tail -5
+
+# Compute Ti/Tv ratio via bcftools stats (lightweight, single pass)
+echo "Computing Ti/Tv ratio..."
+TSTV_FILE="${OUTPUT_DIR}/tstv_stats.txt"
+bcftools stats --threads "${THREADS}" "${FILTERED_VCF}" 2>/dev/null | \
+    awk '/^SN/ || /^TSTV/' > "${TSTV_FILE}" 2>/dev/null || true
 
 # Generate summary statistics
 SUMMARY="${OUTPUT_DIR}/variant_qc_summary.txt"
@@ -185,12 +193,48 @@ SUMMARY="${OUTPUT_DIR}/variant_qc_summary.txt"
     fi
 
     echo ""
+
+    # Heterozygosity / inbreeding coefficient
+    if [[ -f "${PREFIX}.het" ]]; then
+        echo "--- Per-Sample Heterozygosity (Inbreeding Coefficient F) ---"
+        awk 'NR>1 {
+            n++; f = $NF+0; fsum += f
+            if (n==1 || f < min_f) min_f = f
+            if (n==1 || f > max_f) max_f = f
+            if (f > 0.05 || f < -0.05) n_outlier++
+        } END {
+            if (n>0) {
+                printf "Samples:                    %d\n", n
+                printf "Mean F (inbreeding coeff):  %.4f\n", fsum/n
+                printf "Min F:                      %.4f\n", min_f
+                printf "Max F:                      %.4f\n", max_f
+                printf "Outliers (|F|>0.05):        %d (%.1f%%)\n", n_outlier+0, (n_outlier+0)*100/n
+            }
+        }' "${PREFIX}.het"
+    fi
+
+    echo ""
+
+    # Ti/Tv ratio
+    if [[ -f "${TSTV_FILE}" ]]; then
+        echo "--- Transition/Transversion Ratio ---"
+        awk -F'\t' '/^TSTV/ {
+            printf "Transitions:    %s\n", $3
+            printf "Transversions:  %s\n", $4
+            printf "Ti/Tv ratio:    %s\n", $5
+        }' "${TSTV_FILE}" 2>/dev/null || echo "  (Could not parse Ti/Tv ratio)"
+    fi
+
+    echo ""
     echo "======================================"
 } | tee "${SUMMARY}"
 
 echo ""
 echo "Variant QC files:"
-for ext in vmiss hardy afreq log; do
+for ext in vmiss hardy afreq het log; do
     [[ -f "${PREFIX}.${ext}" ]] && echo "  ${PREFIX}.${ext}"
 done
 echo "  ${SUMMARY}"
+if [[ -f "${TSTV_FILE}" ]]; then
+    echo "  ${TSTV_FILE}"
+fi

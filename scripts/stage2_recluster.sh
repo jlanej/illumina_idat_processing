@@ -229,7 +229,8 @@ else
         --gtc-dir "${STAGE1_GTC_DIR}" \
         --hq-samples "${HQ_SAMPLES}" \
         --output-egt "${RECLUSTERED_EGT}" \
-        --min-cluster-samples "${MIN_CLUSTER_SAMPLES}"
+        --min-cluster-samples "${MIN_CLUSTER_SAMPLES}" \
+        --workers "${THREADS}"
 
     echo "  Reclustered EGT: ${RECLUSTERED_EGT}"
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
@@ -393,6 +394,18 @@ else
     # Convert reclustered GTC to VCF (pre-normalization)
     PRE_NORM_BCF="${VCF_DIR}/stage2_pre_norm.bcf"
 
+    # Dynamically allocate sort memory: use ~50% of available RAM (capped at 64G)
+    SORT_MEM="4G"
+    if [[ -f /proc/meminfo ]]; then
+        SORT_MEM=$(awk '/MemAvailable/{
+            mem_gb = int($2 / 1024 / 1024 * 0.5)
+            if (mem_gb < 4) mem_gb = 4
+            if (mem_gb > 64) mem_gb = 64
+            printf "%dG", mem_gb
+        }' /proc/meminfo)
+    fi
+    echo "  Sort memory: ${SORT_MEM}"
+
     bcftools +gtc2vcf \
         --no-version -Ou \
         --do-not-check-bpm \
@@ -404,7 +417,7 @@ else
         --extra "${EXTRA_TSV}" \
         --adjust-clusters \
         --threads "${THREADS}" | \
-    bcftools sort -Ob -m 4G -T "${OUTPUT_DIR}/bcftools." \
+    bcftools sort -Ob -m "${SORT_MEM}" -T "${OUTPUT_DIR}/bcftools." \
         -o "${PRE_NORM_BCF}" --write-index
 
     # Diagnostic: count variants before normalization
@@ -533,24 +546,35 @@ fi
 echo ""
 echo "--- QC Comparison (Stage 1 vs Stage 2) ---"
 
-paste "${STAGE1_QC}" "${STAGE2_QC}" | \
-    awk -F'\t' 'NR==1 {next}
-    {
-        s1_cr = $2; s1_sd = $3
-        s2_cr = $6; s2_sd = $7
-        if (s1_cr != "NA" && s2_cr != "NA") {
-            cr_diff = s2_cr - s1_cr
-            cr_sum += cr_diff; cr_n++
-        }
-        if (s1_sd != "NA" && s2_sd != "NA") {
-            sd_diff = s2_sd - s1_sd
-            sd_sum += sd_diff; sd_n++
-        }
-    }
-    END {
-        if (cr_n > 0) printf "  Avg call rate change:  %+.4f\n", cr_sum/cr_n
-        if (sd_n > 0) printf "  Avg LRR SD change:     %+.4f\n", sd_sum/sd_n
-    }' 2>/dev/null || echo "  (Could not compute comparison - check output files)"
+# Use header-based column lookup (robust to column order changes)
+python3 -c "
+import sys
+def read_qc(path):
+    d = {}
+    with open(path) as f:
+        hdr = f.readline().strip().split('\t')
+        cr_i = hdr.index('call_rate') if 'call_rate' in hdr else 1
+        sd_i = hdr.index('lrr_sd') if 'lrr_sd' in hdr else 2
+        for line in f:
+            fs = line.strip().split('\t')
+            try:
+                cr = float(fs[cr_i]) if fs[cr_i] != 'NA' else None
+                sd = float(fs[sd_i]) if fs[sd_i] != 'NA' else None
+                d[fs[0]] = (cr, sd)
+            except (ValueError, IndexError):
+                pass
+    return d
+
+s1 = read_qc('${STAGE1_QC}')
+s2 = read_qc('${STAGE2_QC}')
+common = set(s1) & set(s2)
+cr_diffs = [s2[s][0]-s1[s][0] for s in common if s1[s][0] is not None and s2[s][0] is not None]
+sd_diffs = [s2[s][1]-s1[s][1] for s in common if s1[s][1] is not None and s2[s][1] is not None]
+if cr_diffs:
+    print(f'  Avg call rate change:  {sum(cr_diffs)/len(cr_diffs):+.4f}')
+if sd_diffs:
+    print(f'  Avg LRR SD change:     {sum(sd_diffs)/len(sd_diffs):+.4f}')
+" 2>/dev/null || echo "  (Could not compute comparison - check output files)"
 
 echo ""
 echo "============================================"

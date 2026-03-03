@@ -100,6 +100,8 @@ def main():
                         help="Sample QC TSV file (from collect_qc_metrics.sh)")
     parser.add_argument("--pca-projections", default=None,
                         help="PCA projections TSV (from ancestry_pca.sh)")
+    parser.add_argument("--het-file", default=None,
+                        help="Plink2 .het file with per-sample inbreeding coefficient")
     parser.add_argument("--output", required=True,
                         help="Output compiled sample sheet TSV")
     parser.add_argument("--n-pcs", type=int, default=20,
@@ -124,8 +126,23 @@ def main():
         # Limit to requested number of PCs
         pc_cols = pc_cols[:args.n_pcs]
 
+    # Read inbreeding coefficient (F) from plink2 .het file if available
+    het_data = {}
+    if args.het_file and os.path.exists(args.het_file):
+        with open(args.het_file) as f:
+            het_header = f.readline().strip().split()
+            # plink2 .het columns: #FID  IID  OBS_CT  E(HOM_CT)  HOM_CT  F
+            iid_idx = 1 if len(het_header) > 1 else 0
+            f_idx = len(het_header) - 1  # F is the last column
+            for line in f:
+                fields = line.strip().split()
+                if len(fields) > f_idx:
+                    het_data[fields[iid_idx]] = fields[f_idx]
+
     # Build unified header
     output_cols = list(qc_header)
+    if het_data:
+        output_cols.append('inbreeding_F')
     output_cols.extend(pc_cols)
 
     # Collect all sample IDs
@@ -144,6 +161,9 @@ def main():
             # Override sample_id if it's the first column
             if qc_header and qc_header[0] == 'sample_id':
                 row[0] = sample_id
+            # Inbreeding coefficient
+            if het_data:
+                row.append(het_data.get(sample_id, 'NA'))
             # PC columns
             pc_row = pc_data.get(sample_id, {})
             for col in pc_cols:

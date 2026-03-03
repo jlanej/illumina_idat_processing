@@ -10,13 +10,13 @@ The pipeline runs in five phases:
 
 1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
-2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, and **LRR median**.
+2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, **LRR median**, **BAF standard deviation** (contamination indicator), and **heterozygosity rate**.
 
-3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering. A **sex check plot** (median chrX vs chrY LRR, colored by predicted sex) is also generated.
+3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering. A **sex check plot** (median chrX vs chrY LRR, colored by predicted sex) is also generated. Per-variant **Ti/Tv ratio** and per-sample **inbreeding coefficients (F)** are computed for additional QC.
 
 4. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
 
-5. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, predicted sex) and ancestry PCs (default 20) for every sample.
+5. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F) and ancestry PCs (default 20) for every sample. A comprehensive **HTML pipeline report** is generated with publication-quality figures (QC dashboard, PCA scatter plots, sex check), summary statistics, and an auto-generated methods paragraph.
 
 ### Reference Genome
 
@@ -232,7 +232,12 @@ output/
 │   ├── pca_eigenvalues.txt          # PCA eigenvalues
 │   ├── pca_qc_samples.txt           # QC'd sample set used for PCA
 │   └── qc_summary.txt               # QC filtering summary
-├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs)
+├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + inbreeding F)
+├── pipeline_report.html             # Comprehensive HTML report with figures
+├── summary_statistics.tsv           # Publication-ready summary statistics table
+├── methods_text.txt                 # Auto-generated methods paragraph
+├── qc_dashboard.png                 # Sample QC dashboard figure
+├── pca_scatter.png                  # PCA scatter plots (PC1 vs PC2, PC3 vs PC4)
 ├── manifests/                  # Downloaded manifest files (if auto-downloaded)
 ├── realigned_manifests/        # Realigned manifest and mapping summary
 │   ├── *.realigned.csv         # CSV with validated/remapped coordinates
@@ -251,6 +256,8 @@ The `*_sample_qc.tsv` files contain per-sample metrics:
 | `lrr_sd` | Standard deviation of Log R Ratio (autosomes only; lower is better) |
 | `lrr_mean` | Mean of Log R Ratio (autosomes only) |
 | `lrr_median` | Median of Log R Ratio (autosomes only) |
+| `baf_sd` | Standard deviation of B Allele Frequency at heterozygous sites (contamination/mosaicism indicator) |
+| `het_rate` | Fraction of heterozygous genotype calls (autosomes only) |
 | `computed_gender` | Inferred gender (1=male, 2=female) |
 
 The `comparison/` subdirectory (Stage 2 only) contains:

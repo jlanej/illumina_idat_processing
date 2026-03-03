@@ -22,12 +22,16 @@ import subprocess
 import sys
 
 
-def extract_chr_lrr_medians(vcf_file, chrom, threads=1):
-    """Extract median LRR per sample for a specific chromosome.
+def extract_chrXY_lrr_medians(vcf_file, threads=1):
+    """Extract median LRR per sample for chrX and chrY in a SINGLE VCF pass.
 
-    Returns dict of sample_index -> median_lrr.
+    Instead of two separate passes (one for chrX, one for chrY), this
+    extracts both chromosomes in one bcftools view -r chrX,chrY call,
+    then splits by chromosome in Python. Halves I/O.
+
+    Returns (dict of sample_index -> median_lrr_X, dict of sample_index -> median_lrr_Y).
     """
-    # Determine correct chromosome name by checking what's in the VCF
+    # Determine correct chromosome names by checking what's in the VCF
     try:
         idx_output = subprocess.run(
             ['bcftools', 'index', '-s', vcf_file],
@@ -37,56 +41,74 @@ def extract_chr_lrr_medians(vcf_file, chrom, threads=1):
     except Exception:
         contigs = []
 
-    # Try chr-prefixed first, then non-prefixed
-    target_chrom = None
-    for candidate in [f'chr{chrom}', chrom]:
+    # Find chrX and chrY names
+    chrom_x = None
+    chrom_y = None
+    for candidate in ['chrX', 'X']:
         if candidate in contigs:
-            target_chrom = candidate
+            chrom_x = candidate
+            break
+    for candidate in ['chrY', 'Y']:
+        if candidate in contigs:
+            chrom_y = candidate
             break
 
-    if target_chrom is None:
-        return {}
+    if chrom_x is None and chrom_y is None:
+        return {}, {}
 
-    # Extract LRR values per sample for this chromosome
+    # Build region string for both chromosomes
+    regions = ','.join(c for c in [chrom_x, chrom_y] if c is not None)
+
+    # Single pass: extract CHROM and LRR per sample
     cmd = (
-        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {target_chrom} '
+        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {regions} '
         f'--threads {threads} "{vcf_file}" 2>/dev/null | '
-        f'bcftools query -f "[\\t%LRR]\\n" 2>/dev/null'
+        f'bcftools query -f "%CHROM[\\t%LRR]\\n" 2>/dev/null'
     )
     try:
         proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         lines = proc.stdout.strip().split('\n')
     except Exception:
-        return {}
+        return {}, {}
 
     if not lines or lines == ['']:
-        return {}
+        return {}, {}
 
-    # Collect LRR values per sample column
-    data = {}
+    # Collect LRR values per sample column, split by chromosome
+    data_x = {}  # sample_idx -> list of float
+    data_y = {}
     for line in lines:
-        fields = line.split('\t')[1:]  # skip leading empty
-        for i, val in enumerate(fields):
+        fields = line.split('\t')
+        if len(fields) < 2:
+            continue
+        chrom = fields[0]
+        for i, val in enumerate(fields[1:]):
             if val in ('.', '', 'nan', '-nan', 'inf', '-inf'):
                 continue
             try:
                 v = float(val)
-                data.setdefault(i, []).append(v)
+                if chrom == chrom_x:
+                    data_x.setdefault(i, []).append(v)
+                elif chrom == chrom_y:
+                    data_y.setdefault(i, []).append(v)
             except ValueError:
                 pass
 
     # Compute median per sample
-    medians = {}
-    for i, vals in data.items():
-        vals.sort()
-        n = len(vals)
-        if n == 0:
-            continue
-        if n % 2 == 1:
-            medians[i] = vals[n // 2]
-        else:
-            medians[i] = (vals[n // 2 - 1] + vals[n // 2]) / 2.0
-    return medians
+    def _compute_medians(data):
+        medians = {}
+        for i, vals in data.items():
+            vals.sort()
+            n = len(vals)
+            if n == 0:
+                continue
+            if n % 2 == 1:
+                medians[i] = vals[n // 2]
+            else:
+                medians[i] = (vals[n // 2 - 1] + vals[n // 2]) / 2.0
+        return medians
+
+    return _compute_medians(data_x), _compute_medians(data_y)
 
 
 def read_sample_names(vcf_file):
@@ -204,11 +226,8 @@ def main():
         print("Error: No samples found in VCF.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"  Extracting median chrX LRR ({len(sample_names)} samples)...")
-    chrx_medians = extract_chr_lrr_medians(args.vcf, 'X', args.threads)
-
-    print(f"  Extracting median chrY LRR ({len(sample_names)} samples)...")
-    chry_medians = extract_chr_lrr_medians(args.vcf, 'Y', args.threads)
+    print(f"  Extracting median chrX + chrY LRR ({len(sample_names)} samples, single pass)...")
+    chrx_medians, chry_medians = extract_chrXY_lrr_medians(args.vcf, args.threads)
 
     sex_map = read_predicted_sex(args.sample_qc)
 
