@@ -142,6 +142,8 @@ bcftools index "${FILTERED_VCF}" 2>/dev/null
 echo "Step 2: Applying stringent variant and sample QC..."
 
 # First pass: variant QC
+# Convert min call rate to max missingness (e.g., 0.98 -> 0.02)
+MAX_SAMPLE_MISSING=$(awk -v cr="${MIN_CALL_RATE}" 'BEGIN{printf "%.4f", 1-cr}')
 plink2 \
     --bcf "${FILTERED_VCF}" \
     --autosome \
@@ -150,7 +152,7 @@ plink2 \
     --geno "${MAX_MISSING}" \
     --hwe "${HWE_P}" \
     --maf "${MIN_MAF}" \
-    --mind "$(awk -v cr="${MIN_CALL_RATE}" 'BEGIN{printf "%.4f", 1-cr}')" \
+    --mind "${MAX_SAMPLE_MISSING}" \
     --make-bed \
     --out "${PREFIX}_qc" 2>&1 | tail -10
 

@@ -132,47 +132,32 @@ def create_sex_check_plot(chrx_medians, chry_medians, sample_names,
               file=sys.stderr)
         return None
 
-    # Gather data points
-    x_vals, y_vals, colors, labels_used = [], [], [], set()
-    color_map = {'1': '#4393C3', '2': '#D6604D', 'M': '#4393C3', 'F': '#D6604D'}
-    label_map = {'1': 'Male', '2': 'Female', 'M': 'Male', 'F': 'Female'}
-
+    # Gather data points with their sex labels
+    points = []  # list of (x, y, sex_code)
     for i, name in enumerate(sample_names):
         if i in chrx_medians and i in chry_medians:
-            x_vals.append(chrx_medians[i])
-            y_vals.append(chry_medians[i])
             sex = sex_map.get(name, 'NA')
-            colors.append(color_map.get(sex, '#999999'))
-            labels_used.add(sex)
+            points.append((chrx_medians[i], chry_medians[i], sex))
 
-    if not x_vals:
+    if not points:
         print("Warning: No samples with both chrX and chrY LRR data.",
               file=sys.stderr)
         return None
 
     fig, ax = plt.subplots(figsize=(8, 7))
 
-    # Plot by sex category for legend
-    for sex_code, color, label in [
-        ('1', '#4393C3', 'Male'), ('M', '#4393C3', 'Male'),
-        ('2', '#D6604D', 'Female'), ('F', '#D6604D', 'Female'),
-        ('NA', '#999999', 'Unknown'),
-    ]:
-        if sex_code not in labels_used:
-            continue
-        xi = [x_vals[j] for j in range(len(x_vals))
-              if sex_map.get(sample_names[
-                  [k for k in range(len(sample_names))
-                   if k in chrx_medians and k in chry_medians][j]
-              ], 'NA') == sex_code]
-        yi = [y_vals[j] for j in range(len(y_vals))
-              if sex_map.get(sample_names[
-                  [k for k in range(len(sample_names))
-                   if k in chrx_medians and k in chry_medians][j]
-              ], 'NA') == sex_code]
+    # Plot by sex category for legend (deduplicate Male codes 1/M, Female 2/F)
+    sex_groups = {
+        'Male': {'codes': {'1', 'M'}, 'color': '#4393C3'},
+        'Female': {'codes': {'2', 'F'}, 'color': '#D6604D'},
+        'Unknown': {'codes': {'NA', 'U', ''}, 'color': '#999999'},
+    }
+    for label, group in sex_groups.items():
+        xi = [p[0] for p in points if p[2] in group['codes']]
+        yi = [p[1] for p in points if p[2] in group['codes']]
         if xi:
-            ax.scatter(xi, yi, c=color, label=label, alpha=0.6, s=20,
-                       edgecolors='none')
+            ax.scatter(xi, yi, c=group['color'], label=label, alpha=0.6,
+                       s=20, edgecolors='none')
 
     ax.set_xlabel('Median LRR (chrX)', fontsize=12)
     ax.set_ylabel('Median LRR (chrY)', fontsize=12)

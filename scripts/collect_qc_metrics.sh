@@ -102,12 +102,14 @@ collect_qc_metrics() {
         python3 -c "
 import sys
 
+_INVALID = {'.', '', 'nan', '-nan', 'inf', '-inf'}
+
 # Read all LRR values per sample column
 data = {}
 for line in sys.stdin:
     fields = line.rstrip('\n').split('\t')[1:]  # skip leading empty field
     for i, val in enumerate(fields):
-        if val not in ('.', '') and not val.startswith('nan') and not val.startswith('inf') and not val.startswith('-nan') and not val.startswith('-inf'):
+        if val.lower() not in _INVALID:
             try:
                 v = float(val)
                 data.setdefault(i, []).append(v)
