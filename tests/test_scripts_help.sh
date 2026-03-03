@@ -29,6 +29,7 @@ HELP_SCRIPTS=(
     scripts/stage2_recluster.sh
     scripts/process_1000g.sh
     scripts/compute_variant_qc.sh
+    scripts/ancestry_pca.sh
 )
 
 for relpath in "${HELP_SCRIPTS[@]}"; do
@@ -66,6 +67,8 @@ PYTHON_SCRIPTS=(
     scripts/recluster_egt.py
     scripts/diagnose_qc.py
     scripts/plot_qc_comparison.py
+    scripts/plot_sex_check.py
+    scripts/compile_sample_sheet.py
 )
 for relpath in "${PYTHON_SCRIPTS[@]}"; do
     PYTHON_SCRIPT="${REPO_DIR}/${relpath}"

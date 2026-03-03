@@ -225,6 +225,34 @@ def diagnose(output_dir=None, qc_file=None, report_file=None):
                     f"Mean LRR SD {sd_mean:.4f} is above expected ({EXPECTED_LRR_SD_MAX})."
                 )
 
+        # LRR mean analysis
+        lrr_means = []
+        for s in samples:
+            try:
+                lm = float(s.get('lrr_mean', 'NA'))
+                lrr_means.append(lm)
+            except (ValueError, TypeError):
+                pass
+
+        if lrr_means:
+            findings.append(f"\n  LRR Mean Statistics:")
+            findings.append(f"    Mean of means: {statistics.mean(lrr_means):.4f}")
+            findings.append(f"    Median of means: {statistics.median(lrr_means):.4f}")
+
+        # LRR median analysis
+        lrr_medians = []
+        for s in samples:
+            try:
+                lmed = float(s.get('lrr_median', 'NA'))
+                lrr_medians.append(lmed)
+            except (ValueError, TypeError):
+                pass
+
+        if lrr_medians:
+            findings.append(f"\n  LRR Median Statistics:")
+            findings.append(f"    Mean of medians: {statistics.mean(lrr_medians):.4f}")
+            findings.append(f"    Median of medians: {statistics.median(lrr_medians):.4f}")
+
     # ---------------------------------------------------------------
     # 2. Check norm warnings log
     # ---------------------------------------------------------------

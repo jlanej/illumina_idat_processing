@@ -55,6 +55,22 @@ RUN wget -q "https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.z
     chmod +x /usr/local/bin/plink2 && \
     rm /tmp/plink2.zip
 
+# Install flashpca2 for fast ancestry PCA computation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libeigen3-dev \
+        liblapack-dev \
+        libopenblas-dev \
+        libboost-program-options-dev \
+        git \
+    && rm -rf /var/lib/apt/lists/* && \
+    cd /tmp && \
+    git clone https://github.com/gabraham/flashpca.git && \
+    cd flashpca && \
+    make all EIGEN_INC=/usr/include/eigen3 && \
+    cp flashpca /usr/local/bin/ && \
+    chmod +x /usr/local/bin/flashpca && \
+    cd / && rm -rf /tmp/flashpca
+
 # Copy pipeline scripts (includes diagnose_qc.py for QC troubleshooting)
 COPY scripts/ /opt/scripts/
 RUN chmod +x /opt/scripts/*.sh /opt/scripts/*.py

@@ -3,7 +3,7 @@
 # collect_qc_metrics.sh
 #
 # Helper functions to extract per-sample QC metrics from genotyping output.
-# Computes call rate and LRR standard deviation per sample.
+# Computes call rate, LRR standard deviation, LRR mean, and LRR median per sample.
 #
 # Sourced by stage1 and stage2 scripts; not intended to be run directly.
 #
@@ -88,23 +88,67 @@ collect_qc_metrics() {
                     if (var < 0) var = 0
                     sd = sqrt(var)
                 } else {
+                    mean = "NA"
                     sd = "NA"
                 }
-                print idx "\t" cr "\t" sd
+                print idx "\t" cr "\t" sd "\t" mean
             }
         }' > "${qc_metrics_file}.idx" 2>/dev/null || true
 
-    # Map column indices back to sample names (combined call_rate + lrr_sd)
+    # Compute LRR median per sample via a second pass
+    echo "  Computing LRR median per sample (autosomes only)..."
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
+    bcftools query -f '[\t%LRR]\n' 2>/dev/null | \
+        python3 -c "
+import sys
+
+_INVALID = {'.', '', 'nan', '-nan', 'inf', '-inf'}
+
+# Read all LRR values per sample column
+data = {}
+for line in sys.stdin:
+    fields = line.rstrip('\n').split('\t')[1:]  # skip leading empty field
+    for i, val in enumerate(fields):
+        if val.lower() not in _INVALID:
+            try:
+                v = float(val)
+                data.setdefault(i, []).append(v)
+            except ValueError:
+                pass
+
+# Output median per sample index
+for i in sorted(data.keys()):
+    vals = sorted(data[i])
+    n = len(vals)
+    if n == 0:
+        print(f'{i}\tNA')
+    elif n % 2 == 1:
+        print(f'{i}\t{vals[n // 2]:.6f}')
+    else:
+        print(f'{i}\t{(vals[n // 2 - 1] + vals[n // 2]) / 2:.6f}')
+# Output NA for samples with no data
+" > "${qc_metrics_file}.median" 2>/dev/null || true
+
+    # Merge median into main metrics file
+    # Map column indices back to sample names (combined call_rate + lrr_sd + lrr_mean + lrr_median)
+    if [[ -s "${qc_metrics_file}.median" ]]; then
+        awk 'NR==FNR { median[$1+0] = $2; next }
+             { idx = $1+0; print $0 "\t" (idx in median ? median[idx] : "NA") }' \
+            "${qc_metrics_file}.median" "${qc_metrics_file}.idx" > "${qc_metrics_file}.combined"
+    else
+        awk '{ print $0 "\tNA" }' "${qc_metrics_file}.idx" > "${qc_metrics_file}.combined"
+    fi
+
     awk 'NR==FNR { names[NR-1] = $0; next }
-         { print names[$1+0] "\t" $2 "\t" $3 }' \
-        "${samples_file}" "${qc_metrics_file}.idx" | \
+         { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 }' \
+        "${samples_file}" "${qc_metrics_file}.combined" | \
         sort -k1,1 > "${qc_metrics_file}"
-    rm -f "${qc_metrics_file}.idx"
+    rm -f "${qc_metrics_file}.idx" "${qc_metrics_file}.median" "${qc_metrics_file}.combined"
 
     if [[ -s "${qc_metrics_file}" ]]; then
         n_qm=$(wc -l < "${qc_metrics_file}" | tr -d ' ')
         echo "  [diag] QC metrics file: ${n_qm} samples"
-        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd):"
+        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd, lrr_mean, lrr_median):"
         head -3 "${qc_metrics_file}" | sed 's/^/    [diag]   /'
     else
         echo "  [diag] WARNING: QC metrics file is empty"
@@ -129,13 +173,13 @@ collect_qc_metrics() {
     # Merge QC metrics with gender into a single output file
     echo "  Merging metrics..."
     {
-        echo -e "sample_id\tcall_rate\tlrr_sd\tcomputed_gender"
-        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,2.2' "${qc_metrics_file}" "${gender_file}"
+        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tcomputed_gender"
+        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,1.4,1.5,2.2' "${qc_metrics_file}" "${gender_file}"
     } > "${output_file}" 2>/dev/null || {
         # Fallback: simpler merge approach
-        echo -e "sample_id\tcall_rate\tlrr_sd\tcomputed_gender"
+        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tcomputed_gender"
         paste "${qc_metrics_file}" "${gender_file}" | \
-            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $5}'
+            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $7}'
     } > "${output_file}"
 
     n_samples=$(( $(wc -l < "${output_file}") - 1 ))
@@ -160,6 +204,22 @@ collect_qc_metrics() {
         } END {
             if (n>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
             else print "  [diag] WARNING: No valid LRR SD values found"
+        }' "${output_file}"
+        awk -F'\t' 'NR>1 && $4 != "NA" {
+            n++; sum+=$4
+            if (n==1 || $4+0 < min) min=$4+0
+            if (n==1 || $4+0 > max) max=$4+0
+        } END {
+            if (n>0) printf "  [diag] LRR mean range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+            else print "  [diag] WARNING: No valid LRR mean values found"
+        }' "${output_file}"
+        awk -F'\t' 'NR>1 && $5 != "NA" {
+            n++; sum+=$5
+            if (n==1 || $5+0 < min) min=$5+0
+            if (n==1 || $5+0 > max) max=$5+0
+        } END {
+            if (n>0) printf "  [diag] LRR median range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+            else print "  [diag] WARNING: No valid LRR median values found"
         }' "${output_file}"
     fi
 

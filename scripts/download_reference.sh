@@ -9,7 +9,7 @@
 #
 set -euo pipefail
 
-GENOME="GRCh38"
+GENOME="CHM13"
 OUTPUT_DIR=""
 
 usage() {
@@ -19,7 +19,7 @@ Usage: $(basename "$0") [OPTIONS]
 Download reference genome and supporting resources.
 
 Options:
-  --genome NAME    Genome build: GRCh37 or GRCh38 (default: GRCh38)
+  --genome NAME    Genome build: CHM13, GRCh37, or GRCh38 (default: CHM13)
   --output-dir DIR Directory to save reference files (required)
   --help           Show this help message
 EOF
@@ -42,7 +42,13 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-if [[ "${GENOME}" == "GRCh38" ]]; then
+if [[ "${GENOME}" == "CHM13" ]]; then
+    FASTA_NAME="chm13v2.0.fa"
+    FASTA_URL="https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz"
+    MAP_URL="https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz"
+    MAP_NAME="genetic_map_hg38_withX.txt.gz"
+    CYTO_URL="https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.cytoBand.txt.gz"
+elif [[ "${GENOME}" == "GRCh38" ]]; then
     FASTA_NAME="GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
     FASTA_URL="https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz"
     MAP_URL="https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz"
@@ -55,7 +61,7 @@ elif [[ "${GENOME}" == "GRCh37" ]]; then
     MAP_NAME="genetic_map_hg19_withX.txt.gz"
     CYTO_URL="https://hgdownload.cse.ucsc.edu/goldenPath/hg19/database/cytoBand.txt.gz"
 else
-    echo "Error: Unsupported genome build: ${GENOME}. Use GRCh37 or GRCh38." >&2
+    echo "Error: Unsupported genome build: ${GENOME}. Use CHM13, GRCh37, or GRCh38." >&2
     exit 1
 fi
 

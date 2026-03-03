@@ -54,6 +54,7 @@ workflow illumina_idat_processing {
     File  final_vcf_idx        = run_pipeline.final_vcf_idx
     File  final_qc_tsv         = run_pipeline.final_qc_tsv
     File  stage1_qc_tsv        = run_pipeline.stage1_qc_tsv
+    File? compiled_sample_sheet = run_pipeline.compiled_sample_sheet
     File? qc_diagnostic_report = run_pipeline.qc_diagnostic_report
   }
 
@@ -122,6 +123,7 @@ task run_pipeline {
       then "pipeline_output/stage1/qc/stage1_sample_qc.tsv"
       else "pipeline_output/stage2/qc/stage2_sample_qc.tsv"
     File  stage1_qc_tsv        = "pipeline_output/stage1/qc/stage1_sample_qc.tsv"
+    File? compiled_sample_sheet = "pipeline_output/compiled_sample_sheet.tsv"
     File? qc_diagnostic_report = "pipeline_output/qc_diagnostic_report.txt"
   }
 
