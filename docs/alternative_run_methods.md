@@ -41,6 +41,15 @@ docker run --rm \
     bash /opt/scripts/process_1000g.sh \
     --output-dir /data/1000g_output \
     --num-samples 200
+
+# Reuse a local pre-downloaded archive (not deleted by script)
+docker run --rm \
+    -v $PWD:/data \
+    ghcr.io/jlanej/illumina_idat_processing:main \
+    bash /opt/scripts/process_1000g.sh \
+    --output-dir /data/1000g_output \
+    --archive /data/Omni25_idats_gtcs_2141_samples.tgz \
+    --num-samples all --threads 8
 ```
 
 ## From Source

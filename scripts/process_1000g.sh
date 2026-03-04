@@ -39,6 +39,7 @@ SKIP_STAGE2="false"
 SKIP_FAILURES="true"   # default on for 1000G: some samples may have incomplete downloads
 KEEP_ARCHIVE="false"
 FORCE="false"
+USER_ARCHIVE=""
 USER_BPM=""
 USER_EGT=""
 USER_CSV=""
@@ -48,6 +49,9 @@ FORCE_RENAME="false"
 
 # Default 1000G sample name map (bundled with the repo)
 DEFAULT_1000G_NAME_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests/data/sample_name_map.txt"
+
+# Prefer pigz for faster multi-threaded gzip decompression when available.
+USE_PIGZ="false"
 
 usage() {
     cat <<EOF
@@ -67,6 +71,8 @@ Manifest options (override auto-downloaded manifests):
 Options:
   --num-samples N|all    Number of samples to process (default: ${NUM_SAMPLES})
                          Use "all" for all ~2141 samples
+  --archive FILE         Use a pre-downloaded Omni25_idats_gtcs_2141_samples.tgz
+                         archive instead of downloading it
   --sample-name-map FILE Two-column tab-delimited file mapping IDAT root names
                          to desired sample names.  Defaults to the bundled
                          1000G map (tests/data/sample_name_map.txt).
@@ -80,7 +86,7 @@ Options:
                          1000G data, where a small number of samples may have
                          incomplete downloads).  Disable with --no-skip-failures.
   --no-skip-failures     Halt on IDAT read errors instead of skipping
-  --keep-archive         Keep the downloaded .tgz archive after extraction
+  --keep-archive         Keep downloaded archive after extraction
   --force                Force re-run of all pipeline steps, ignoring checkpoints
   --help                 Show this help message
 
@@ -90,6 +96,10 @@ Examples:
 
   # Process all ~2141 samples
   $(basename "$0") --output-dir ./1000g_output --num-samples all --threads 8
+
+  # Use a pre-downloaded 1000G archive (will never be deleted by this script)
+  $(basename "$0") --output-dir ./1000g_output \\
+      --archive /data/Omni25_idats_gtcs_2141_samples.tgz --num-samples all
 
   # Use with Apptainer/Singularity on HPC
   apptainer exec --bind \$PWD docker://ghcr.io/jlanej/illumina_idat_processing:main \\
@@ -108,6 +118,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --output-dir)    OUTPUT_DIR="$2"; shift 2 ;;
         --num-samples)   NUM_SAMPLES="$2"; shift 2 ;;
+        --archive)       USER_ARCHIVE="$2"; shift 2 ;;
         --sample-name-map) USER_SAMPLE_NAME_MAP="$2"; shift 2 ;;
         --force-rename)  FORCE_RENAME="true"; shift ;;
         --threads)       THREADS="$2"; shift 2 ;;
@@ -131,6 +142,46 @@ if [[ -z "${OUTPUT_DIR}" ]]; then
     exit 1
 fi
 
+if command -v pigz >/dev/null 2>&1; then
+    USE_PIGZ="true"
+fi
+
+# Tar helper wrappers so we can consistently enable pigz acceleration.
+tar_list_file() {
+    local archive="$1"
+    if [[ "${USE_PIGZ}" == "true" ]]; then
+        tar --use-compress-program="pigz -dc -p ${THREADS}" -tf "${archive}"
+    else
+        tar tzf "${archive}"
+    fi
+}
+
+tar_extract_file() {
+    local archive="$1"
+    shift
+    if [[ "${USE_PIGZ}" == "true" ]]; then
+        tar --use-compress-program="pigz -dc -p ${THREADS}" -xf "${archive}" "$@"
+    else
+        tar xzf "${archive}" "$@"
+    fi
+}
+
+tar_list_stream() {
+    if [[ "${USE_PIGZ}" == "true" ]]; then
+        pigz -dc -p "${THREADS}" | tar -tf -
+    else
+        tar tzf -
+    fi
+}
+
+tar_extract_stream() {
+    if [[ "${USE_PIGZ}" == "true" ]]; then
+        pigz -dc -p "${THREADS}" | tar -xf - "$@"
+    else
+        tar xzf - "$@"
+    fi
+}
+
 mkdir -p "${OUTPUT_DIR}"
 
 DOWNLOAD_DIR="${OUTPUT_DIR}/downloads"
@@ -145,6 +196,14 @@ echo ""
 echo "Output dir:     ${OUTPUT_DIR}"
 echo "Num samples:    ${NUM_SAMPLES}"
 echo "Threads:        ${THREADS}"
+if [[ "${USE_PIGZ}" == "true" ]]; then
+    echo "Gzip backend:   pigz (parallel)"
+else
+    echo "Gzip backend:   gzip (tar default)"
+fi
+if [[ -n "${USER_ARCHIVE}" ]]; then
+    echo "Archive file:   ${USER_ARCHIVE}"
+fi
 echo ""
 
 # ---------------------------------------------------------------
@@ -236,11 +295,23 @@ echo ""
 # ---------------------------------------------------------------
 # Step 2: Download and extract IDAT files
 # ---------------------------------------------------------------
-if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
+if [[ "${SKIP_DOWNLOAD}" != "true" || -n "${USER_ARCHIVE}" ]]; then
     mkdir -p "${DOWNLOAD_DIR}" "${IDAT_DIR}"
 
-    ARCHIVE="${DOWNLOAD_DIR}/${IDAT_TGZ}"
     ARCHIVE_URL="${FTP_BASE}/${IDAT_TGZ}"
+    ARCHIVE_FROM_USER="false"
+    REMOTE_ARCHIVE_ALLOWED="true"
+    ARCHIVE="${DOWNLOAD_DIR}/${IDAT_TGZ}"
+
+    if [[ -n "${USER_ARCHIVE}" ]]; then
+        if [[ ! -f "${USER_ARCHIVE}" ]]; then
+            echo "Error: --archive file not found: ${USER_ARCHIVE}" >&2
+            exit 1
+        fi
+        ARCHIVE="${USER_ARCHIVE}"
+        ARCHIVE_FROM_USER="true"
+        REMOTE_ARCHIVE_ALLOWED="false"
+    fi
 
     # Check if the correct number of IDAT files are already present
     EXISTING_GRN=$(find "${IDAT_DIR}" -name "*_Grn.idat" -o -name "*_Grn.IDAT" 2>/dev/null | wc -l)
@@ -252,7 +323,11 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     else
 
     echo "--- Step 2: Downloading 1000G IDAT files ---"
-    echo "  Source: ${ARCHIVE_URL}"
+    if [[ "${ARCHIVE_FROM_USER}" == "true" ]]; then
+        echo "  Source: local archive ${ARCHIVE}"
+    else
+        echo "  Source: ${ARCHIVE_URL}"
+    fi
     echo ""
 
     # Extract only IDAT files (skip GTC files to save space)
@@ -262,25 +337,32 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
         echo "  This is a large file (~20 GB) and may take a while."
         echo ""
         if [[ -f "${ARCHIVE}" ]]; then
-            echo "  Archive already downloaded: ${ARCHIVE}"
-        else
+            echo "  Archive already available: ${ARCHIVE}"
+        elif [[ "${REMOTE_ARCHIVE_ALLOWED}" == "true" ]]; then
             wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
+        else
+            echo "Error: Local archive not available and remote download is disabled." >&2
+            exit 1
         fi
 
         echo ""
         echo "  Extracting IDAT files..."
         EXTRACT_START=${SECONDS}
-        tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+        tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
             --wildcards '*.idat' 2>/dev/null || \
-        tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat' 2>/dev/null || \
-        tar xzf "${ARCHIVE}" -C "${IDAT_DIR}"
+        tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat' 2>/dev/null || \
+        tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}"
         EXTRACT_ELAPSED=$(( SECONDS - EXTRACT_START ))
         N_EXTRACTED=$(find "${IDAT_DIR}" -name '*.idat' -o -name '*.IDAT' 2>/dev/null | wc -l)
         echo "  Extraction complete: ${N_EXTRACTED} IDAT files in ${EXTRACT_ELAPSED}s"
     else
         # Stream a subset of samples directly, avoiding full archive download
         echo "  Selecting ${NUM_SAMPLES} samples..."
-        echo "  Mode: subset streaming (avoids downloading full ~20 GB archive)"
+        if [[ "${REMOTE_ARCHIVE_ALLOWED}" == "true" ]]; then
+            echo "  Mode: subset streaming (avoids downloading full ~20 GB archive)"
+        else
+            echo "  Mode: subset extraction from local archive"
+        fi
         echo ""
 
         # Get green IDAT paths: use local archive if present, otherwise stream
@@ -288,10 +370,14 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
         if [[ -f "${ARCHIVE}" ]]; then
             echo "  [1/3] Listing archive contents (local)..."
             echo "        Archive: ${ARCHIVE}"
-            SAMPLE_LIST=$(tar tzf "${ARCHIVE}" 2>/dev/null | \
+            SAMPLE_LIST=$(tar_list_file "${ARCHIVE}" 2>/dev/null | \
                 grep -i '_Grn\.idat' | \
                 head -n "${NUM_SAMPLES}")
         else
+            if [[ "${REMOTE_ARCHIVE_ALLOWED}" != "true" ]]; then
+                echo "Error: --archive was provided but not found: ${ARCHIVE}" >&2
+                exit 1
+            fi
             echo "  [1/3] Listing archive contents (streaming from remote)..."
             echo "        URL: ${ARCHIVE_URL}"
             echo "        The full ~20 GB archive must be streamed to list its contents."
@@ -309,7 +395,7 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
             ) &
             LISTING_MONITOR_PID=$!
             SAMPLE_LIST=$(curl -sL "${ARCHIVE_URL}" | \
-                tar -tzf - 2>/dev/null | \
+                tar_list_stream 2>/dev/null | \
                 grep -i '_Grn\.idat' | \
                 head -n "${NUM_SAMPLES}") || true
             kill "${LISTING_MONITOR_PID}" 2>/dev/null || true
@@ -322,14 +408,19 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
 
         if [[ -z "${SAMPLE_LIST}" ]]; then
             echo ""
-            echo "  [!] Could not list archive contents. Falling back to full download..."
-            if [[ ! -f "${ARCHIVE}" ]]; then
-                wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
+            if [[ "${REMOTE_ARCHIVE_ALLOWED}" == "true" ]]; then
+                echo "  [!] Could not list archive contents. Falling back to full download..."
+                if [[ ! -f "${ARCHIVE}" ]]; then
+                    wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
+                fi
+                tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+                    --wildcards '*.idat' 2>/dev/null || \
+                tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat' 2>/dev/null || \
+                tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}"
+            else
+                echo "Error: Could not list IDAT entries from local archive: ${ARCHIVE}" >&2
+                exit 1
             fi
-            tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
-                --wildcards '*.idat' 2>/dev/null || \
-            tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat' 2>/dev/null || \
-            tar xzf "${ARCHIVE}" -C "${IDAT_DIR}"
         else
             # Build extraction list: both Grn and Red for selected samples
             echo ""
@@ -350,14 +441,14 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
             if [[ -f "${ARCHIVE}" ]]; then
                 echo "  [3/3] Extracting selected samples from local archive..."
                 # shellcheck disable=SC2086
-                tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+                tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                     ${EXTRACT_LIST} 2>/dev/null || \
-                tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" \
+                tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" \
                     ${EXTRACT_LIST} 2>/dev/null || {
                     echo "        Selective extraction failed. Extracting all IDATs..."
-                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+                    tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                         --wildcards '*.idat' 2>/dev/null || \
-                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
+                    tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
                 }
             else
                 echo "  [3/3] Streaming extraction of ${N_PAIRS} samples from remote..."
@@ -394,7 +485,7 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                 # Attempt 1: stream with --strip-components=1
                 # shellcheck disable=SC2086
                 curl -sL "${ARCHIVE_URL}" | \
-                    tar xzf - -C "${IDAT_DIR}" --strip-components=1 \
+                    tar_extract_stream -C "${IDAT_DIR}" --strip-components=1 \
                         ${EXTRACT_LIST} 2>/dev/null &
                 EXTRACT_PID=$!
                 _monitor_extraction "${EXTRACT_PID}"
@@ -407,7 +498,7 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                     echo "        Retrying without --strip-components..."
                     # shellcheck disable=SC2086
                     curl -sL "${ARCHIVE_URL}" | \
-                        tar xzf - -C "${IDAT_DIR}" \
+                        tar_extract_stream -C "${IDAT_DIR}" \
                             ${EXTRACT_LIST} 2>/dev/null &
                     EXTRACT_PID=$!
                     _monitor_extraction "${EXTRACT_PID}"
@@ -418,9 +509,9 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
                     # Attempt 3: full download fallback
                     echo "        Streaming extraction failed. Falling back to full download..."
                     wget -q --show-progress -O "${ARCHIVE}" "${ARCHIVE_URL}"
-                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
+                    tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --strip-components=1 \
                         --wildcards '*.idat' 2>/dev/null || \
-                    tar xzf "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
+                    tar_extract_file "${ARCHIVE}" -C "${IDAT_DIR}" --wildcards '*.idat'
                 fi
             fi
             EXTRACT_ELAPSED=$(( SECONDS - EXTRACT_START ))
@@ -437,8 +528,8 @@ if [[ "${SKIP_DOWNLOAD}" != "true" ]]; then
     # Clean up empty subdirectories
     find "${IDAT_DIR}" -mindepth 1 -type d -empty -delete 2>/dev/null || true
 
-    # Remove archive if not keeping it
-    if [[ "${KEEP_ARCHIVE}" != "true" && -f "${ARCHIVE}" ]]; then
+    # Remove archive if not keeping it (never remove a user-provided archive).
+    if [[ "${KEEP_ARCHIVE}" != "true" && "${ARCHIVE_FROM_USER}" != "true" && -f "${ARCHIVE}" ]]; then
         echo "  Removing archive to save disk space..."
         rm -f "${ARCHIVE}"
     fi

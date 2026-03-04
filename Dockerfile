@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         liblzma-dev \
         libssl-dev \
         make \
+        pigz \
         python3 \
         python3-matplotlib \
         python3-numpy \
