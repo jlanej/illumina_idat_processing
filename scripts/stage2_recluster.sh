@@ -397,15 +397,21 @@ if [[ -n "${SAMPLE_NAME_MAP}" && -f "${SAMPLE_NAME_MAP}" ]]; then
             S2_MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
         done < "${SAMPLE_NAME_MAP}"
 
+        # Build list of GTC files to process
+        S2_GTC_SAMPLES=()
+        while IFS= read -r gtc_path; do
+            S2_GTC_SAMPLES+=("$(basename "${gtc_path}" .gtc)")
+        done < <(find "${GTC_DIR}" -name '*.gtc' | sort)
+
         {
             echo -e "sample_id\toriginal_name"
             n_renamed=0
-            find "${GTC_DIR}" -name '*.gtc' | sort | while read -r gtc_path; do
-                gtc_id=$(basename "${gtc_path}" .gtc)
+            for gtc_id in "${S2_GTC_SAMPLES[@]}"; do
                 if [[ -n "${S2_MAP_OLD_TO_NEW[${gtc_id}]+x}" ]]; then
                     new_name="${S2_MAP_OLD_TO_NEW[${gtc_id}]}"
                     if [[ "${new_name}" != "${gtc_id}" ]]; then
                         mv "${GTC_DIR}/${gtc_id}.gtc" "${GTC_DIR}/${new_name}.gtc"
+                        (( n_renamed++ )) || true
                     fi
                     echo -e "${new_name}\t${gtc_id}"
                 else
@@ -414,6 +420,7 @@ if [[ -n "${SAMPLE_NAME_MAP}" && -f "${SAMPLE_NAME_MAP}" ]]; then
             done
         } > "${STAGE2_NAME_MAP_FILE}"
 
+        echo "  Renamed ${n_renamed} GTC files"
         echo "  Name mapping saved: ${STAGE2_NAME_MAP_FILE}"
         mark_done "stage2_rename_gtc"
     fi

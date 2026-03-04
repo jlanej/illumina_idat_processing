@@ -359,13 +359,15 @@ if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
         n_map_matched=0
         n_data_matched=0
 
+        declare -A GTC_SET
+        for gtc_id in "${GTC_SAMPLES[@]}"; do
+            GTC_SET["${gtc_id}"]=1
+        done
+
         for key in "${MAP_KEYS[@]}"; do
-            for gtc_id in "${GTC_SAMPLES[@]}"; do
-                if [[ "${key}" == "${gtc_id}" ]]; then
-                    (( n_map_matched++ )) || true
-                    break
-                fi
-            done
+            if [[ -n "${GTC_SET[${key}]+x}" ]]; then
+                (( n_map_matched++ )) || true
+            fi
         done
 
         for gtc_id in "${GTC_SAMPLES[@]}"; do

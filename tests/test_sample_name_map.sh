@@ -101,12 +101,12 @@ done
 
 # Check that renamed files exist
 all_ok="true"
-head -3 "${MAP_FILE}" | while IFS=$'\t' read -r old_name new_name; do
+while IFS=$'\t' read -r old_name new_name; do
     if [[ ! -f "${GTC_DIR}/${new_name}.gtc" ]]; then
         echo "  FAIL: Expected ${new_name}.gtc not found after rename"
-        echo "false"
+        all_ok="false"
     fi
-done | grep -q "false" && all_ok="false"
+done < <(head -3 "${MAP_FILE}")
 
 if [[ "${all_ok}" == "true" && "${n_renamed}" -gt 0 ]]; then
     echo "  PASS: Renamed ${n_renamed} GTC files"
