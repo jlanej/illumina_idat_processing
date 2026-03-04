@@ -18,6 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/utils.sh"
 
 # Defaults
 THREADS=1
@@ -161,14 +162,18 @@ if [[ -z "${SAMPLE_SHEET}" ]]; then
         echo "Generating sample sheet from IDAT files..."
         {
             echo -e "sample_id\tgreen_idat\tred_idat"
-            find "${IDAT_DIR}" -name "*_Grn.idat" -o -name "*_Grn.idat.gz" | sort | while read -r grn; do
+            # Build sample sheet efficiently: find all green IDATs, check for
+            # matching red, emit TSV lines. Uses parameter expansion instead
+            # of per-file basename/sed subprocesses.
+            while IFS= read -r -d '' grn; do
                 red="${grn/_Grn.idat/_Red.idat}"
-                if [[ -f "${red}" ]] || [[ -f "${red}.gz" ]]; then
-                    # Extract sample ID from barcode_position pattern
-                    base=$(basename "${grn}" | sed 's/_Grn\.idat\(\.gz\)\?$//')
-                    echo -e "${base}\t$(basename "${grn}")\t$(basename "${red}")"
+                if [[ -f "${red}" || -f "${red}.gz" ]]; then
+                    grn_base="${grn##*/}"
+                    red_base="${red##*/}"
+                    base="${grn_base%%_Grn.idat*}"
+                    printf '%s\t%s\t%s\n' "${base}" "${grn_base}" "${red_base}"
                 fi
-            done
+            done < <(find "${IDAT_DIR}" \( -name "*_Grn.idat" -o -name "*_Grn.idat.gz" \) -print0 | sort -z)
         } > "${SAMPLE_SHEET}.tmp"
         mv "${SAMPLE_SHEET}.tmp" "${SAMPLE_SHEET}"
         n_samples=$(( $(wc -l < "${SAMPLE_SHEET}") - 1 ))
@@ -469,16 +474,8 @@ else
     # GRCh38-realigned CSV), so the coordinate check would falsely fail.
     PRE_NORM_BCF="${VCF_DIR}/stage1_pre_norm.bcf"
 
-    # Dynamically allocate sort memory: use ~50% of available RAM (capped at 64G)
-    SORT_MEM="4G"
-    if [[ -f /proc/meminfo ]]; then
-        SORT_MEM=$(awk '/MemAvailable/{
-            mem_gb = int($2 / 1024 / 1024 * 0.5)
-            if (mem_gb < 4) mem_gb = 4
-            if (mem_gb > 64) mem_gb = 64
-            printf "%dG", mem_gb
-        }' /proc/meminfo)
-    fi
+    # Dynamically allocate sort memory (works on Linux and macOS)
+    SORT_MEM=$(detect_sort_memory)
     echo "  Sort memory: ${SORT_MEM}"
 
     bcftools +gtc2vcf \
@@ -496,7 +493,7 @@ else
 
     # Diagnostic: count variants before normalization
     N_PRE_NORM=$(bcftools index -n "${PRE_NORM_BCF}" 2>/dev/null || \
-        bcftools view -H "${PRE_NORM_BCF}" | wc -l)
+        bcftools view -H --threads "${THREADS}" "${PRE_NORM_BCF}" | wc -l)
     echo "  Variants before normalization: ${N_PRE_NORM}"
 
     # Normalize with -c ws (warn and swap REF/ALT to match reference).
@@ -519,7 +516,7 @@ else
 
     # Diagnostic: count variants after normalization and REF swaps
     N_POST_NORM=$(bcftools index -n "${VCF_OUTPUT}" 2>/dev/null || \
-        bcftools view -H "${VCF_OUTPUT}" | wc -l)
+        bcftools view -H --threads "${THREADS}" "${VCF_OUTPUT}" | wc -l)
     N_REF_SWAPS=$(grep -c "REF_MISMATCH" "${NORM_LOG}" 2>/dev/null || true)
     echo "  Variants after normalization:  ${N_POST_NORM}"
     echo "  REF/ALT swaps (REF mismatch):  ${N_REF_SWAPS}"

@@ -89,7 +89,7 @@ trap 'rm -f "${FILTERED_VCF}" "${FILTERED_VCF}.csi"' EXIT
 
 bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \
     -Ob -o "${FILTERED_VCF}" "${VCF}" 2>/dev/null
-bcftools index "${FILTERED_VCF}" 2>/dev/null
+bcftools index --threads "${THREADS}" "${FILTERED_VCF}" 2>/dev/null
 
 # Run plink2 to compute variant-level QC on autosomes
 # --missing variant-only: per-variant missingness
