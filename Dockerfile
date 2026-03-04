@@ -58,19 +58,20 @@ RUN wget -q "https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_latest.z
 # Install flashpca2 for fast ancestry PCA computation
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libeigen3-dev \
-        libspectra-dev \
         liblapack-dev \
         libopenblas-dev \
         libboost-program-options-dev \
         git \
     && rm -rf /var/lib/apt/lists/* && \
     cd /tmp && \
+    wget -q https://github.com/yixuan/spectra/archive/v0.8.1.tar.gz && \
+    tar xzf v0.8.1.tar.gz && \
     git clone https://github.com/gabraham/flashpca.git && \
     cd flashpca && \
-    make all EIGEN_INC=/usr/include/eigen3 SPECTRA_INC=/usr/include && \
+    make all EIGEN_INC=/usr/include/eigen3 SPECTRA_INC=/tmp/spectra-0.8.1/include && \
     cp flashpca /usr/local/bin/ && \
     chmod +x /usr/local/bin/flashpca && \
-    cd / && rm -rf /tmp/flashpca
+    cd / && rm -rf /tmp/flashpca /tmp/spectra-0.8.1 /tmp/v0.8.1.tar.gz
 
 # Copy pipeline scripts (includes diagnose_qc.py for QC troubleshooting)
 COPY scripts/ /opt/scripts/
