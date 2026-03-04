@@ -27,6 +27,7 @@ SKIP_STAGE2="false"
 SKIP_DOWNLOAD="false"
 SKIP_FAILURES="false"
 FORCE="false"
+FORCE_RENAME="false"
 
 usage() {
     cat <<EOF
@@ -54,6 +55,11 @@ Processing options:
   --threads INT          Number of threads (default: ${THREADS})
   --min-call-rate FLOAT  Min call rate for Stage 2 HQ samples (default: ${MIN_CALL_RATE})
   --max-lrr-sd FLOAT     Max LRR SD for Stage 2 HQ samples (default: ${MAX_LRR_SD})
+  --sample-name-map FILE Two-column tab-delimited file mapping IDAT root names
+                         (column 1) to desired sample names (column 2).
+                         Renames samples in GTC files, VCFs, and QC reports.
+  --force-rename         Allow renaming even when fewer than 50% of samples in
+                         the name map match the data (default: halt)
   --skip-stage2          Skip Stage 2 (reclustering)
   --skip-download        Do not auto-download manifests or reference
   --skip-failures        Continue past corrupt/truncated IDAT files instead of
@@ -88,6 +94,7 @@ EGT=""
 CSV=""
 REF_DIR=""
 REF_FASTA=""
+SAMPLE_NAME_MAP=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -104,6 +111,8 @@ while [[ $# -gt 0 ]]; do
         --threads)        THREADS="$2"; shift 2 ;;
         --min-call-rate)  MIN_CALL_RATE="$2"; shift 2 ;;
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
+        --sample-name-map) SAMPLE_NAME_MAP="$2"; shift 2 ;;
+        --force-rename)   FORCE_RENAME="true"; shift ;;
         --skip-stage2)    SKIP_STAGE2="true"; shift ;;
         --skip-download)  SKIP_DOWNLOAD="true"; shift ;;
         --skip-failures)  SKIP_FAILURES="true"; shift ;;
@@ -231,6 +240,9 @@ echo "  Genome:         ${GENOME}"
 echo "  Threads:        ${THREADS}"
 echo "  Min call rate:  ${MIN_CALL_RATE}"
 echo "  Max LRR SD:     ${MAX_LRR_SD}"
+if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+    echo "  Name map:       ${SAMPLE_NAME_MAP}"
+fi
 echo ""
 
 # ---------------------------------------------------------------
@@ -324,6 +336,12 @@ STAGE1_ARGS=(
     --output-dir "${STAGE1_DIR}"
     --threads "${THREADS}"
 )
+if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+    STAGE1_ARGS+=(--sample-name-map "${SAMPLE_NAME_MAP}")
+fi
+if [[ "${FORCE_RENAME}" == "true" ]]; then
+    STAGE1_ARGS+=(--force-rename)
+fi
 if [[ "${FORCE}" == "true" ]]; then
     STAGE1_ARGS+=(--force)
 fi
@@ -362,6 +380,9 @@ else
         --max-lrr-sd "${MAX_LRR_SD}"
         --threads "${THREADS}"
     )
+    if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+        STAGE2_ARGS+=(--sample-name-map "${SAMPLE_NAME_MAP}")
+    fi
     if [[ "${FORCE}" == "true" ]]; then
         STAGE2_ARGS+=(--force)
     fi

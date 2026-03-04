@@ -52,6 +52,8 @@ Options:
   --min-call-rate FLOAT       Minimum call rate for HQ samples (default: ${MIN_CALL_RATE})
   --max-lrr-sd FLOAT          Maximum LRR SD for HQ samples (default: ${MAX_LRR_SD})
   --min-cluster-samples INT   Minimum samples per genotype to recompute cluster (default: ${MIN_CLUSTER_SAMPLES})
+  --sample-name-map FILE      Two-column tab-delimited file mapping IDAT root
+                              names to desired sample names (renames GTC files)
   --threads INT               Number of threads (default: ${THREADS})
   --batch-size INT            Batch size for IDAT to GTC conversion (default: ${BATCH_SIZE})
   --skip-failures             Continue past corrupt/truncated IDAT files instead of
@@ -70,6 +72,7 @@ CSV=""
 REF_FASTA=""
 STAGE1_DIR=""
 OUTPUT_DIR=""
+SAMPLE_NAME_MAP=""
 FORCE="false"
 SKIP_FAILURES="false"
 
@@ -82,6 +85,7 @@ while [[ $# -gt 0 ]]; do
         --ref-fasta)      REF_FASTA="$2"; shift 2 ;;
         --stage1-dir)     STAGE1_DIR="$2"; shift 2 ;;
         --output-dir)     OUTPUT_DIR="$2"; shift 2 ;;
+        --sample-name-map) SAMPLE_NAME_MAP="$2"; shift 2 ;;
         --min-call-rate)  MIN_CALL_RATE="$2"; shift 2 ;;
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
         --min-cluster-samples) MIN_CLUSTER_SAMPLES="$2"; shift 2 ;;
@@ -375,6 +379,58 @@ else
 fi
 
 # ---------------------------------------------------------------
+# Rename GTC files using sample name map (if provided)
+# ---------------------------------------------------------------
+STAGE2_NAME_MAP_FILE="${OUTPUT_DIR}/sample_name_mapping.tsv"
+
+if [[ -n "${SAMPLE_NAME_MAP}" && -f "${SAMPLE_NAME_MAP}" ]]; then
+    if step_done "stage2_rename_gtc" && [[ -f "${STAGE2_NAME_MAP_FILE}" ]]; then
+        n_renamed=$(awk -F'\t' '$1 != $2' "${STAGE2_NAME_MAP_FILE}" | wc -l)
+        echo "  [checkpoint] GTC rename already complete (${n_renamed} renamed). Skipping."
+    else
+        echo ""
+        echo "--- Applying sample name map (stage 2) ---"
+
+        declare -A S2_MAP_OLD_TO_NEW
+        while IFS=$'\t' read -r old_name new_name; do
+            [[ -z "${old_name}" || "${old_name}" == "#"* ]] && continue
+            S2_MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
+        done < "${SAMPLE_NAME_MAP}"
+
+        {
+            echo -e "sample_id\toriginal_name"
+            n_renamed=0
+            find "${GTC_DIR}" -name '*.gtc' | sort | while read -r gtc_path; do
+                gtc_id=$(basename "${gtc_path}" .gtc)
+                if [[ -n "${S2_MAP_OLD_TO_NEW[${gtc_id}]+x}" ]]; then
+                    new_name="${S2_MAP_OLD_TO_NEW[${gtc_id}]}"
+                    if [[ "${new_name}" != "${gtc_id}" ]]; then
+                        mv "${GTC_DIR}/${gtc_id}.gtc" "${GTC_DIR}/${new_name}.gtc"
+                    fi
+                    echo -e "${new_name}\t${gtc_id}"
+                else
+                    echo -e "${gtc_id}\t${gtc_id}"
+                fi
+            done
+        } > "${STAGE2_NAME_MAP_FILE}"
+
+        echo "  Name mapping saved: ${STAGE2_NAME_MAP_FILE}"
+        mark_done "stage2_rename_gtc"
+    fi
+else
+    # No name map: write identity mapping for downstream consistency
+    if [[ ! -f "${STAGE2_NAME_MAP_FILE}" ]]; then
+        {
+            echo -e "sample_id\toriginal_name"
+            find "${GTC_DIR}" -name '*.gtc' | sort | while read -r gtc_path; do
+                sid=$(basename "${gtc_path}" .gtc)
+                echo -e "${sid}\t${sid}"
+            done
+        } > "${STAGE2_NAME_MAP_FILE}"
+    fi
+fi
+
+# ---------------------------------------------------------------
 # Step 4: Convert reclustered GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
@@ -475,6 +531,19 @@ else
 
     source "${SCRIPT_DIR}/collect_qc_metrics.sh"
     collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${STAGE2_QC}" "${THREADS}"
+
+    # Add original_name column from name mapping
+    if [[ -f "${STAGE2_NAME_MAP_FILE}" ]]; then
+        awk -F'\t' '
+            NR==FNR { if (FNR > 1) map[$1] = $2; next }
+            FNR==1 { print "sample_id\toriginal_name\t" substr($0, index($0,$2)); next }
+            { printf "%s\t%s", $1, ($1 in map ? map[$1] : $1)
+              for (i=2; i<=NF; i++) printf "\t%s", $i
+              printf "\n" }
+        ' "${STAGE2_NAME_MAP_FILE}" "${STAGE2_QC}" > "${STAGE2_QC}.tmp"
+        mv "${STAGE2_QC}.tmp" "${STAGE2_QC}"
+    fi
+
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
     echo "  Step 5/7 completed in ${STEP_ELAPSED}s"
     mark_done "stage2_qc"

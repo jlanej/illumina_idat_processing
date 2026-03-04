@@ -40,6 +40,11 @@ Required:
 Options:
   --sample-sheet FILE    Tab-delimited file mapping sample_id to IDAT files
                          (auto-generated from IDAT dir if not provided)
+  --sample-name-map FILE Two-column tab-delimited file mapping IDAT root names
+                         to desired sample names.  Applied after GTC creation
+                         to rename samples in all downstream outputs.
+  --force-rename         Allow renaming even when fewer than 50% of samples in
+                         the name map match the data (default: halt)
   --threads INT          Number of threads (default: ${THREADS})
   --batch-size INT       Batch size for IDAT to GTC conversion (default: ${BATCH_SIZE})
   --skip-failures        Continue past corrupt/truncated IDAT files instead of
@@ -60,6 +65,8 @@ CSV=""
 REF_FASTA=""
 OUTPUT_DIR=""
 SAMPLE_SHEET=""
+SAMPLE_NAME_MAP=""
+FORCE_RENAME="false"
 FORCE="false"
 SKIP_FAILURES="false"
 
@@ -72,6 +79,8 @@ while [[ $# -gt 0 ]]; do
         --ref-fasta)     REF_FASTA="$2"; shift 2 ;;
         --output-dir)    OUTPUT_DIR="$2"; shift 2 ;;
         --sample-sheet)  SAMPLE_SHEET="$2"; shift 2 ;;
+        --sample-name-map) SAMPLE_NAME_MAP="$2"; shift 2 ;;
+        --force-rename)  FORCE_RENAME="true"; shift ;;
         --threads)       THREADS="$2"; shift 2 ;;
         --batch-size)    BATCH_SIZE="$2"; shift 2 ;;
         --skip-failures) SKIP_FAILURES="true"; shift ;;
@@ -99,6 +108,12 @@ done
 
 if [[ ! -d "${IDAT_DIR}" ]]; then
     echo "Error: IDAT directory not found: ${IDAT_DIR}" >&2
+    exit 1
+fi
+
+# Validate sample name map if provided
+if [[ -n "${SAMPLE_NAME_MAP}" && ! -f "${SAMPLE_NAME_MAP}" ]]; then
+    echo "Error: Sample name map not found: ${SAMPLE_NAME_MAP}" >&2
     exit 1
 fi
 
@@ -311,6 +326,117 @@ else
 fi
 
 # ---------------------------------------------------------------
+# Rename GTC files using sample name map (if provided)
+# ---------------------------------------------------------------
+NAME_MAP_FILE="${OUTPUT_DIR}/sample_name_mapping.tsv"
+
+if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+    if step_done "stage1_rename_gtc" && [[ -f "${NAME_MAP_FILE}" ]]; then
+        n_renamed=$(awk -F'\t' '$1 != $2' "${NAME_MAP_FILE}" | wc -l)
+        echo "  [checkpoint] GTC rename already complete (${n_renamed} renamed). Skipping."
+    else
+        echo ""
+        echo "--- Applying sample name map ---"
+
+        # Build list of GTC sample IDs (original IDAT root names)
+        GTC_SAMPLES=()
+        while IFS= read -r gtc_path; do
+            GTC_SAMPLES+=("$(basename "${gtc_path}" .gtc)")
+        done < <(find "${GTC_DIR}" -name '*.gtc' | sort)
+
+        # Read the name map into associative arrays
+        declare -A MAP_OLD_TO_NEW
+        MAP_KEYS=()
+        while IFS=$'\t' read -r old_name new_name; do
+            [[ -z "${old_name}" || "${old_name}" == "#"* ]] && continue
+            MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
+            MAP_KEYS+=("${old_name}")
+        done < "${SAMPLE_NAME_MAP}"
+
+        # Sanity check: count matches in both directions
+        n_map_entries=${#MAP_KEYS[@]}
+        n_gtc_samples=${#GTC_SAMPLES[@]}
+        n_map_matched=0
+        n_data_matched=0
+
+        for key in "${MAP_KEYS[@]}"; do
+            for gtc_id in "${GTC_SAMPLES[@]}"; do
+                if [[ "${key}" == "${gtc_id}" ]]; then
+                    (( n_map_matched++ )) || true
+                    break
+                fi
+            done
+        done
+
+        for gtc_id in "${GTC_SAMPLES[@]}"; do
+            if [[ -n "${MAP_OLD_TO_NEW[${gtc_id}]+x}" ]]; then
+                (( n_data_matched++ )) || true
+            fi
+        done
+
+        n_map_unmatched=$(( n_map_entries - n_map_matched ))
+        n_data_unmatched=$(( n_gtc_samples - n_data_matched ))
+
+        echo "  Name map entries:                  ${n_map_entries}"
+        echo "  GTC samples in data:               ${n_gtc_samples}"
+        echo "  Map entries matching data:          ${n_map_matched} / ${n_map_entries}"
+        echo "  Data samples matching map:          ${n_data_matched} / ${n_gtc_samples}"
+        echo "  Map entries not in data:            ${n_map_unmatched}"
+        echo "  Data samples not in map:            ${n_data_unmatched}"
+
+        # Check match proportion — halt if less than 50% match
+        if [[ "${n_gtc_samples}" -gt 0 ]]; then
+            match_ok=$(awk -v m="${n_data_matched}" -v t="${n_gtc_samples}" \
+                'BEGIN { print (m / t >= 0.5) ? "yes" : "no" }')
+        else
+            match_ok="no"
+        fi
+
+        if [[ "${match_ok}" == "no" && "${FORCE_RENAME}" != "true" ]]; then
+            echo ""
+            echo "Error: Fewer than 50% of data samples match the name map." >&2
+            echo "  Use --force-rename to proceed anyway." >&2
+            exit 1
+        elif [[ "${match_ok}" == "no" ]]; then
+            echo "  WARNING: Fewer than 50% match, but --force-rename is set. Continuing."
+        fi
+
+        # Rename GTC files and build mapping
+        {
+            echo -e "sample_id\toriginal_name"
+            n_renamed=0
+            for gtc_id in "${GTC_SAMPLES[@]}"; do
+                if [[ -n "${MAP_OLD_TO_NEW[${gtc_id}]+x}" ]]; then
+                    new_name="${MAP_OLD_TO_NEW[${gtc_id}]}"
+                    if [[ "${new_name}" != "${gtc_id}" ]]; then
+                        mv "${GTC_DIR}/${gtc_id}.gtc" "${GTC_DIR}/${new_name}.gtc"
+                        (( n_renamed++ )) || true
+                    fi
+                    echo -e "${new_name}\t${gtc_id}"
+                else
+                    echo -e "${gtc_id}\t${gtc_id}"
+                fi
+            done
+        } > "${NAME_MAP_FILE}"
+
+        echo "  Renamed ${n_renamed} GTC files"
+        echo "  Name mapping saved: ${NAME_MAP_FILE}"
+        mark_done "stage1_rename_gtc"
+    fi
+else
+    # No name map: write identity mapping for downstream consistency
+    if [[ ! -f "${NAME_MAP_FILE}" ]]; then
+        {
+            echo -e "sample_id\toriginal_name"
+            find "${GTC_DIR}" -name '*.gtc' | sort | while read -r gtc_path; do
+                sid=$(basename "${gtc_path}" .gtc)
+                echo -e "${sid}\t${sid}"
+            done
+        } > "${NAME_MAP_FILE}"
+    fi
+fi
+
+# ---------------------------------------------------------------
 # Step 3: Convert GTC files to VCF
 # ---------------------------------------------------------------
 echo ""
@@ -427,6 +553,19 @@ else
 
     source "${SCRIPT_DIR}/collect_qc_metrics.sh"
     collect_qc_metrics "${VCF_OUTPUT}" "${EXTRA_TSV}" "${QC_OUTPUT}" "${THREADS}"
+
+    # Add original_name column from name mapping
+    if [[ -f "${NAME_MAP_FILE}" ]]; then
+        awk -F'\t' '
+            NR==FNR { if (FNR > 1) map[$1] = $2; next }
+            FNR==1 { print "sample_id\toriginal_name\t" substr($0, index($0,$2)); next }
+            { printf "%s\t%s", $1, ($1 in map ? map[$1] : $1)
+              for (i=2; i<=NF; i++) printf "\t%s", $i
+              printf "\n" }
+        ' "${NAME_MAP_FILE}" "${QC_OUTPUT}" > "${QC_OUTPUT}.tmp"
+        mv "${QC_OUTPUT}.tmp" "${QC_OUTPUT}"
+    fi
+
     STEP_ELAPSED=$(( SECONDS - STEP_START ))
     echo "  Step 3/4 completed in ${STEP_ELAPSED}s"
     mark_done "stage1_qc"
