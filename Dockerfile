@@ -64,12 +64,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/* && \
     cd /tmp && \
+    wget -q https://github.com/yixuan/spectra/archive/v0.8.1.tar.gz && \
+    tar xzf v0.8.1.tar.gz && \
     git clone https://github.com/gabraham/flashpca.git && \
     cd flashpca && \
-    make all EIGEN_INC=/usr/include/eigen3 && \
+    make all EIGEN_INC=/usr/include/eigen3 SPECTRA_INC=/tmp/spectra-0.8.1/include && \
     cp flashpca /usr/local/bin/ && \
     chmod +x /usr/local/bin/flashpca && \
-    cd / && rm -rf /tmp/flashpca
+    cd / && rm -rf /tmp/flashpca /tmp/spectra-0.8.1 /tmp/v0.8.1.tar.gz
 
 # Copy pipeline scripts (includes diagnose_qc.py for QC troubleshooting)
 COPY scripts/ /opt/scripts/

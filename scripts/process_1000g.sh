@@ -43,6 +43,11 @@ USER_BPM=""
 USER_EGT=""
 USER_CSV=""
 USER_MANIFEST_DIR=""
+USER_SAMPLE_NAME_MAP=""
+FORCE_RENAME="false"
+
+# Default 1000G sample name map (bundled with the repo)
+DEFAULT_1000G_NAME_MAP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tests/data/sample_name_map.txt"
 
 usage() {
     cat <<EOF
@@ -62,6 +67,12 @@ Manifest options (override auto-downloaded manifests):
 Options:
   --num-samples N|all    Number of samples to process (default: ${NUM_SAMPLES})
                          Use "all" for all ~2141 samples
+  --sample-name-map FILE Two-column tab-delimited file mapping IDAT root names
+                         to desired sample names.  Defaults to the bundled
+                         1000G map (tests/data/sample_name_map.txt).
+                         Use --sample-name-map "" to disable.
+  --force-rename         Allow renaming even when fewer than 50% of samples in
+                         the name map match the data
   --threads INT          Number of threads (default: ${THREADS})
   --skip-download        Skip downloading data (use existing files)
   --skip-stage2          Skip Stage 2 reclustering
@@ -97,6 +108,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --output-dir)    OUTPUT_DIR="$2"; shift 2 ;;
         --num-samples)   NUM_SAMPLES="$2"; shift 2 ;;
+        --sample-name-map) USER_SAMPLE_NAME_MAP="$2"; shift 2 ;;
+        --force-rename)  FORCE_RENAME="true"; shift ;;
         --threads)       THREADS="$2"; shift 2 ;;
         --bpm)           USER_BPM="$2"; shift 2 ;;
         --egt)           USER_EGT="$2"; shift 2 ;;
@@ -455,6 +468,15 @@ echo ""
 echo "--- Step 3: Running processing pipeline on GRCh38 ---"
 echo ""
 
+# Resolve sample name map: use user-provided, or default 1000G map
+SAMPLE_NAME_MAP=""
+if [[ -n "${USER_SAMPLE_NAME_MAP}" ]]; then
+    SAMPLE_NAME_MAP="${USER_SAMPLE_NAME_MAP}"
+elif [[ -f "${DEFAULT_1000G_NAME_MAP}" ]]; then
+    SAMPLE_NAME_MAP="${DEFAULT_1000G_NAME_MAP}"
+    echo "  Using default 1000G sample name map: ${SAMPLE_NAME_MAP}"
+fi
+
 PIPELINE_ARGS=(
     --idat-dir "${IDAT_DIR}"
     --output-dir "${PIPELINE_DIR}"
@@ -464,6 +486,14 @@ PIPELINE_ARGS=(
     --genome GRCh38
     --threads "${THREADS}"
 )
+
+if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+    PIPELINE_ARGS+=(--sample-name-map "${SAMPLE_NAME_MAP}")
+fi
+
+if [[ "${FORCE_RENAME}" == "true" ]]; then
+    PIPELINE_ARGS+=(--force-rename)
+fi
 
 if [[ "${SKIP_STAGE2}" == "true" ]]; then
     PIPELINE_ARGS+=(--skip-stage2)
