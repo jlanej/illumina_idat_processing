@@ -69,6 +69,11 @@ PYTHON_SCRIPTS=(
     scripts/plot_qc_comparison.py
     scripts/plot_sex_check.py
     scripts/compile_sample_sheet.py
+    scripts/compute_sample_qc.py
+    scripts/enrich_qc_with_names.py
+    scripts/filter_qc_samples.py
+    scripts/bpm_header_probe.py
+    scripts/generate_report.py
 )
 for relpath in "${PYTHON_SCRIPTS[@]}"; do
     PYTHON_SCRIPT="${REPO_DIR}/${relpath}"

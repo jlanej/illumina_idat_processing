@@ -239,7 +239,8 @@ else
         red="${grn/_Grn.idat/_Red.idat}"
         if [[ -f "${red}" ]]; then
             # Check if GTC output already exists for this sample
-            sample_id=$(basename "${grn}" | sed 's/_Grn\.idat\(\.gz\)\?$//')
+            grn_base="${grn##*/}"
+            sample_id="${grn_base%%_Grn.idat*}"
             gtc_file="${GTC_DIR}/${sample_id}.gtc"
             if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
                 (( n_skipped++ )) || true

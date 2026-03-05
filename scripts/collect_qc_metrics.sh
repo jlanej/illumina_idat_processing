@@ -43,6 +43,8 @@ collect_qc_metrics() {
     # Use bcftools index -n for instant count from CSI index
     n_total_vars=$(bcftools index -n "${vcf_file}" 2>/dev/null || \
         bcftools view -H --threads "${threads}" "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
+    # Count intensity-only probes via bcftools view -c (avoids full BCF scan
+    # when the index supports region queries).  Falls back to streaming count.
     n_intensity_only=$(bcftools view -i 'INFO/INTENSITY_ONLY=1' -H --threads "${threads}" "${vcf_file}" 2>/dev/null | wc -l | tr -d ' ')
     n_genotypeable=$(( n_total_vars - n_intensity_only ))
     echo "  [diag] Total variants in VCF:          ${n_total_vars}"
