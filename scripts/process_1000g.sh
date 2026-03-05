@@ -566,6 +566,13 @@ if [[ -n "${USER_SAMPLE_NAME_MAP}" ]]; then
 elif [[ -f "${DEFAULT_1000G_NAME_MAP}" ]]; then
     SAMPLE_NAME_MAP="${DEFAULT_1000G_NAME_MAP}"
     echo "  Using default 1000G sample name map: ${SAMPLE_NAME_MAP}"
+else
+    echo "  WARNING: Default 1000G sample name map not found at:"
+    echo "    ${DEFAULT_1000G_NAME_MAP}"
+    echo "  Samples will retain Sentrix barcode IDs instead of being renamed"
+    echo "  to 1000G sample names (e.g., NA12878)."
+    echo "  To enable renaming, provide --sample-name-map /path/to/map.txt"
+    echo ""
 fi
 
 PIPELINE_ARGS=(

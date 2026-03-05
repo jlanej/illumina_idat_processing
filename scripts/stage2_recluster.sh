@@ -166,46 +166,16 @@ if step_done "stage2_hq_select" && [[ -f "${HQ_SAMPLES}" ]]; then
     echo "  [checkpoint] HQ sample selection already complete (${n_hq} samples). Skipping."
     echo ""
 else
-    awk -F'\t' -v min_cr="${MIN_CALL_RATE}" -v max_sd="${MAX_LRR_SD}" '
-        NR == 1 { next }
-        {
-            sample = $1
-            call_rate = $2
-            lrr_sd = $3
-            if (call_rate+0 >= min_cr+0 && (lrr_sd == "NA" || lrr_sd+0 <= max_sd+0)) {
-                print sample > "/dev/fd/3"
-            } else {
-                print sample > "/dev/fd/4"
-            }
-        }
-    ' "${STAGE1_QC}" 3>"${HQ_SAMPLES}" 4>"${EXCLUDED_SAMPLES}"
+    # Use Python for robust header-based column lookup, handling optional
+    # columns like original_name that shift column positions.
+    python3 "${SCRIPT_DIR}/filter_qc_samples.py" \
+        --qc-file "${STAGE1_QC}" \
+        --hq-output "${HQ_SAMPLES}" \
+        --excluded-output "${EXCLUDED_SAMPLES}" \
+        --min-call-rate "${MIN_CALL_RATE}" \
+        --max-lrr-sd "${MAX_LRR_SD}"
 
-    n_total=$(( $(wc -l < "${STAGE1_QC}") - 1 ))
-    n_hq=$(wc -l < "${HQ_SAMPLES}")
-    n_excluded=$(wc -l < "${EXCLUDED_SAMPLES}")
-
-    echo "  Total samples:            ${n_total}"
-    echo "  High-quality samples:     ${n_hq}"
-    echo "  Excluded samples:         ${n_excluded}"
-
-    # Diagnostic: show QC threshold evaluation details
-    echo "  [diag] QC thresholds: call_rate >= ${MIN_CALL_RATE}, lrr_sd <= ${MAX_LRR_SD}"
-    echo "  [diag] Stage 1 QC file first 5 lines:"
-    head -5 "${STAGE1_QC}" | sed 's/^/    [diag]   /'
-    if [[ "${n_excluded}" -gt 0 ]]; then
-        echo "  [diag] First 5 excluded samples with values:"
-        awk -F'\t' -v min_cr="${MIN_CALL_RATE}" -v max_sd="${MAX_LRR_SD}" '
-            NR == 1 { next }
-            {
-                cr = $2; sd = $3
-                fail_cr = (cr+0 < min_cr+0) ? "FAIL" : "ok"
-                fail_sd = (sd != "NA" && sd+0 > max_sd+0) ? "FAIL" : "ok"
-                if (fail_cr == "FAIL" || fail_sd == "FAIL") {
-                    n++
-                    if (n <= 5) printf "    [diag]   %s: call_rate=%s(%s) lrr_sd=%s(%s)\n", $1, cr, fail_cr, sd, fail_sd
-                }
-            }' "${STAGE1_QC}"
-    fi
+    n_hq=$(wc -l < "${HQ_SAMPLES}" | tr -d ' ')
     echo ""
 
     if [[ "${n_hq}" -lt 10 ]]; then
@@ -269,7 +239,8 @@ else
         red="${grn/_Grn.idat/_Red.idat}"
         if [[ -f "${red}" ]]; then
             # Check if GTC output already exists for this sample
-            sample_id=$(basename "${grn}" | sed 's/_Grn\.idat\(\.gz\)\?$//')
+            grn_base="${grn##*/}"
+            sample_id="${grn_base%%_Grn.idat*}"
             gtc_file="${GTC_DIR}/${sample_id}.gtc"
             if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
                 (( n_skipped++ )) || true
@@ -386,7 +357,7 @@ STAGE2_NAME_MAP_FILE="${OUTPUT_DIR}/sample_name_mapping.tsv"
 
 if [[ -n "${SAMPLE_NAME_MAP}" && -f "${SAMPLE_NAME_MAP}" ]]; then
     if step_done "stage2_rename_gtc" && [[ -f "${STAGE2_NAME_MAP_FILE}" ]]; then
-        n_renamed=$(awk -F'\t' '$1 != $2' "${STAGE2_NAME_MAP_FILE}" | wc -l)
+        n_renamed=$(awk -F'\t' 'NR>1 && $1 != $2' "${STAGE2_NAME_MAP_FILE}" | wc -l)
         echo "  [checkpoint] GTC rename already complete (${n_renamed} renamed). Skipping."
     else
         echo ""
@@ -534,13 +505,10 @@ else
 
     # Add original_name column from name mapping
     if [[ -f "${STAGE2_NAME_MAP_FILE}" ]]; then
-        awk -F'\t' '
-            NR==FNR { if (FNR > 1) map[$1] = $2; next }
-            FNR==1 { print "sample_id\toriginal_name\t" substr($0, index($0,$2)); next }
-            { printf "%s\t%s", $1, ($1 in map ? map[$1] : $1)
-              for (i=2; i<=NF; i++) printf "\t%s", $i
-              printf "\n" }
-        ' "${STAGE2_NAME_MAP_FILE}" "${STAGE2_QC}" > "${STAGE2_QC}.tmp"
+        python3 "${SCRIPT_DIR}/enrich_qc_with_names.py" \
+            --qc-file "${STAGE2_QC}" \
+            --name-map "${STAGE2_NAME_MAP_FILE}" \
+            --output "${STAGE2_QC}.tmp"
         mv "${STAGE2_QC}.tmp" "${STAGE2_QC}"
     fi
 

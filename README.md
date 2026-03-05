@@ -6,17 +6,21 @@ Inspired by [MoChA](https://github.com/freeseek/mocha) and [MoChA WDL](https://g
 
 ## Overview
 
-The pipeline runs in five phases:
+The pipeline runs in seven phases:
 
 1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
-2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, **LRR median**, **BAF standard deviation** (contamination indicator), and **heterozygosity rate**.
+2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, **LRR median**, **BAF standard deviation** (contamination indicator), and **heterozygosity rate**. Per-variant QC (missingness, HWE, MAF, Ti/Tv, inbreeding F) is also computed.
 
-3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering. A **sex check plot** (median chrX vs chrY LRR, colored by predicted sex) is also generated. Per-variant **Ti/Tv ratio** and per-sample **inbreeding coefficients (F)** are computed for additional QC.
+3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics, recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering.
 
-4. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
+4. **Sex Check**: A scatter plot of median chrX vs chrY LRR per sample, colored by predicted sex, is generated for visual QC of sex concordance.
 
-5. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F) and ancestry PCs (default 20) for every sample. A comprehensive **HTML pipeline report** is generated with publication-quality figures (QC dashboard, PCA scatter plots, sex check), summary statistics, and an auto-generated methods paragraph.
+5. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
+
+6. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F) and ancestry PCs (default 20) for every sample.
+
+7. **QC Diagnostics & Report**: Automated QC diagnostics identify potential issues (deflated call rates, inflated LRR SD, build mismatches). A comprehensive **HTML pipeline report** is generated with publication-quality figures (QC dashboard, PCA scatter plots, sex check), summary statistics, and an auto-generated methods paragraph.
 
 ### Reference Genome
 
@@ -116,8 +120,12 @@ apptainer exec --bind $PWD illumina_idat_processing_main.sif \
 | `--threads INT` | Number of threads (default: 1) |
 | `--min-call-rate FLOAT` | Min call rate for HQ samples in Stage 2 (default: 0.97) |
 | `--max-lrr-sd FLOAT` | Max LRR SD for HQ samples in Stage 2 (default: 0.35) |
+| `--sample-name-map FILE` | Two-column tab-delimited file mapping IDAT root names to desired sample names |
+| `--force-rename` | Allow renaming even when fewer than 50% of samples match the name map |
 | `--skip-stage2` | Skip Stage 2 reclustering |
 | `--skip-download` | Do not auto-download manifests or reference |
+| `--skip-failures` | Continue past corrupt/truncated IDAT files instead of halting |
+| `--force` | Force re-run of all steps, ignoring checkpoints |
 
 ### Individual Scripts
 
@@ -219,7 +227,13 @@ output/
 │   │   └── stage1_initial.bcf  # Initial VCF with BAF + LRR
 │   └── qc/
 │       ├── stage1_sample_qc.tsv  # Per-sample call rate, LRR SD/mean/median
-│       └── gtc_metadata.tsv      # GTC file metadata
+│       ├── gtc_metadata.tsv      # GTC file metadata
+│       ├── failed_idat2gtc.tsv   # Failed samples (if --skip-failures used)
+│       └── variant_qc/           # Variant-level QC metrics
+│           ├── variant_qc.vmiss  # Per-variant missingness
+│           ├── variant_qc.hardy  # Hardy-Weinberg equilibrium tests
+│           ├── variant_qc.afreq  # Allele frequency statistics
+│           └── variant_qc.het    # Per-sample inbreeding coefficients
 ├── stage2/
 │   ├── gtc/                    # Re-called GTC files (new clusters)
 │   ├── vcf/
@@ -228,6 +242,7 @@ output/
 │   │   ├── stage2_sample_qc.tsv    # Updated QC metrics
 │   │   ├── high_quality_samples.txt # Samples used for reclustering
 │   │   ├── excluded_samples.txt     # Low-quality samples
+│   │   ├── variant_qc/             # Variant-level QC metrics (post-recluster)
 │   │   └── comparison/              # Pre/post reclustering QC comparison
 │   │       ├── qc_comparison_report.txt  # Summary statistics text report
 │   │       ├── qc_comparison_samples.png # Sample-level QC comparison plots
@@ -242,6 +257,7 @@ output/
 │   ├── pca_qc_samples.txt           # QC'd sample set used for PCA
 │   └── qc_summary.txt               # QC filtering summary
 ├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + inbreeding F)
+├── qc_diagnostic_report.txt         # Automated QC diagnostic report
 ├── pipeline_report.html             # Comprehensive HTML report with figures
 ├── summary_statistics.tsv           # Publication-ready summary statistics table
 ├── methods_text.txt                 # Auto-generated methods paragraph
@@ -297,7 +313,7 @@ Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a t
 
 **Stage 1** applies the default EGT clusters to produce initial genotype calls and computes per-sample QC metrics. Samples with low call rate (< 0.97) or high LRR standard deviation (> 0.35) are flagged as low quality.
 
-**Stage 2** performs true reclustering in three steps:
+**Stage 2** performs true reclustering in four steps:
 
 1. **Recompute EGT**: Using `scripts/recluster_egt.py`, extracts normalized intensity data (theta, R coordinates) from Stage 1 GTC files of high-quality samples, grouped by their genotype calls (AA/AB/BB). For each probe, recomputes the cluster means and standard deviations in (theta, R) space. Probes with insufficient data fall back to the original cluster definitions. The result is a new EGT file tailored to the study population.
 

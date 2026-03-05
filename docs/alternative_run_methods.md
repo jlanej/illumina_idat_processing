@@ -80,7 +80,7 @@ bash scripts/run_pipeline.sh \
     --output-dir /path/to/output
 ```
 
-The pipeline will auto-download the correct BPM, EGT, and CSV manifest files for the specified array, as well as the GRCh38 reference genome.
+The pipeline will auto-download the correct BPM, EGT, and CSV manifest files for the specified array, as well as the CHM13 reference genome (default; use `--genome GRCh38` or `--genome GRCh37` if preferred).
 
 ### From-source requirements
 
@@ -88,6 +88,6 @@ The pipeline will auto-download the correct BPM, EGT, and CSV manifest files for
 - GCC 5+ (for compiling bcftools and plugins)
 - Python 3.6+ with NumPy and Matplotlib
 - Standard tools: `wget`, `samtools`, `bwa`, `make`
-- ~30 GB disk for GRCh38 reference genome
+- ~30 GB disk for reference genome (CHM13, GRCh38, or GRCh37)
 
 All other dependencies (bcftools, gtc2vcf, idat2gtc) are installed by `scripts/install_dependencies.sh`.
