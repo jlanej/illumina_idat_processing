@@ -337,7 +337,7 @@ NAME_MAP_FILE="${OUTPUT_DIR}/sample_name_mapping.tsv"
 
 if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
     if step_done "stage1_rename_gtc" && [[ -f "${NAME_MAP_FILE}" ]]; then
-        n_renamed=$(awk -F'\t' '$1 != $2' "${NAME_MAP_FILE}" | wc -l)
+        n_renamed=$(awk -F'\t' 'NR>1 && $1 != $2' "${NAME_MAP_FILE}" | wc -l)
         echo "  [checkpoint] GTC rename already complete (${n_renamed} renamed). Skipping."
     else
         echo ""
@@ -555,13 +555,10 @@ else
 
     # Add original_name column from name mapping
     if [[ -f "${NAME_MAP_FILE}" ]]; then
-        awk -F'\t' '
-            NR==FNR { if (FNR > 1) map[$1] = $2; next }
-            FNR==1 { print "sample_id\toriginal_name\t" substr($0, index($0,$2)); next }
-            { printf "%s\t%s", $1, ($1 in map ? map[$1] : $1)
-              for (i=2; i<=NF; i++) printf "\t%s", $i
-              printf "\n" }
-        ' "${NAME_MAP_FILE}" "${QC_OUTPUT}" > "${QC_OUTPUT}.tmp"
+        python3 "${SCRIPT_DIR}/enrich_qc_with_names.py" \
+            --qc-file "${QC_OUTPUT}" \
+            --name-map "${NAME_MAP_FILE}" \
+            --output "${QC_OUTPUT}.tmp"
         mv "${QC_OUTPUT}.tmp" "${QC_OUTPUT}"
     fi
 

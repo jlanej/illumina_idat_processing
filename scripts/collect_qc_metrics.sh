@@ -128,38 +128,46 @@ collect_qc_metrics() {
     echo "  [diag] QC output first 5 lines:"
     head -5 "${output_file}" | sed 's/^/    [diag]   /'
     if [[ "${n_samples}" -gt 0 ]]; then
-        awk -F'\t' 'NR>1 && $2 != "NA" {
-            n++; sum+=$2
-            if (n==1 || $2+0 < min) min=$2+0
-            if (n==1 || $2+0 > max) max=$2+0
-        } END {
-            if (n>0) printf "  [diag] Call rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-            else print "  [diag] WARNING: No valid call rate values found"
-        }' "${output_file}"
-        awk -F'\t' 'NR>1 && $3 != "NA" {
-            n++; sum+=$3
-            if (n==1 || $3+0 < min) min=$3+0
-            if (n==1 || $3+0 > max) max=$3+0
-        } END {
-            if (n>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-            else print "  [diag] WARNING: No valid LRR SD values found"
-        }' "${output_file}"
-        awk -F'\t' 'NR>1 && $6 != "NA" {
-            n++; sum+=$6
-            if (n==1 || $6+0 < min) min=$6+0
-            if (n==1 || $6+0 > max) max=$6+0
-        } END {
-            if (n>0) printf "  [diag] BAF SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-            else print "  [diag] WARNING: No valid BAF SD values found"
-        }' "${output_file}"
-        awk -F'\t' 'NR>1 && $7 != "NA" {
-            n++; sum+=$7
-            if (n==1 || $7+0 < min) min=$7+0
-            if (n==1 || $7+0 > max) max=$7+0
-        } END {
-            if (n>0) printf "  [diag] Het rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-            else print "  [diag] WARNING: No valid het rate values found"
-        }' "${output_file}"
+        awk -F'\t' '
+            NR==1 { for(i=1;i<=NF;i++) if($i=="call_rate") c=i; next }
+            c && $c != "NA" {
+                n++; sum+=$c
+                if (n==1 || $c+0 < min) min=$c+0
+                if (n==1 || $c+0 > max) max=$c+0
+            } END {
+                if (n>0) printf "  [diag] Call rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+                else print "  [diag] WARNING: No valid call rate values found"
+            }' "${output_file}"
+        awk -F'\t' '
+            NR==1 { for(i=1;i<=NF;i++) if($i=="lrr_sd") c=i; next }
+            c && $c != "NA" {
+                n++; sum+=$c
+                if (n==1 || $c+0 < min) min=$c+0
+                if (n==1 || $c+0 > max) max=$c+0
+            } END {
+                if (n>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+                else print "  [diag] WARNING: No valid LRR SD values found"
+            }' "${output_file}"
+        awk -F'\t' '
+            NR==1 { for(i=1;i<=NF;i++) if($i=="baf_sd") c=i; next }
+            c && $c != "NA" {
+                n++; sum+=$c
+                if (n==1 || $c+0 < min) min=$c+0
+                if (n==1 || $c+0 > max) max=$c+0
+            } END {
+                if (n>0) printf "  [diag] BAF SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+                else print "  [diag] WARNING: No valid BAF SD values found"
+            }' "${output_file}"
+        awk -F'\t' '
+            NR==1 { for(i=1;i<=NF;i++) if($i=="het_rate") c=i; next }
+            c && $c != "NA" {
+                n++; sum+=$c
+                if (n==1 || $c+0 < min) min=$c+0
+                if (n==1 || $c+0 > max) max=$c+0
+            } END {
+                if (n>0) printf "  [diag] Het rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
+                else print "  [diag] WARNING: No valid het rate values found"
+            }' "${output_file}"
     fi
 
     rm -f "${samples_file}"

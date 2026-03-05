@@ -78,6 +78,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY scripts/ /opt/scripts/
 RUN chmod +x /opt/scripts/*.sh /opt/scripts/*.py
 COPY config/ /opt/config/
+COPY tests/data/ /opt/tests/data/
 
 WORKDIR /data
 
