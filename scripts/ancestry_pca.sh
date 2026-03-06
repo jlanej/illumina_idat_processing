@@ -293,9 +293,9 @@ fi
 # -----------------------------------------------------------------
 # QC Summary
 # -----------------------------------------------------------------
-PLINK2_VERSION=$(plink2 --version 2>/dev/null | head -1 || echo "unknown")
+PLINK2_VERSION=$(plink2 --version 2>/dev/null | head -1 || echo "version not detected")
 if [[ "${HAVE_FLASHPCA}" == "true" ]]; then
-    FLASHPCA_VERSION=$(flashpca --version 2>&1 | head -1 || echo "unknown")
+    FLASHPCA_VERSION=$(flashpca --version 2>&1 | head -1 || echo "version not detected")
 else
     FLASHPCA_VERSION="not available"
 fi
