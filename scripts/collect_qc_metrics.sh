@@ -114,6 +114,7 @@ collect_qc_metrics() {
             echo "    [diag] shard ${chunk_idx}: samples ${start_line}-${end_line} (${n_chunk_samples})"
 
             (
+                set -o pipefail
                 bcftools view -e 'INFO/INTENSITY_ONLY=1' -t "${autosome_targets}" --threads 1 "${vcf_file}" 2>/dev/null | \
                 bcftools query --samples-file "${chunk_samples_file}" -f '[\t%GT:%LRR:%BAF]\n' 2>/dev/null | \
                     python3 "${script_dir}/compute_sample_qc.py" \
@@ -135,6 +136,10 @@ collect_qc_metrics() {
                         exit 1
                     fi
                 else
+                    if [[ "${n_chunk_samples}" -gt 0 ]]; then
+                        echo "      [diag] ERROR: shard ${chunk_idx} produced no output for ${n_chunk_samples} samples" >&2
+                        exit 1
+                    fi
                     : > "${chunk_metrics_file}"
                 fi
             ) &
@@ -148,7 +153,6 @@ collect_qc_metrics() {
         for pid in "${pids[@]}"; do
             if ! wait "${pid}"; then
                 rc=1
-                break
             fi
         done
         if [[ "${rc}" -ne 0 ]]; then
@@ -167,6 +171,7 @@ collect_qc_metrics() {
     fi
 
     if [[ -s "${qc_metrics_file}" ]]; then
+        local n_qm
         n_qm=$(wc -l < "${qc_metrics_file}" | tr -d ' ')
         if [[ "${n_qm}" -ne "${n_samples_vcf}" ]]; then
             echo "  [diag] ERROR: final sample QC row count mismatch (expected ${n_samples_vcf}, got ${n_qm})" >&2
@@ -219,44 +224,46 @@ collect_qc_metrics() {
     head -5 "${output_file}" | sed 's/^/    [diag]   /'
     if [[ "${n_samples}" -gt 0 ]]; then
         awk -F'\t' '
-            NR==1 { for(i=1;i<=NF;i++) if($i=="call_rate") c=i; next }
-            c && $c != "NA" {
-                n++; sum+=$c
-                if (n==1 || $c+0 < min) min=$c+0
-                if (n==1 || $c+0 > max) max=$c+0
-            } END {
-                if (n>0) printf "  [diag] Call rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-                else print "  [diag] WARNING: No valid call rate values found"
-            }' "${output_file}"
-        awk -F'\t' '
-            NR==1 { for(i=1;i<=NF;i++) if($i=="lrr_sd") c=i; next }
-            c && $c != "NA" {
-                n++; sum+=$c
-                if (n==1 || $c+0 < min) min=$c+0
-                if (n==1 || $c+0 > max) max=$c+0
-            } END {
-                if (n>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-                else print "  [diag] WARNING: No valid LRR SD values found"
-            }' "${output_file}"
-        awk -F'\t' '
-            NR==1 { for(i=1;i<=NF;i++) if($i=="baf_sd") c=i; next }
-            c && $c != "NA" {
-                n++; sum+=$c
-                if (n==1 || $c+0 < min) min=$c+0
-                if (n==1 || $c+0 > max) max=$c+0
-            } END {
-                if (n>0) printf "  [diag] BAF SD range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-                else print "  [diag] WARNING: No valid BAF SD values found"
-            }' "${output_file}"
-        awk -F'\t' '
-            NR==1 { for(i=1;i<=NF;i++) if($i=="het_rate") c=i; next }
-            c && $c != "NA" {
-                n++; sum+=$c
-                if (n==1 || $c+0 < min) min=$c+0
-                if (n==1 || $c+0 > max) max=$c+0
-            } END {
-                if (n>0) printf "  [diag] Het rate range: %.4f - %.4f (mean %.4f, n=%d)\n", min, max, sum/n, n
-                else print "  [diag] WARNING: No valid het rate values found"
+            NR==1 {
+                for(i=1;i<=NF;i++) {
+                    if($i=="call_rate") ci=i
+                    if($i=="lrr_sd")   li=i
+                    if($i=="baf_sd")   bi=i
+                    if($i=="het_rate") hi=i
+                }
+                next
+            }
+            {
+                if(ci && $ci!="NA") {
+                    cn++; cs+=$ci
+                    if(cn==1||$ci+0<cmin) cmin=$ci+0
+                    if(cn==1||$ci+0>cmax) cmax=$ci+0
+                }
+                if(li && $li!="NA") {
+                    ln++; ls+=$li
+                    if(ln==1||$li+0<lmin) lmin=$li+0
+                    if(ln==1||$li+0>lmax) lmax=$li+0
+                }
+                if(bi && $bi!="NA") {
+                    bn++; bs+=$bi
+                    if(bn==1||$bi+0<bmin) bmin=$bi+0
+                    if(bn==1||$bi+0>bmax) bmax=$bi+0
+                }
+                if(hi && $hi!="NA") {
+                    hn++; hs+=$hi
+                    if(hn==1||$hi+0<hmin) hmin=$hi+0
+                    if(hn==1||$hi+0>hmax) hmax=$hi+0
+                }
+            }
+            END {
+                if(cn>0) printf "  [diag] Call rate range: %.4f - %.4f (mean %.4f, n=%d)\n",cmin,cmax,cs/cn,cn
+                else     print  "  [diag] WARNING: No valid call rate values found"
+                if(ln>0) printf "  [diag] LRR SD range: %.4f - %.4f (mean %.4f, n=%d)\n",lmin,lmax,ls/ln,ln
+                else     print  "  [diag] WARNING: No valid LRR SD values found"
+                if(bn>0) printf "  [diag] BAF SD range: %.4f - %.4f (mean %.4f, n=%d)\n",bmin,bmax,bs/bn,bn
+                else     print  "  [diag] WARNING: No valid BAF SD values found"
+                if(hn>0) printf "  [diag] Het rate range: %.4f - %.4f (mean %.4f, n=%d)\n",hmin,hmax,hs/hn,hn
+                else     print  "  [diag] WARNING: No valid het rate values found"
             }' "${output_file}"
     fi
 
