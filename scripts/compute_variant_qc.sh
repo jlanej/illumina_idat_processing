@@ -81,6 +81,7 @@ echo "Computing variant QC with PLINK2..."
 echo "  VCF:     ${VCF}"
 echo "  Output:  ${OUTPUT_DIR}"
 echo "  Threads: ${THREADS}"
+VAR_QC_START=${SECONDS}
 
 # Filter out intensity-only probes before passing to plink2
 # These probes lack genotype calls and would inflate missingness
@@ -90,6 +91,8 @@ trap 'rm -f "${FILTERED_VCF}" "${FILTERED_VCF}.csi"' EXIT
 bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \
     -Ob -o "${FILTERED_VCF}" "${VCF}" 2>/dev/null
 bcftools index --threads "${THREADS}" "${FILTERED_VCF}" 2>/dev/null
+N_FILTERED=$(bcftools index -n "${FILTERED_VCF}" 2>/dev/null || echo "NA")
+echo "  [diag] Filtered autosomal-input BCF ready: ${FILTERED_VCF} (variants=${N_FILTERED})"
 
 # Run plink2 to compute variant-level QC on autosomes
 # --missing variant-only: per-variant missingness
@@ -106,12 +109,14 @@ plink2 \
     --freq \
     --het \
     --out "${PREFIX}" 2>&1 | tail -5
+echo "  [diag] PLINK2 variant QC metrics generated for prefix: ${PREFIX}"
 
 # Compute Ti/Tv ratio via bcftools stats (lightweight, single pass)
 echo "Computing Ti/Tv ratio..."
 TSTV_FILE="${OUTPUT_DIR}/tstv_stats.txt"
 bcftools stats --threads "${THREADS}" "${FILTERED_VCF}" 2>/dev/null | \
     awk '/^SN/ || /^TSTV/' > "${TSTV_FILE}" 2>/dev/null || true
+echo "  [diag] Ti/Tv stats written: ${TSTV_FILE}"
 
 # Generate summary statistics
 SUMMARY="${OUTPUT_DIR}/variant_qc_summary.txt"
@@ -238,3 +243,5 @@ echo "  ${SUMMARY}"
 if [[ -f "${TSTV_FILE}" ]]; then
     echo "  ${TSTV_FILE}"
 fi
+VAR_QC_ELAPSED=$(( SECONDS - VAR_QC_START ))
+echo "  [diag] Total variant QC stage time: ${VAR_QC_ELAPSED}s"

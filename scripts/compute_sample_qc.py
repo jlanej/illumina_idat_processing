@@ -63,7 +63,7 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
     baf_sum = None
     baf_sum_sq = None
 
-    # Collect LRR values for median (list of lists → numpy at end)
+    # Collect LRR values for median (per-sample list of float32 chunks)
     lrr_values = None
 
     def _init_accumulators(ns):
@@ -133,11 +133,13 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
         lrr_sum[:] += np.sum(lrr_clean, axis=0)
         lrr_sum_sq[:] += np.sum(lrr_clean ** 2, axis=0)
 
-        # Collect LRR values for median (must keep all values)
+        # Collect LRR values for median (keep compact float32 chunk copies)
         for col_idx in range(num_samples):
             col_valid = lrr_valid[:, col_idx]
             if np.any(col_valid):
-                lrr_values[col_idx].extend(lrr_arr[col_valid, col_idx].tolist())
+                lrr_values[col_idx].append(
+                    lrr_arr[col_valid, col_idx].astype(np.float32, copy=True)
+                )
 
         # --- Vectorised BAF accumulation (het-only) -------------------
         baf_valid = is_het & np.isfinite(baf_arr)
@@ -194,20 +196,23 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
                 lrr_sd = float('nan')
                 mean_val = lrr_sum[i] / lrr_n[i] if lrr_n[i] > 0 else float('nan')
 
-            # LRR median via numpy.partition (O(n) selection, no full sort)
+            # LRR median via in-place numpy partition (O(n) selection)
             if lrr_values[i]:
-                arr = np.array(lrr_values[i], dtype=np.float32)
-                n = len(arr)
+                if len(lrr_values[i]) == 1:
+                    arr = lrr_values[i][0].copy()
+                else:
+                    arr = np.concatenate(lrr_values[i]).astype(np.float32, copy=False)
+                n = arr.size
                 if n % 2 == 1:
                     k = n // 2
-                    np.partition(arr, k)
+                    arr.partition(k)
                     median_val = float(arr[k])
                 else:
-                    k1, k2 = n // 2 - 1, n // 2
-                    np.partition(arr, k2)
-                    # After partition around k2, arr[:k2] are all <= arr[k2]
-                    # The k1-th element is the max of arr[:k2]
-                    median_val = float((np.max(arr[:k2]) + arr[k2]) / 2)
+                    k2 = n // 2
+                    k1 = k2 - 1
+                    # Example: [1,3,5,7] -> k1=1,k2=2 -> median=(arr[1]+arr[2])/2 = 4
+                    arr.partition((k1, k2))
+                    median_val = float((arr[k1] + arr[k2]) / 2.0)
             else:
                 median_val = float('nan')
 
@@ -251,4 +256,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

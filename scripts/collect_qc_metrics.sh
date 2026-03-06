@@ -22,6 +22,8 @@ collect_qc_metrics() {
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+    local qc_start qc_elapsed
+    qc_start=${SECONDS}
     echo "Extracting per-sample QC metrics..."
 
     local gender_file qc_metrics_file samples_file
@@ -66,12 +68,17 @@ collect_qc_metrics() {
     # Restricted to autosomes only to avoid inflation from sex-chromosome
     # hemizygosity in males.
     # -----------------------------------------------------------------
+    echo "  [diag] Starting autosomal GT/LRR/BAF stream extraction..."
+    local metric_start metric_elapsed
+    metric_start=${SECONDS}
     echo "  Computing QC metrics per sample (${n_samples_vcf} samples, autosomes only, single pass)..."
     bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
     bcftools query -f '[\t%GT:%LRR:%BAF]\n' 2>/dev/null | \
         python3 "${script_dir}/compute_sample_qc.py" \
             --num-samples "${n_samples_vcf}" \
             --output "${qc_metrics_file}.raw" 2>&1 | sed 's/^/  /'
+    metric_elapsed=$(( SECONDS - metric_start ))
+    echo "  [diag] Sample metric extraction completed in ${metric_elapsed}s"
 
     # Map column indices back to sample names
     if [[ -s "${qc_metrics_file}.raw" ]]; then
@@ -112,6 +119,8 @@ collect_qc_metrics() {
     fi
 
     # Merge QC metrics with gender into a single output file
+    local merge_start merge_elapsed
+    merge_start=${SECONDS}
     echo "  Merging metrics..."
     {
         echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_sd\thet_rate\tcomputed_gender"
@@ -123,8 +132,10 @@ collect_qc_metrics() {
             awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $9}'
     } > "${output_file}"
 
+    merge_elapsed=$(( SECONDS - merge_start ))
     n_samples=$(( $(wc -l < "${output_file}") - 1 ))
     echo "  QC metrics computed for ${n_samples} samples: ${output_file}"
+    echo "  [diag] Merge + finalization completed in ${merge_elapsed}s"
 
     # Diagnostic: show first few rows and value ranges
     echo "  [diag] QC output first 5 lines:"
@@ -171,6 +182,9 @@ collect_qc_metrics() {
                 else print "  [diag] WARNING: No valid het rate values found"
             }' "${output_file}"
     fi
+
+    qc_elapsed=$(( SECONDS - qc_start ))
+    echo "  [diag] Total sample QC metric stage time: ${qc_elapsed}s"
 
     rm -f "${samples_file}"
 }
