@@ -138,6 +138,16 @@ bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \
     -Ob -o "${FILTERED_VCF}" "${VCF}" 2>/dev/null
 bcftools index "${FILTERED_VCF}" 2>/dev/null
 
+# Track input counts for QC summary
+N_INPUT=$(bcftools index -n "${VCF}" 2>/dev/null || echo 0)
+N_AFTER_INTENSITY=$(bcftools index -n "${FILTERED_VCF}" 2>/dev/null || echo 0)
+N_INTENSITY_REMOVED=$(( N_INPUT - N_AFTER_INTENSITY ))
+N_MULTIALLELIC=$(bcftools view -H -m3 "${FILTERED_VCF}" 2>/dev/null | wc -l | tr -d ' ')
+N_INPUT_SAMPLES=$(bcftools query -l "${VCF}" 2>/dev/null | wc -l | tr -d ' ')
+echo "  Input variants:          ${N_INPUT}"
+echo "  Intensity-only removed:  ${N_INTENSITY_REMOVED}"
+echo "  Multiallelic variants:   ${N_MULTIALLELIC}"
+
 # -----------------------------------------------------------------
 # Step 2: Stringent variant and sample QC with plink2
 # -----------------------------------------------------------------
@@ -150,6 +160,8 @@ plink2 \
     --bcf "${FILTERED_VCF}" \
     --autosome \
     --allow-extra-chr \
+    --snps-only \
+    --max-alleles 2 \
     --threads "${THREADS}" \
     --geno "${MAX_MISSING}" \
     --hwe "${HWE_P}" \
@@ -227,6 +239,8 @@ if [[ "${HAVE_FLASHPCA}" == "true" && -f "${PREFIX}_ldpruned.bed" ]]; then
         --bcf "${FILTERED_VCF}" \
         --autosome \
         --allow-extra-chr \
+        --snps-only \
+        --max-alleles 2 \
         --extract "${PREFIX}_ldprune.prune.in" \
         --threads "${THREADS}" \
         --make-bed \
@@ -281,12 +295,28 @@ fi
 # -----------------------------------------------------------------
 # QC Summary
 # -----------------------------------------------------------------
+PLINK2_VERSION=$(plink2 --version 2>/dev/null | head -1 || echo "version not detected")
+if [[ "${HAVE_FLASHPCA}" == "true" ]]; then
+    FLASHPCA_VERSION=$(flashpca --version 2>&1 | head -1 || echo "version not detected")
+else
+    FLASHPCA_VERSION="not available"
+fi
+RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
 {
     echo "======================================================"
     echo "  Ancestry PCA QC Summary"
     echo "======================================================"
     echo ""
-    echo "Input VCF: ${VCF}"
+    echo "Date: ${RUN_DATE}"
+    echo ""
+    echo "Software:"
+    echo "  plink2:     ${PLINK2_VERSION}"
+    echo "  flashpca2:  ${FLASHPCA_VERSION}"
+    echo ""
+    echo "Input:"
+    echo "  VCF:             ${VCF}"
+    echo "  Total variants:  ${N_INPUT}"
+    echo "  Total samples:   ${N_INPUT_SAMPLES}"
     echo ""
     echo "QC Parameters:"
     echo "  Max variant missingness: ${MAX_MISSING}"
@@ -295,10 +325,18 @@ fi
     echo "  Min sample call rate:   ${MIN_CALL_RATE}"
     echo "  LD pruning:             window=${LD_WINDOW}kb step=${LD_STEP} r2=${LD_R2}"
     echo ""
-    echo "Results:"
-    echo "  Variants after QC:      ${N_VARIANTS_QC}"
-    echo "  Samples after QC:       ${N_SAMPLES_QC}"
-    echo "  Variants after LD prune: ${N_LD_PRUNED}"
+    echo "Variant Filtering Cascade:"
+    echo "  Input variants:                    ${N_INPUT}"
+    echo "  After intensity-only removal:      ${N_AFTER_INTENSITY} (${N_INTENSITY_REMOVED} removed)"
+    echo "  Multiallelic variants excluded:    ${N_MULTIALLELIC}"
+    echo "  After variant/sample QC (biallelic SNPs): ${N_VARIANTS_QC}"
+    echo "  After LD pruning:                  ${N_LD_PRUNED}"
+    echo ""
+    echo "Sample Filtering:"
+    echo "  Input samples:           ${N_INPUT_SAMPLES}"
+    echo "  Samples after QC:        ${N_SAMPLES_QC}"
+    echo ""
+    echo "PCA:"
     echo "  PCs computed:           ${N_PCS}"
     if [[ "${HAVE_FLASHPCA}" == "true" ]]; then
         echo "  PCA method:             flashpca2"
