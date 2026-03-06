@@ -26,11 +26,13 @@ collect_qc_metrics() {
     qc_start=${SECONDS}
     echo "Extracting per-sample QC metrics..."
 
-    local gender_file qc_metrics_file samples_file shard_dir
-    gender_file=$(mktemp)
-    qc_metrics_file=$(mktemp)
-    samples_file=$(mktemp)
-    shard_dir=$(mktemp -d)
+    local tmp_root gender_file qc_metrics_file samples_file shard_dir
+    tmp_root="$(dirname "${output_file}")/tmp/collect_qc_metrics"
+    mkdir -p "${tmp_root}"
+    gender_file=$(mktemp -p "${tmp_root}" gender.XXXXXX.tsv)
+    qc_metrics_file=$(mktemp -p "${tmp_root}" qc_metrics.XXXXXX.tsv)
+    samples_file=$(mktemp -p "${tmp_root}" samples.XXXXXX.txt)
+    shard_dir=$(mktemp -d -p "${tmp_root}" shards.XXXXXX)
     trap 'rm -f "${gender_file}" "${qc_metrics_file}" "${samples_file}"; rm -rf "${shard_dir}"' RETURN
 
     # Get sample names from VCF

@@ -138,7 +138,8 @@ VCF_DIR="${OUTPUT_DIR}/vcf"
 QC_DIR="${OUTPUT_DIR}/qc"
 CLUSTER_DIR="${OUTPUT_DIR}/clusters"
 CHECKPOINT_DIR="${OUTPUT_DIR}/.checkpoints"
-mkdir -p "${GTC_DIR}" "${VCF_DIR}" "${QC_DIR}" "${CLUSTER_DIR}" "${CHECKPOINT_DIR}"
+TMP_DIR="${OUTPUT_DIR}/tmp/stage2_recluster"
+mkdir -p "${GTC_DIR}" "${VCF_DIR}" "${QC_DIR}" "${CLUSTER_DIR}" "${CHECKPOINT_DIR}" "${TMP_DIR}"
 
 # Helper: check if a step is already complete
 step_done() {
@@ -307,7 +308,7 @@ else
                 IDAT_ARGS+=("${ALL_RED[j]}")
             done
 
-            BATCH_LOG=$(mktemp)
+            BATCH_LOG=$(mktemp -p "${TMP_DIR}" stage2_batch.XXXXXX.log)
             if bcftools +idat2gtc \
                 --bpm "${BPM}" \
                 --egt "${RECLUSTERED_EGT}" \
@@ -318,7 +319,7 @@ else
                 BATCH_RC=$?
                 echo "  Batch ${batch_num} failed (exit ${BATCH_RC}). Retrying samples individually..."
                 for (( j=i; j<batch_end; j++ )); do
-                    SAMPLE_LOG=$(mktemp)
+                    SAMPLE_LOG=$(mktemp -p "${TMP_DIR}" stage2_sample.XXXXXX.log)
                     if bcftools +idat2gtc \
                         --bpm "${BPM}" \
                         --egt "${RECLUSTERED_EGT}" \
