@@ -45,6 +45,7 @@ USER_EGT=""
 USER_CSV=""
 USER_MANIFEST_DIR=""
 USER_SAMPLE_NAME_MAP=""
+USER_IDAT_DIR=""
 FORCE_RENAME="false"
 
 # Default 1000G sample name map (bundled with the repo)
@@ -73,6 +74,8 @@ Options:
                          Use "all" for all ~2141 samples
   --archive FILE         Use a pre-downloaded Omni25_idats_gtcs_2141_samples.tgz
                          archive instead of downloading it
+  --idat-dir DIR         Use a pre-extracted IDAT directory instead of
+                         downloading/extracting the 1000G archive
   --sample-name-map FILE Two-column tab-delimited file mapping IDAT root names
                          to desired sample names.  Defaults to the bundled
                          1000G map (tests/data/sample_name_map.txt).
@@ -101,6 +104,9 @@ Examples:
   $(basename "$0") --output-dir ./1000g_output \\
       --archive /data/Omni25_idats_gtcs_2141_samples.tgz --num-samples all
 
+  # Use a pre-extracted IDAT directory
+  $(basename "$0") --output-dir ./1000g_output --idat-dir /data/1000g_idats
+
   # Use with Apptainer/Singularity on HPC
   apptainer exec --bind \$PWD docker://ghcr.io/jlanej/illumina_idat_processing:main \\
       bash /opt/scripts/process_1000g.sh --output-dir \$PWD/1000g_output
@@ -119,6 +125,7 @@ while [[ $# -gt 0 ]]; do
         --output-dir)    OUTPUT_DIR="$2"; shift 2 ;;
         --num-samples)   NUM_SAMPLES="$2"; shift 2 ;;
         --archive)       USER_ARCHIVE="$2"; shift 2 ;;
+        --idat-dir)      USER_IDAT_DIR="$2"; shift 2 ;;
         --sample-name-map) USER_SAMPLE_NAME_MAP="$2"; shift 2 ;;
         --force-rename)  FORCE_RENAME="true"; shift ;;
         --threads)       THREADS="$2"; shift 2 ;;
@@ -139,6 +146,10 @@ done
 
 if [[ -z "${OUTPUT_DIR}" ]]; then
     echo "Error: --output-dir is required" >&2
+    exit 1
+fi
+if [[ -n "${USER_IDAT_DIR}" && ! -d "${USER_IDAT_DIR}" ]]; then
+    echo "Error: --idat-dir directory not found: ${USER_IDAT_DIR}" >&2
     exit 1
 fi
 
@@ -186,6 +197,9 @@ mkdir -p "${OUTPUT_DIR}"
 
 DOWNLOAD_DIR="${OUTPUT_DIR}/downloads"
 IDAT_DIR="${OUTPUT_DIR}/idats"
+if [[ -n "${USER_IDAT_DIR}" ]]; then
+    IDAT_DIR="${USER_IDAT_DIR}"
+fi
 MANIFEST_DIR="${OUTPUT_DIR}/manifests"
 PIPELINE_DIR="${OUTPUT_DIR}/pipeline_output"
 
@@ -203,6 +217,9 @@ else
 fi
 if [[ -n "${USER_ARCHIVE}" ]]; then
     echo "Archive file:   ${USER_ARCHIVE}"
+fi
+if [[ -n "${USER_IDAT_DIR}" ]]; then
+    echo "IDAT dir:       ${USER_IDAT_DIR}"
 fi
 echo ""
 
@@ -295,7 +312,12 @@ echo ""
 # ---------------------------------------------------------------
 # Step 2: Download and extract IDAT files
 # ---------------------------------------------------------------
-if [[ "${SKIP_DOWNLOAD}" != "true" || -n "${USER_ARCHIVE}" ]]; then
+if [[ -n "${USER_IDAT_DIR}" ]]; then
+    echo "--- Step 2: Using pre-extracted IDAT directory ---"
+    echo "  IDAT dir: ${IDAT_DIR}"
+    echo "  Skipping 1000G archive download/extraction."
+    echo ""
+elif [[ "${SKIP_DOWNLOAD}" != "true" || -n "${USER_ARCHIVE}" ]]; then
     mkdir -p "${DOWNLOAD_DIR}" "${IDAT_DIR}"
 
     ARCHIVE_URL="${FTP_BASE}/${IDAT_TGZ}"

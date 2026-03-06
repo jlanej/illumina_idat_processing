@@ -266,6 +266,83 @@ else
     (( FAIL++ )) || true
 fi
 
+# ---------------------------------------------------------------
+# Test 12: --help includes --idat-dir in process_1000g
+# ---------------------------------------------------------------
+echo "--- Test 12: process_1000g --help mentions --idat-dir ---"
+help_out=$(bash "${REPO_DIR}/scripts/process_1000g.sh" --help 2>&1) || true
+if echo "${help_out}" | grep -q -- "--idat-dir"; then
+    echo "  PASS: process_1000g --help mentions --idat-dir"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: process_1000g --help does not mention --idat-dir"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 13: stage1 skips idat2gtc when mapped GTC already exists
+# ---------------------------------------------------------------
+echo "--- Test 13: stage1 idempotent skip with mapped GTC filenames ---"
+T13_DIR="${TMPDIR}/test13_stage1_skip"
+mkdir -p "${T13_DIR}/idats" "${T13_DIR}/out/gtc" "${T13_DIR}/out/vcf" \
+    "${T13_DIR}/out/qc/variant_qc" "${T13_DIR}/out/.checkpoints" "${T13_DIR}/bin"
+
+# Minimal required inputs
+touch "${T13_DIR}/array.bpm" "${T13_DIR}/array.egt" "${T13_DIR}/array.csv" "${T13_DIR}/ref.fa"
+touch "${T13_DIR}/idats/OLD_Grn.idat" "${T13_DIR}/idats/OLD_Red.idat"
+{
+    echo -e "sample_id\tgreen_idat\tred_idat"
+    echo -e "OLD\tOLD_Grn.idat\tOLD_Red.idat"
+} > "${T13_DIR}/sample_sheet.tsv"
+echo -e "OLD\tNEW" > "${T13_DIR}/map.tsv"
+echo "placeholder" > "${T13_DIR}/out/gtc/NEW.gtc"
+
+# Pre-create later-stage outputs/checkpoints so test only exercises Step 1 logic
+touch "${T13_DIR}/out/vcf/stage1_initial.bcf"
+{
+    echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tcomputed_gender"
+    echo -e "NEW\t1.0\t0.1\t0.0\t0.0\tU"
+} > "${T13_DIR}/out/qc/stage1_sample_qc.tsv"
+{
+    echo -e "sample_id\toriginal_name"
+    echo -e "NEW\tOLD"
+} > "${T13_DIR}/out/sample_name_mapping.tsv"
+touch "${T13_DIR}/out/.checkpoints/stage1_rename_gtc.done"
+touch "${T13_DIR}/out/.checkpoints/stage1_gtc2vcf.done"
+touch "${T13_DIR}/out/.checkpoints/stage1_qc.done"
+touch "${T13_DIR}/out/.checkpoints/stage1_variant_qc.done"
+
+# Stub bcftools: if idat2gtc is invoked unexpectedly, the test should fail
+cat > "${T13_DIR}/bin/bcftools" <<'EOF'
+#!/usr/bin/env bash
+echo "bcftools_called $*" >> "${BCFTOOLS_LOG}"
+exit 99
+EOF
+chmod +x "${T13_DIR}/bin/bcftools"
+BCFTOOLS_LOG="${T13_DIR}/bcftools.log"
+
+if PATH="${T13_DIR}/bin:${PATH}" BCFTOOLS_LOG="${BCFTOOLS_LOG}" \
+    bash "${REPO_DIR}/scripts/stage1_initial_genotyping.sh" \
+        --idat-dir "${T13_DIR}/idats" \
+        --bpm "${T13_DIR}/array.bpm" \
+        --egt "${T13_DIR}/array.egt" \
+        --csv "${T13_DIR}/array.csv" \
+        --ref-fasta "${T13_DIR}/ref.fa" \
+        --output-dir "${T13_DIR}/out" \
+        --sample-sheet "${T13_DIR}/sample_sheet.tsv" \
+        --sample-name-map "${T13_DIR}/map.tsv" >/dev/null 2>&1; then
+    if [[ ! -s "${BCFTOOLS_LOG}" ]]; then
+        echo "  PASS: stage1 skipped IDAT->GTC conversion when mapped GTC already exists"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: stage1 invoked bcftools unexpectedly"
+        (( FAIL++ )) || true
+    fi
+else
+    echo "  FAIL: stage1 run failed in idempotency test"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"

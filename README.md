@@ -73,9 +73,17 @@ apptainer exec --bind $PWD illumina_idat_processing_main.sif \
     --output-dir $PWD/1000g_output \
     --archive $PWD/Omni25_idats_gtcs_2141_samples.tgz \
     --num-samples all --threads 8
+
+# Reuse a pre-extracted IDAT directory (skips archive download/extraction)
+apptainer exec --bind $PWD illumina_idat_processing_main.sif \
+    bash /opt/scripts/process_1000g.sh \
+    --output-dir $PWD/1000g_output \
+    --idat-dir /data/1000g_idats \
+    --num-samples all --threads 8
 ```
 
 The `--archive` file is treated as user-managed input and is never deleted by `process_1000g.sh`.
+When `--idat-dir` is provided, `process_1000g.sh` reuses that directory directly.
 
 > **Other run methods** (Docker, from source): see [docs/alternative_run_methods.md](docs/alternative_run_methods.md).
 

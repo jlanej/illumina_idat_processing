@@ -120,6 +120,19 @@ if [[ ! -d "${STAGE1_GTC_DIR}" ]]; then
     exit 1
 fi
 
+if [[ -n "${SAMPLE_NAME_MAP}" && ! -f "${SAMPLE_NAME_MAP}" ]]; then
+    echo "Error: Sample name map not found: ${SAMPLE_NAME_MAP}" >&2
+    exit 1
+fi
+
+declare -A S2_MAP_OLD_TO_NEW
+if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+    while IFS=$'\t' read -r old_name new_name; do
+        [[ -z "${old_name}" || "${old_name}" == "#"* ]] && continue
+        S2_MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
+    done < "${SAMPLE_NAME_MAP}"
+fi
+
 GTC_DIR="${OUTPUT_DIR}/gtc"
 VCF_DIR="${OUTPUT_DIR}/vcf"
 QC_DIR="${OUTPUT_DIR}/qc"
@@ -138,6 +151,21 @@ step_done() {
 mark_done() {
     local step_name="$1"
     date -u "+%Y-%m-%dT%H:%M:%SZ" > "${CHECKPOINT_DIR}/${step_name}.done"
+}
+
+sample_has_stage2_gtc() {
+    local sample_id="$1"
+    local gtc_file="${GTC_DIR}/${sample_id}.gtc"
+    if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+        return 0
+    fi
+    if [[ -n "${S2_MAP_OLD_TO_NEW[${sample_id}]+x}" ]]; then
+        gtc_file="${GTC_DIR}/${S2_MAP_OLD_TO_NEW[${sample_id}]}.gtc"
+        if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+            return 0
+        fi
+    fi
+    return 1
 }
 
 echo "============================================"
@@ -241,8 +269,7 @@ else
             # Check if GTC output already exists for this sample
             grn_base="${grn##*/}"
             sample_id="${grn_base%%_Grn.idat*}"
-            gtc_file="${GTC_DIR}/${sample_id}.gtc"
-            if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+            if sample_has_stage2_gtc "${sample_id}"; then
                 (( n_skipped++ )) || true
                 continue
             fi
@@ -362,12 +389,6 @@ if [[ -n "${SAMPLE_NAME_MAP}" && -f "${SAMPLE_NAME_MAP}" ]]; then
     else
         echo ""
         echo "--- Applying sample name map (stage 2) ---"
-
-        declare -A S2_MAP_OLD_TO_NEW
-        while IFS=$'\t' read -r old_name new_name; do
-            [[ -z "${old_name}" || "${old_name}" == "#"* ]] && continue
-            S2_MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
-        done < "${SAMPLE_NAME_MAP}"
 
         # Build list of GTC files to process
         S2_GTC_SAMPLES=()
