@@ -27,6 +27,7 @@ import argparse
 import base64
 import io
 import json
+import math
 import os
 import subprocess
 import sys
@@ -615,8 +616,7 @@ def _prepare_sample_json(qc_rows, stats):
     def _clean(v):
         if v is None:
             return None
-        if isinstance(v, float) and (v != v or v == float('inf')
-                                     or v == float('-inf')):
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
             return None
         return round(v, 6)
 

@@ -239,6 +239,49 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 15: Boundary value pass/fail classification ---
+echo "--- Test 15: Boundary value pass/fail classification ---"
+BOUNDARY_DIR="${TMP_DIR}/boundary"
+mkdir -p "${BOUNDARY_DIR}"
+cat > "${BOUNDARY_DIR}/boundary_qc.tsv" << 'BEOF'
+sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
+EXACT_PASS	0.9700	0.3500	0.0000	0.0000	0.0100	0.2500	M
+JUST_BELOW_CR	0.9699	0.3500	0.0000	0.0000	0.0100	0.2500	F
+JUST_ABOVE_LRR	0.9700	0.3501	0.0000	0.0000	0.0100	0.2500	M
+BOTH_FAIL	0.9699	0.3501	0.0000	0.0000	0.0100	0.2500	F
+BEOF
+
+if python3 -c "
+import sys, json
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from generate_report import compute_summary_stats, read_tsv, _prepare_sample_json
+
+_, rows = read_tsv('${BOUNDARY_DIR}/boundary_qc.tsv')
+stats = compute_summary_stats(rows)
+data = json.loads(_prepare_sample_json(rows, stats))
+
+results = {s['id']: s['qc_pass'] for s in data}
+
+# CR=0.97 and LRR_SD=0.35 should pass (>= and <=)
+assert results['EXACT_PASS'] == True, f'EXACT_PASS should pass, got {results[\"EXACT_PASS\"]}'
+# CR=0.9699 is below 0.97 threshold
+assert results['JUST_BELOW_CR'] == False, f'JUST_BELOW_CR should fail, got {results[\"JUST_BELOW_CR\"]}'
+# LRR_SD=0.3501 is above 0.35 threshold
+assert results['JUST_ABOVE_LRR'] == False, f'JUST_ABOVE_LRR should fail, got {results[\"JUST_ABOVE_LRR\"]}'
+# Both below threshold
+assert results['BOTH_FAIL'] == False, f'BOTH_FAIL should fail, got {results[\"BOTH_FAIL\"]}'
+
+assert stats['n_pass'] == 1, f'expected 1 pass, got {stats[\"n_pass\"]}'
+assert stats['n_fail'] == 3, f'expected 3 fail, got {stats[\"n_fail\"]}'
+print('OK')
+" 2>/dev/null; then
+    echo "  PASS: Boundary values correctly classified"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Boundary value classification incorrect"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
