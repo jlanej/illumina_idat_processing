@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+#
+# test_generate_report.sh
+#
+# Tests for scripts/generate_report.py:
+#   - GWAS threshold constants are defined
+#   - Report generates with all expected interactive elements
+#   - Summary statistics include new threshold-based counts
+#   - Sample JSON data is correctly serialised for Plotly
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "${TMP_DIR}"' EXIT
+
+PASS=0
+FAIL=0
+
+echo "============================================"
+echo "  generate_report.py Tests"
+echo "============================================"
+echo ""
+
+# --- Create mock pipeline output ---
+mkdir -p "${TMP_DIR}/stage2/qc" "${TMP_DIR}/stage1/qc"
+
+cat > "${TMP_DIR}/stage2/qc/stage2_sample_qc.tsv" << 'EOF'
+sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
+S001	0.9985	0.1523	-0.0012	-0.0005	0.0321	0.2345	M
+S002	0.9654	0.4123	0.0321	0.0215	0.1623	0.2890	F
+S003	0.9992	0.1234	-0.0003	-0.0001	0.0287	0.2356	M
+EOF
+
+cat > "${TMP_DIR}/stage1/qc/stage1_sample_qc.tsv" << 'EOF'
+sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
+S001	0.9945	0.1723	-0.0018	-0.0009	0.0345	0.2312	M
+S002	0.9554	0.4523	0.0389	0.0278	0.1712	0.2934	F
+S003	0.9972	0.1434	-0.0009	-0.0004	0.0298	0.2323	M
+EOF
+
+# --- Test 1: Generate report ---
+echo "--- Test 1: Report generation ---"
+python3 "${REPO_DIR}/scripts/generate_report.py" --output-dir "${TMP_DIR}" >/dev/null 2>&1
+REPORT="${TMP_DIR}/pipeline_report.html"
+
+if [[ -f "${REPORT}" ]]; then
+    echo "  PASS: Report file generated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Report file not generated"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 2: Report contains Plotly CDN reference ---
+echo "--- Test 2: Plotly.js CDN reference ---"
+if grep -q 'plotly' "${REPORT}"; then
+    echo "  PASS: Plotly CDN reference found"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Plotly CDN reference missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 3: Report contains interactive plot containers ---
+echo "--- Test 3: Interactive plot containers ---"
+for div_id in plot-scatter plot-cr plot-lrr; do
+    if grep -q "id=\"${div_id}\"" "${REPORT}"; then
+        echo "  PASS: Plot container '${div_id}' found"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Plot container '${div_id}' missing"
+        (( FAIL++ )) || true
+    fi
+done
+
+# --- Test 4: GWAS QC thresholds reference table ---
+echo "--- Test 4: GWAS QC thresholds section ---"
+if grep -q 'GWAS QC Best Practice Thresholds' "${REPORT}"; then
+    echo "  PASS: GWAS QC thresholds section present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: GWAS QC thresholds section missing"
+    (( FAIL++ )) || true
+fi
+
+if grep -q 'threshold-table' "${REPORT}"; then
+    echo "  PASS: Threshold table CSS class present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Threshold table CSS class missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 5: Per-sample QC table ---
+echo "--- Test 5: Per-sample QC table ---"
+if grep -q 'sample-tbody' "${REPORT}"; then
+    echo "  PASS: Sample table body element found"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sample table body element missing"
+    (( FAIL++ )) || true
+fi
+
+if grep -q 'sample-search' "${REPORT}"; then
+    echo "  PASS: Sample search input found"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sample search input missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 6: QC data JSON embedded ---
+echo "--- Test 6: QC data JSON ---"
+if grep -q 'id="qc-data"' "${REPORT}"; then
+    echo "  PASS: QC data JSON block found"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: QC data JSON block missing"
+    (( FAIL++ )) || true
+fi
+
+# Verify JSON contains sample IDs
+if grep -q '"S001"' "${REPORT}" && grep -q '"S002"' "${REPORT}"; then
+    echo "  PASS: Sample IDs present in embedded JSON"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sample IDs missing from embedded JSON"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 7: Pass/fail classification in JSON ---
+echo "--- Test 7: Pass/fail classification ---"
+# S001 and S003 should pass (CR >= 0.97, LRR SD <= 0.35)
+# S002 should fail (CR 0.9654 < 0.97, LRR SD 0.4123 > 0.35)
+if grep -q '"qc_pass": true' "${REPORT}" && grep -q '"qc_pass": false' "${REPORT}"; then
+    echo "  PASS: Pass/fail classification present in JSON"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Pass/fail classification missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 8: Stage comparison table ---
+echo "--- Test 8: Stage comparison ---"
+if grep -q 'Stage 1' "${REPORT}" && grep -q 'Stage 2' "${REPORT}"; then
+    echo "  PASS: Stage comparison present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Stage comparison missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 9: Summary statistics TSV ---
+echo "--- Test 9: Summary statistics TSV ---"
+STATS="${TMP_DIR}/summary_statistics.tsv"
+if [[ -f "${STATS}" ]]; then
+    echo "  PASS: Summary statistics TSV generated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Summary statistics TSV not generated"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 10: Methods text ---
+echo "--- Test 10: Methods text ---"
+METHODS="${TMP_DIR}/methods_text.txt"
+if [[ -f "${METHODS}" ]]; then
+    echo "  PASS: Methods text file generated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Methods text file not generated"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 11: Modern CSS variables ---
+echo "--- Test 11: Modern CSS ---"
+if grep -q '\-\-primary' "${REPORT}" && grep -q '\-\-success' "${REPORT}"; then
+    echo "  PASS: CSS custom properties (variables) present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: CSS custom properties missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 12: BAF flag count in JSON ---
+echo "--- Test 12: BAF SD flag ---"
+# S002 has BAF SD 0.1623 > 0.15, should be flagged
+if grep -q '"baf_flag": true' "${REPORT}"; then
+    echo "  PASS: BAF SD flag present in JSON"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: BAF SD flag missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 13: GWAS threshold constants ---
+echo "--- Test 13: GWAS threshold constants in Python ---"
+if python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from generate_report import GWAS_THRESHOLDS
+assert GWAS_THRESHOLDS['call_rate_min'] == 0.97
+assert GWAS_THRESHOLDS['lrr_sd_max'] == 0.35
+assert GWAS_THRESHOLDS['baf_sd_max'] == 0.15
+assert GWAS_THRESHOLDS['het_rate_sd_multiplier'] == 3
+assert GWAS_THRESHOLDS['hwe_pvalue_min'] == 1e-6
+assert GWAS_THRESHOLDS['maf_min'] == 0.01
+print('OK')
+" 2>/dev/null; then
+    echo "  PASS: GWAS threshold constants valid"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: GWAS threshold constants error"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 14: compute_summary_stats enhancements ---
+echo "--- Test 14: compute_summary_stats enhancements ---"
+if python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from generate_report import compute_summary_stats, read_tsv
+_, rows = read_tsv('${TMP_DIR}/stage2/qc/stage2_sample_qc.tsv')
+stats = compute_summary_stats(rows)
+assert 'n_baf_flag' in stats, 'n_baf_flag missing'
+assert 'n_het_outlier' in stats, 'n_het_outlier missing'
+assert 'pass_rate' in stats, 'pass_rate missing'
+assert stats['n_pass'] == 2, f'n_pass expected 2, got {stats[\"n_pass\"]}'
+assert stats['n_fail'] == 1, f'n_fail expected 1, got {stats[\"n_fail\"]}'
+assert stats['n_baf_flag'] == 1, f'n_baf_flag expected 1, got {stats[\"n_baf_flag\"]}'
+print('OK')
+" 2>/dev/null; then
+    echo "  PASS: compute_summary_stats has threshold-based counts"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: compute_summary_stats missing enhancements"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+echo "============================================"
+echo "  Results: ${PASS} passed, ${FAIL} failed"
+echo "============================================"
+
+if [[ "${FAIL}" -gt 0 ]]; then
+    exit 1
+fi
