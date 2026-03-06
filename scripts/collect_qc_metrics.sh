@@ -124,6 +124,16 @@ collect_qc_metrics() {
                     awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
                         FNR > 1 { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 }' \
                         "${chunk_samples_file}" "${chunk_raw_file}" | sort -k1,1 > "${chunk_metrics_file}"
+                    local mapped_count
+                    mapped_count=$(wc -l < "${chunk_metrics_file}" | tr -d ' ')
+                    if [[ "${mapped_count}" -ne "${n_chunk_samples}" ]]; then
+                        echo "      [diag] ERROR: shard ${chunk_idx} sample/stat alignment mismatch (expected ${n_chunk_samples}, got ${mapped_count})" >&2
+                        exit 1
+                    fi
+                    if ! awk -F'\t' '$1=="" { exit 1 }' "${chunk_metrics_file}"; then
+                        echo "      [diag] ERROR: shard ${chunk_idx} produced empty sample IDs" >&2
+                        exit 1
+                    fi
                 else
                     : > "${chunk_metrics_file}"
                 fi
@@ -158,6 +168,10 @@ collect_qc_metrics() {
 
     if [[ -s "${qc_metrics_file}" ]]; then
         n_qm=$(wc -l < "${qc_metrics_file}" | tr -d ' ')
+        if [[ "${n_qm}" -ne "${n_samples_vcf}" ]]; then
+            echo "  [diag] ERROR: final sample QC row count mismatch (expected ${n_samples_vcf}, got ${n_qm})" >&2
+            return 1
+        fi
         echo "  [diag] QC metrics file: ${n_qm} samples"
         echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd, lrr_mean, lrr_median, baf_sd, het_rate):"
         head -3 "${qc_metrics_file}" | sed 's/^/    [diag]   /'
