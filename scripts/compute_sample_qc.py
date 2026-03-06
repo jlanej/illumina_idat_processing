@@ -210,6 +210,7 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
                 else:
                     k2 = n // 2
                     k1 = k2 - 1
+                    # Example: [1,3,5,7] -> k1=1,k2=2 -> median=(arr[1]+arr[2])/2 = 4
                     arr.partition((k1, k2))
                     median_val = float((arr[k1] + arr[k2]) / 2.0)
             else:
