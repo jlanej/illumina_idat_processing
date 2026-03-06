@@ -118,6 +118,16 @@ if [[ -n "${SAMPLE_NAME_MAP}" && ! -f "${SAMPLE_NAME_MAP}" ]]; then
     exit 1
 fi
 
+declare -A MAP_OLD_TO_NEW
+MAP_KEYS=()
+if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
+    while IFS=$'\t' read -r old_name new_name; do
+        [[ -z "${old_name}" || "${old_name}" == "#"* ]] && continue
+        MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
+        MAP_KEYS+=("${old_name}")
+    done < "${SAMPLE_NAME_MAP}"
+fi
+
 GTC_DIR="${OUTPUT_DIR}/gtc"
 VCF_DIR="${OUTPUT_DIR}/vcf"
 QC_DIR="${OUTPUT_DIR}/qc"
@@ -135,6 +145,21 @@ step_done() {
 mark_done() {
     local step_name="$1"
     date -u "+%Y-%m-%dT%H:%M:%SZ" > "${CHECKPOINT_DIR}/${step_name}.done"
+}
+
+sample_has_gtc() {
+    local sample_id="$1"
+    local gtc_file="${GTC_DIR}/${sample_id}.gtc"
+    if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+        return 0
+    fi
+    if [[ -n "${MAP_OLD_TO_NEW[${sample_id}]+x}" ]]; then
+        gtc_file="${GTC_DIR}/${MAP_OLD_TO_NEW[${sample_id}]}.gtc"
+        if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+            return 0
+        fi
+    fi
+    return 1
 }
 
 echo "============================================"
@@ -210,8 +235,7 @@ else
         red_path="${IDAT_DIR}/${red}"
 
         # Check if GTC output already exists for this sample
-        gtc_file="${GTC_DIR}/${sample_id}.gtc"
-        if [[ -f "${gtc_file}" && -s "${gtc_file}" ]]; then
+        if sample_has_gtc "${sample_id}"; then
             (( n_skipped++ )) || true
             continue
         fi
@@ -348,15 +372,6 @@ if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
         while IFS= read -r gtc_path; do
             GTC_SAMPLES+=("$(basename "${gtc_path}" .gtc)")
         done < <(find "${GTC_DIR}" -name '*.gtc' | sort)
-
-        # Read the name map into associative arrays
-        declare -A MAP_OLD_TO_NEW
-        MAP_KEYS=()
-        while IFS=$'\t' read -r old_name new_name; do
-            [[ -z "${old_name}" || "${old_name}" == "#"* ]] && continue
-            MAP_OLD_TO_NEW["${old_name}"]="${new_name}"
-            MAP_KEYS+=("${old_name}")
-        done < "${SAMPLE_NAME_MAP}"
 
         # Sanity check: count matches in both directions
         n_map_entries=${#MAP_KEYS[@]}
