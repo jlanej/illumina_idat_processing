@@ -74,6 +74,8 @@ if ! command -v plink2 &>/dev/null; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
+TMP_DIR="${OUTPUT_DIR}/tmp/compute_variant_qc"
+mkdir -p "${TMP_DIR}"
 
 PREFIX="${OUTPUT_DIR}/${PREFIX_NAME}"
 
@@ -85,7 +87,7 @@ VAR_QC_START=${SECONDS}
 
 # Filter out intensity-only probes before passing to plink2
 # These probes lack genotype calls and would inflate missingness
-FILTERED_VCF=$(mktemp --suffix=.bcf)
+FILTERED_VCF=$(mktemp -p "${TMP_DIR}" --suffix=.bcf filtered_variant_qc.XXXXXX)
 trap 'rm -f "${FILTERED_VCF}" "${FILTERED_VCF}.csi"' EXIT
 
 bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \

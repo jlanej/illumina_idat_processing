@@ -106,6 +106,8 @@ else
 fi
 
 mkdir -p "${OUTPUT_DIR}"
+TMP_DIR="${OUTPUT_DIR}/tmp/ancestry_pca"
+mkdir -p "${TMP_DIR}"
 
 PREFIX="${OUTPUT_DIR}/ancestry_pca"
 SUMMARY="${OUTPUT_DIR}/qc_summary.txt"
@@ -129,7 +131,7 @@ echo ""
 # Step 1: Filter intensity-only probes
 # -----------------------------------------------------------------
 echo "Step 1: Filtering intensity-only probes..."
-FILTERED_VCF=$(mktemp --suffix=.bcf)
+FILTERED_VCF=$(mktemp -p "${TMP_DIR}" --suffix=.bcf filtered_ancestry_pca.XXXXXX)
 trap 'rm -f "${FILTERED_VCF}" "${FILTERED_VCF}.csi"' EXIT
 
 bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \
