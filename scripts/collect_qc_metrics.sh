@@ -134,19 +134,20 @@ collect_qc_metrics() {
         done
 
         local pid rc
+        rc=0
         for pid in "${pids[@]}"; do
             if ! wait "${pid}"; then
                 rc=1
                 break
             fi
         done
-        if [[ "${rc:-0}" -ne 0 ]]; then
+        if [[ "${rc}" -ne 0 ]]; then
             echo "  [diag] ERROR: one or more sample QC shards failed" >&2
             return 1
         fi
 
         if [[ "${#chunk_files[@]}" -gt 0 ]]; then
-            cat "${chunk_files[@]}" | sort -k1,1 > "${qc_metrics_file}"
+            sort -m -k1,1 "${chunk_files[@]}" > "${qc_metrics_file}"
         else
             touch "${qc_metrics_file}"
         fi
