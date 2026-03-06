@@ -26,16 +26,20 @@ collect_qc_metrics() {
     qc_start=${SECONDS}
     echo "Extracting per-sample QC metrics..."
 
-    local gender_file qc_metrics_file samples_file
+    local gender_file qc_metrics_file samples_file shard_dir
     gender_file=$(mktemp)
     qc_metrics_file=$(mktemp)
     samples_file=$(mktemp)
-    trap 'rm -f "${gender_file}" "${qc_metrics_file}" "${samples_file}"' RETURN
+    shard_dir=$(mktemp -d)
+    trap 'rm -f "${gender_file}" "${qc_metrics_file}" "${samples_file}"; rm -rf "${shard_dir}"' RETURN
 
     # Get sample names from VCF
     bcftools query -l "${vcf_file}" > "${samples_file}"
     local n_samples_vcf
     n_samples_vcf=$(wc -l < "${samples_file}" | tr -d ' ')
+    if [[ "${n_samples_vcf}" -eq 0 ]]; then
+        echo "  [diag] WARNING: no samples found in VCF"
+    fi
 
     # -----------------------------------------------------------------
     # Diagnostic: Variant counts (use index when possible)
@@ -56,14 +60,14 @@ collect_qc_metrics() {
     echo "  [diag] ==================================="
 
     # -----------------------------------------------------------------
-    # Compute ALL per-sample metrics in a SINGLE BCF pass.
+    # Compute ALL per-sample metrics in sample shards.
     #
     # Extracts GT:LRR:BAF triples per sample per variant, piped to
     # compute_sample_qc.py which computes call_rate, lrr_sd, lrr_mean,
     # lrr_median, baf_sd, and het_rate simultaneously.
     #
-    # This replaces the previous two-pass approach (awk + Python median),
-    # halving BCF decompression and I/O cost.
+    # Sharding by sample groups enables parallel processing while preserving
+    # per-sample results.
     #
     # Restricted to autosomes only to avoid inflation from sex-chromosome
     # hemizygosity in males.
@@ -74,26 +78,81 @@ collect_qc_metrics() {
     local autosome_targets
     autosome_targets="$(printf 'chr%s,' {1..22}; printf '%s,' {1..22})"
     autosome_targets="${autosome_targets%,}"
-    echo "  Computing QC metrics per sample (${n_samples_vcf} samples, autosomes only, single pass)..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t "${autosome_targets}" --threads "${threads}" "${vcf_file}" 2>/dev/null | \
-    bcftools query -f '[\t%GT:%LRR:%BAF]\n' 2>/dev/null | \
-        python3 "${script_dir}/compute_sample_qc.py" \
-            --num-samples "${n_samples_vcf}" \
-            --output "${qc_metrics_file}.raw" 2>&1 | sed 's/^/  /'
-    metric_elapsed=$(( SECONDS - metric_start ))
-    echo "  [diag] Sample metric extraction completed in ${metric_elapsed}s"
-
-    # Map column indices back to sample names
-    if [[ -s "${qc_metrics_file}.raw" ]]; then
-        # Skip header from compute_sample_qc.py, map idx to sample names
-        awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
-             FNR > 1 { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 }' \
-            "${samples_file}" "${qc_metrics_file}.raw" | \
-            sort -k1,1 > "${qc_metrics_file}"
-        rm -f "${qc_metrics_file}.raw"
-    else
-        echo "  [diag] WARNING: QC metrics computation returned empty output"
+    local max_parallel
+    max_parallel="${threads}"
+    if ! [[ "${max_parallel}" =~ ^[0-9]+$ ]] || [[ "${max_parallel}" -lt 1 ]]; then
+        max_parallel=1
+    fi
+    if [[ "${max_parallel}" -gt "${n_samples_vcf}" ]]; then
+        max_parallel="${n_samples_vcf}"
+    fi
+    if [[ "${n_samples_vcf}" -eq 0 ]]; then
         touch "${qc_metrics_file}"
+        metric_elapsed=$(( SECONDS - metric_start ))
+        echo "  [diag] Sample metric extraction skipped (0 samples) in ${metric_elapsed}s"
+    else
+        local samples_per_chunk
+        samples_per_chunk=$(( (n_samples_vcf + max_parallel - 1) / max_parallel ))
+        echo "  Computing QC metrics per sample (${n_samples_vcf} samples, autosomes only, ${max_parallel} shard(s))..."
+
+        local chunk_idx start_line end_line chunk_samples_file chunk_raw_file chunk_metrics_file n_chunk_samples
+        local -a pids=()
+        local -a chunk_files=()
+        chunk_idx=0
+        while [[ $(( chunk_idx * samples_per_chunk )) -lt "${n_samples_vcf}" ]]; do
+            start_line=$(( chunk_idx * samples_per_chunk + 1 ))
+            end_line=$(( start_line + samples_per_chunk - 1 ))
+            if [[ "${end_line}" -gt "${n_samples_vcf}" ]]; then
+                end_line="${n_samples_vcf}"
+            fi
+
+            chunk_samples_file="${shard_dir}/samples_chunk_${chunk_idx}.txt"
+            chunk_raw_file="${shard_dir}/qc_chunk_${chunk_idx}.raw"
+            chunk_metrics_file="${shard_dir}/qc_chunk_${chunk_idx}.tsv"
+            sed -n "${start_line},${end_line}p" "${samples_file}" > "${chunk_samples_file}"
+            n_chunk_samples=$(( end_line - start_line + 1 ))
+            echo "    [diag] shard ${chunk_idx}: samples ${start_line}-${end_line} (${n_chunk_samples})"
+
+            (
+                bcftools view -e 'INFO/INTENSITY_ONLY=1' -t "${autosome_targets}" --threads 1 "${vcf_file}" 2>/dev/null | \
+                bcftools query --samples-file "${chunk_samples_file}" -f '[\t%GT:%LRR:%BAF]\n' 2>/dev/null | \
+                    python3 "${script_dir}/compute_sample_qc.py" \
+                        --num-samples "${n_chunk_samples}" \
+                        --output "${chunk_raw_file}" 2>&1 | sed 's/^/      /'
+
+                if [[ -s "${chunk_raw_file}" ]]; then
+                    awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
+                        FNR > 1 { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 }' \
+                        "${chunk_samples_file}" "${chunk_raw_file}" | sort -k1,1 > "${chunk_metrics_file}"
+                else
+                    : > "${chunk_metrics_file}"
+                fi
+            ) &
+            pids+=("$!")
+            chunk_files+=("${chunk_metrics_file}")
+            chunk_idx=$(( chunk_idx + 1 ))
+        done
+
+        local pid rc
+        for pid in "${pids[@]}"; do
+            if ! wait "${pid}"; then
+                rc=1
+                break
+            fi
+        done
+        if [[ "${rc:-0}" -ne 0 ]]; then
+            echo "  [diag] ERROR: one or more sample QC shards failed" >&2
+            return 1
+        fi
+
+        if [[ "${#chunk_files[@]}" -gt 0 ]]; then
+            cat "${chunk_files[@]}" | sort -k1,1 > "${qc_metrics_file}"
+        else
+            touch "${qc_metrics_file}"
+        fi
+
+        metric_elapsed=$(( SECONDS - metric_start ))
+        echo "  [diag] Sample metric extraction completed in ${metric_elapsed}s"
     fi
 
     if [[ -s "${qc_metrics_file}" ]]; then

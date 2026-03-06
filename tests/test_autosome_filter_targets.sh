@@ -39,6 +39,16 @@ else
     (( FAIL++ )) || true
 fi
 
+if grep -Eq -- "samples_per_chunk=\\$\\(\\( \\(n_samples_vcf \\+ max_parallel - 1\\) / max_parallel \\)\\)" "${COLLECT_QC}" && \
+   grep -Eq -- "bcftools query --samples-file \"\\$\\{chunk_samples_file\\}\"" "${COLLECT_QC}" && \
+   grep -Eq -- "for pid in \"\\$\\{pids\\[@\\]\\}\"; do" "${COLLECT_QC}"; then
+    echo "  PASS: sample QC is sharded by sample groups and collated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: sample-group sharding logic not found"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
