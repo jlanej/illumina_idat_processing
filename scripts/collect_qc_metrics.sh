@@ -71,8 +71,11 @@ collect_qc_metrics() {
     echo "  [diag] Starting autosomal GT/LRR/BAF stream extraction..."
     local metric_start metric_elapsed
     metric_start=${SECONDS}
+    local autosome_targets
+    autosome_targets="$(printf 'chr%s,' {1..22}; printf '%s,' {1..22})"
+    autosome_targets="${autosome_targets%,}"
     echo "  Computing QC metrics per sample (${n_samples_vcf} samples, autosomes only, single pass)..."
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT --threads "${threads}" "${vcf_file}" 2>/dev/null | \
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t "${autosome_targets}" --threads "${threads}" "${vcf_file}" 2>/dev/null | \
     bcftools query -f '[\t%GT:%LRR:%BAF]\n' 2>/dev/null | \
         python3 "${script_dir}/compute_sample_qc.py" \
             --num-samples "${n_samples_vcf}" \

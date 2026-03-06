@@ -17,7 +17,7 @@ This replaces the previous two-pass approach (awk for call_rate/lrr_sd + Python
 for lrr_median), halving the BCF decompression I/O.
 
 Usage (called by collect_qc_metrics.sh):
-    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t ^chrX,chrY,chrM,X,Y,MT file.bcf |
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' -t chr1,chr2,...,chr22,1,2,...,22 file.bcf |
     bcftools query -f '[\\t%GT:%LRR:%BAF]\\n' |
     python3 compute_sample_qc.py --num-samples N --output metrics.tsv
 
