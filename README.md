@@ -20,7 +20,12 @@ The pipeline runs in seven phases:
 
 6. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F) and ancestry PCs (default 20) for every sample.
 
-7. **QC Diagnostics & Report**: Automated QC diagnostics identify potential issues (deflated call rates, inflated LRR SD, build mismatches). A comprehensive **HTML pipeline report** is generated with publication-quality figures (QC dashboard, PCA scatter plots, sex check), summary statistics, and an auto-generated methods paragraph.
+7. **QC Diagnostics & Report**: Automated QC diagnostics identify potential issues (deflated call rates, inflated LRR SD, build mismatches). A comprehensive **interactive HTML pipeline report** is generated featuring:
+   - **Interactive Plotly.js charts** — Call Rate vs LRR SD scatter plot and metric distribution histograms with hover tooltips, zoom, and pan
+   - **GWAS QC best-practice thresholds** — Reference table citing Anderson et al. (2010), Marees et al. (2018), and Turner et al. (2011), covering sample call rate (≥ 0.97), LRR SD (≤ 0.35), BAF SD (≤ 0.15), heterozygosity rate (± 3 SD), variant missingness (< 0.02), HWE p-value (≥ 1e-6), MAF (≥ 0.01), and inbreeding F (|F| ≤ 0.05)
+   - **Per-sample QC table** — Searchable, sortable table with color-coded pass/fail/warning indicators for every sample
+   - **Visual overview** — KPI metric cards, QC pass-rate progress bar, stage comparison with color-coded improvement indicators
+   - Publication-quality static figures (QC dashboard, PCA scatter, sex check) and auto-generated methods paragraph
 
 ### Reference Genome
 

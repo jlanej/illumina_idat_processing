@@ -35,7 +35,7 @@ Options:
   --min-maf FLOAT     Minimum minor allele frequency (default: 0.05)
   --min-call-rate FLOAT Min sample call rate (default: 0.98)
   --ld-window INT     LD pruning window in kb (default: 1000)
-  --ld-step INT       LD pruning step size (default: 100)
+  --ld-step INT       LD pruning step size (must be 1 for kb windows; default: 1)
   --ld-r2 FLOAT       LD pruning r-squared threshold (default: 0.1)
   --threads INT       Number of threads (default: all available)
   --help              Show this help message
@@ -57,7 +57,7 @@ HWE_P="1e-6"
 MIN_MAF=0.05
 MIN_CALL_RATE=0.98
 LD_WINDOW=1000
-LD_STEP=100
+LD_STEP=1
 LD_R2=0.1
 THREADS=$(nproc 2>/dev/null || echo 1)
 
