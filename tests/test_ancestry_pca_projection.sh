@@ -225,6 +225,9 @@ import sys
 pcs_path, proj_path = sys.argv[1], sys.argv[2]
 n_pcs = 4
 tolerance = 1e-9
+# Treat PCs as degenerate only when their spread is effectively zero at
+# double-precision scale.
+degeneracy_threshold = 1e-8
 
 pcs = {}
 with open(pcs_path, "r", encoding="utf-8") as f:
@@ -266,7 +269,7 @@ if len(projected_only) < 2:
 
 for sid in projected_only:
     vals = proj[sid]
-    if max(vals) - min(vals) <= 1e-8:
+    if max(vals) - min(vals) <= degeneracy_threshold:
         raise SystemExit(
             f"Sample {sid} projected PCs appear degenerate (all nearly identical): {vals}"
         )
