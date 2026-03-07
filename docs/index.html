@@ -209,7 +209,7 @@ section h2 {
 
     <div class="header">
         <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
-        <p class="subtitle">Generated: 2026-03-07 01:01:22</p>
+        <p class="subtitle">Generated: 2026-03-07 01:11:05</p>
     </div>
 
     <nav class="nav-bar">
@@ -516,14 +516,14 @@ section h2 {
     <section id="methods">
         <h2>📝 Methods Text (for publications)</h2>
         <div class="methods-text">
-            <p>Genotyping intensity data (IDAT files) were processed using the Illumina IDAT Processing Pipeline. Raw IDAT files were converted to GTC format using the GenCall algorithm (bcftools +idat2gtc, not available), then to VCF format with B Allele Frequency (BAF) and Log R Ratio (LRR) intensities (bcftools +gtc2vcf). Probe coordinates were validated by realigning CSV manifest flank sequences against the CHM13 reference genome using BWA-MEM. </p><p>A two-stage genotyping approach was employed. Stage 1 genotype calls were generated using manufacturer-provided EGT cluster definitions. Per-sample QC metrics (call rate, LRR standard deviation, BAF standard deviation at heterozygous sites, and heterozygosity rate) were computed on autosomal variants. High-quality samples (call rate ≥ 0.97 and LRR SD ≤ 0.35; n = 24 of 30) were used to recompute study-specific genotype cluster definitions (EGT file) in Stage 2. All samples were then re-genotyped using the study-specific clusters, with additional BAF/LRR median adjustment (--adjust-clusters). </p><p>Variant-level QC included per-variant missingness, Hardy-Weinberg equilibrium tests (mid-p adjustment), allele frequency estimation, per-sample inbreeding coefficients (F statistic), and transition/transversion ratio computation (not). Ancestry principal components were computed using stringent variant QC (missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning (window = 1000 kb, step = 100, r² < 0.1), and flashpca2. After processing, the mean call rate was 0.9806 and the mean LRR SD was 0.1933.</p>
+            <p>Genotyping intensity data (IDAT files) were processed using the Illumina IDAT Processing Pipeline. Raw IDAT files were converted to GTC format using the GenCall algorithm (bcftools +idat2gtc), then to VCF format with B Allele Frequency (BAF) and Log R Ratio (LRR) intensities (bcftools +gtc2vcf). Probe coordinates were validated by realigning CSV manifest flank sequences against the CHM13 reference genome using BWA-MEM. </p><p>A two-stage genotyping approach was employed. Stage 1 genotype calls were generated using manufacturer-provided EGT cluster definitions. Per-sample QC metrics (call rate, LRR standard deviation, BAF standard deviation at heterozygous sites, and heterozygosity rate) were computed on autosomal variants. High-quality samples (call rate ≥ 0.97 and LRR SD ≤ 0.35; n = 24 of 30) were used to recompute study-specific genotype cluster definitions (EGT file) in Stage 2. All samples were then re-genotyped using the study-specific clusters, with additional BAF/LRR median adjustment (--adjust-clusters). </p><p>Variant-level QC included per-variant missingness, Hardy-Weinberg equilibrium tests (mid-p adjustment), allele frequency estimation, per-sample inbreeding coefficients (F statistic), and transition/transversion ratio computation (plink2). Ancestry principal components were computed using stringent variant QC (missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning (window = 1000 kb, step = 1, r² < 0.1), and flashpca2. After processing, the mean call rate was 0.9806 and the mean LRR SD was 0.1933.</p>
         </div>
     </section>
 
     <section id="tools">
         <h2>🛠️ Tool Versions</h2>
         <div class="card">
-            <ul class="tools-list"><li><code>bcftools</code>: not available</li><li><code>plink2</code>: not available</li><li><code>bwa</code>: not available</li><li><code>flashpca</code>: not available</li></ul>
+            <ul class="tools-list"><li><code>bcftools</code>: not installed</li><li><code>plink2</code>: not installed</li><li><code>bwa</code>: not installed</li><li><code>flashpca</code>: not installed</li></ul>
         </div>
     </section>
 

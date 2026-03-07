@@ -300,8 +300,7 @@ def main():
     print(f"Generating mock pipeline output in: {args.output_dir}")
     print(f"  Samples: {n}")
 
-    # Stage 1 QC (slightly worse metrics)
-    rng_bak = random.getstate()
+    # Stage 1 QC (same structure, deterministic from fixed seed)
     s1 = generate_sample_qc(args.output_dir, 'stage1', n)
     print(f"  Stage 1 sample QC: {s1}")
 

@@ -68,7 +68,7 @@ def get_tool_versions():
             output = (proc.stdout + proc.stderr).strip().split('\n')[0]
             versions[tool] = output
         except Exception:
-            versions[tool] = 'not available'
+            versions[tool] = ''
     return versions
 
 
@@ -404,15 +404,17 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
     sd = stats.get('lrr_sd_mean', 0)
     n_pass = stats.get('n_pass', 0)
 
-    bcftools_ver = tool_versions.get('bcftools', 'bcftools')
-    plink2_ver = tool_versions.get('plink2', 'plink2')
+    bcftools_ver = tool_versions.get('bcftools', '')
+    plink2_ver = tool_versions.get('plink2', '')
+
+    # Format tool citations cleanly
+    bcf_cite = f"bcftools {bcftools_ver}" if bcftools_ver else 'bcftools'
+    plink_cite = f"plink2 {plink2_ver}" if plink2_ver else 'plink2'
 
     text = (
         f"Genotyping intensity data (IDAT files) were processed using the "
         f"Illumina IDAT Processing Pipeline. Raw IDAT files were converted to "
-        f"GTC format using the GenCall algorithm (bcftools +idat2gtc, "
-        f"{bcftools_ver.split()[0] if bcftools_ver else 'bcftools'} "
-        f"{bcftools_ver.split()[1] if len(bcftools_ver.split()) > 1 else ''}), "
+        f"GTC format using the GenCall algorithm (bcftools +idat2gtc), "
         f"then to VCF format with B Allele Frequency (BAF) and Log R Ratio (LRR) "
         f"intensities (bcftools +gtc2vcf). "
         f"Probe coordinates were validated by realigning CSV manifest flank "
@@ -431,10 +433,10 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"Variant-level QC included per-variant missingness, Hardy-Weinberg "
         f"equilibrium tests (mid-p adjustment), allele frequency estimation, "
         f"per-sample inbreeding coefficients (F statistic), and transition/"
-        f"transversion ratio computation ({plink2_ver.split()[0] if plink2_ver else 'plink2'}). "
+        f"transversion ratio computation ({plink_cite}). "
         f"Ancestry principal components were computed using stringent variant QC "
         f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning "
-        f"(window = 1000 kb, step = 100, r² < 0.1), and flashpca2. "
+        f"(window = 1000 kb, step = 1, r² < 0.1), and flashpca2. "
         f"After processing, the mean call rate was {cr:.4f} and the mean "
         f"LRR SD was {sd:.4f}."
     )
@@ -1102,7 +1104,8 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     # Tool versions
     tools_html = '<ul class="tools-list">'
     for tool, ver in tool_versions.items():
-        tools_html += f'<li><code>{tool}</code>: {ver}</li>'
+        display_ver = ver if ver else 'not installed'
+        tools_html += f'<li><code>{tool}</code>: {display_ver}</li>'
     tools_html += '</ul>'
 
     # Pass rate
