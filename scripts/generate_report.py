@@ -29,6 +29,7 @@ import io
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import statistics
@@ -591,7 +592,47 @@ def generate_html_report(output_dir):
     with open(methods_path, 'w') as f:
         f.write(methods_text)
 
+    _consolidate_summary_outputs(output_dir)
+
     return report_path
+
+
+def _consolidate_summary_outputs(output_dir):
+    """Copy top-level report artifacts into a consolidated summary directory."""
+    summary_dir = os.path.join(output_dir, 'summary')
+    os.makedirs(summary_dir, exist_ok=True)
+
+    # Top-level outputs commonly used for quick review.
+    for filename in [
+        'pipeline_report.html',
+        'summary_statistics.tsv',
+        'methods_text.txt',
+        'compiled_sample_sheet.tsv',
+        'qc_diagnostic_report.txt',
+        'qc_dashboard.png',
+        'pca_scatter.png',
+    ]:
+        src = os.path.join(output_dir, filename)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(summary_dir, filename))
+
+    # Representative nested outputs frequently referenced in reports.
+    for relpath, outname in [
+        (os.path.join('ancestry_pca', 'pca_projections.tsv'), 'pca_projections.tsv'),
+        (os.path.join('ancestry_pca', 'pca_eigenvalues.txt'), 'pca_eigenvalues.txt'),
+        (os.path.join('ancestry_pca', 'qc_summary.txt'), 'ancestry_pca_qc_summary.txt'),
+        (os.path.join('ancestry_pca', 'pca_qc_samples.txt'), 'ancestry_pca_qc_samples.txt'),
+        (os.path.join('sex_check', 'sex_check_chrXY_lrr.png'), 'sex_check_chrXY_lrr.png'),
+        (os.path.join('realigned_manifests', 'realign_summary.txt'), 'realign_summary.txt'),
+        (os.path.join('stage2', 'qc', 'comparison', 'qc_comparison_report.txt'), 'qc_comparison_report.txt'),
+        (os.path.join('stage2', 'qc', 'comparison', 'qc_comparison_samples.png'), 'qc_comparison_samples.png'),
+        (os.path.join('stage2', 'qc', 'comparison', 'qc_comparison_variants.png'), 'qc_comparison_variants.png'),
+        (os.path.join('stage2', 'qc', 'variant_qc', 'variant_qc_summary.txt'), 'variant_qc_summary_stage2.txt'),
+        (os.path.join('stage1', 'qc', 'variant_qc', 'variant_qc_summary.txt'), 'variant_qc_summary_stage1.txt'),
+    ]:
+        src = os.path.join(output_dir, relpath)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(summary_dir, outname))
 
 
 def _write_summary_tsv(stats, filepath):
@@ -1504,6 +1545,7 @@ def main():
         print(f"Pipeline report: {report_path}")
         print(f"Summary stats:   {os.path.join(args.output_dir, 'summary_statistics.tsv')}")
         print(f"Methods text:    {os.path.join(args.output_dir, 'methods_text.txt')}")
+        print(f"Summary dir:     {os.path.join(args.output_dir, 'summary')}")
     else:
         print("Error: Could not generate report.", file=sys.stderr)
         sys.exit(1)

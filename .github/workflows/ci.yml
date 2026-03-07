@@ -14,8 +14,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Install Python test dependencies
+        run: python3 -m pip install --upgrade pip numpy
 
       - name: Shell syntax and lint checks
         run: bash tests/test_shell_syntax.sh
@@ -23,5 +31,13 @@ jobs:
       - name: Script help output tests
         run: bash tests/test_scripts_help.sh
 
-      - name: Validate resource URLs
-        run: bash tests/test_resource_links.sh
+      - name: Run integration and regression test suite
+        run: |
+          bash tests/test_resource_links.sh
+          bash tests/test_generate_report.sh
+          bash tests/test_compute_sample_qc.sh
+          bash tests/test_autosome_filter_targets.sh
+          bash tests/test_temp_dir_scoping.sh
+          bash tests/test_sample_name_map.sh
+          bash tests/test_realign_manifest.sh
+          bash tests/test_ancestry_pca_projection.sh
