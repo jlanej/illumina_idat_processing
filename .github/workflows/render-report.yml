@@ -1,0 +1,48 @@
+name: Render Demo Report
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/generate_report.py'
+      - 'tests/generate_mock_data.py'
+      - '.github/workflows/render-report.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate mock data
+        run: python3 tests/generate_mock_data.py --output-dir /tmp/mock_output
+
+      - name: Generate HTML report
+        run: python3 scripts/generate_report.py --output-dir /tmp/mock_output
+
+      - name: Copy report to docs/
+        run: cp /tmp/mock_output/pipeline_report.html docs/index.html
+
+      - name: Check for changes
+        id: diff
+        run: |
+          git diff --quiet docs/index.html && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git commit -m "Auto-render demo report from mock data"
+          git push

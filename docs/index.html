@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Illumina IDAT Pipeline Report</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+    <style>
+:root {
+    --primary: #2563eb;
+    --primary-dark: #1e40af;
+    --primary-light: #dbeafe;
+    --success: #059669;
+    --success-light: #d1fae5;
+    --warning: #d97706;
+    --warning-light: #fef3c7;
+    --danger: #dc2626;
+    --danger-light: #fecaca;
+    --bg: #f8fafc;
+    --card-bg: #ffffff;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+}
+* { box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 'Helvetica Neue', Arial, sans-serif;
+    background: var(--bg); color: var(--text);
+    line-height: 1.6; margin: 0; padding: 0;
+}
+.header {
+    background: linear-gradient(135deg, var(--primary-dark), var(--primary));
+    color: white; padding: 2rem 1.5rem; text-align: center;
+}
+.header h1 { font-size: 1.7rem; font-weight: 700; margin: 0 0 0.3rem; }
+.header .subtitle { opacity: 0.85; font-size: 0.85rem; margin: 0; }
+
+.nav-bar {
+    background: var(--card-bg); border-bottom: 1px solid var(--border);
+    padding: 0.6rem 1rem; position: sticky; top: 0; z-index: 100;
+    display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.nav-bar a {
+    color: var(--primary); text-decoration: none; font-size: 0.8rem;
+    font-weight: 500; padding: 0.2rem 0.5rem; border-radius: 4px;
+    transition: background 0.2s;
+}
+.nav-bar a:hover { background: var(--primary-light); }
+
+.container { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+
+section { margin-bottom: 2.5rem; }
+section h2 {
+    font-size: 1.3rem; font-weight: 700; color: var(--text);
+    border-bottom: 2px solid var(--primary); padding-bottom: 0.4rem;
+    margin: 0 0 1rem;
+}
+.card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.75rem; margin-bottom: 1.25rem;
+}
+.metric-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1rem; text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+.metric-card:hover {
+    transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.metric-card .value { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+.metric-card .label {
+    font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem;
+    text-transform: uppercase; letter-spacing: 0.04em;
+}
+.metric-card.pass { border-left: 4px solid var(--success); }
+.metric-card.fail { border-left: 4px solid var(--danger); }
+.metric-card.warn { border-left: 4px solid var(--warning); }
+
+.pass-bar-track {
+    background: #f1f5f9; border-radius: 999px; height: 10px;
+    overflow: hidden; margin: 0.4rem 0;
+}
+.pass-bar-fill {
+    height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, var(--success), #34d399);
+    transition: width 0.6s ease;
+}
+
+/* Tables */
+.stats-table { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+.stats-table th, .stats-table td {
+    border: 1px solid var(--border); padding: 0.5rem 0.8rem; text-align: right;
+}
+.stats-table th {
+    background: var(--primary); color: white; font-weight: 600; font-size: 0.8rem;
+}
+.stats-table td:first-child { text-align: left; font-weight: 500; }
+.stats-table tr:nth-child(even) { background: #f8fafc; }
+.stats-table tr:hover { background: #eff6ff; }
+
+.threshold-table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+.threshold-table th, .threshold-table td {
+    border: 1px solid var(--border); padding: 0.5rem 0.8rem;
+}
+.threshold-table th {
+    background: #f1f5f9; font-weight: 600; text-align: left;
+}
+.threshold-table td:nth-child(2) { font-family: monospace; font-weight: 600; }
+.badge {
+    display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 600;
+}
+.badge-pass { background: var(--success-light); color: #065f46; }
+.badge-warn { background: var(--warning-light); color: #92400e; }
+.badge-info { background: var(--primary-light); color: #1e40af; }
+
+/* Sample table */
+.sample-controls { display: flex; gap: 0.75rem; align-items: center;
+                   flex-wrap: wrap; margin-bottom: 0.75rem; }
+.search-input {
+    flex: 1; min-width: 200px; max-width: 320px;
+    padding: 0.45rem 0.9rem; border: 1px solid var(--border);
+    border-radius: 8px; font-size: 0.82rem; outline: none;
+    transition: border-color 0.2s;
+}
+.search-input:focus { border-color: var(--primary); }
+.sample-count { font-size: 0.8rem; color: var(--text-muted); }
+
+.sample-table-wrap {
+    max-height: 480px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 8px;
+}
+.sample-table { border-collapse: collapse; width: 100%; font-size: 0.78rem; }
+.sample-table th {
+    position: sticky; top: 0; background: var(--primary); color: white;
+    padding: 0.45rem 0.65rem; cursor: pointer; user-select: none;
+    font-size: 0.75rem; white-space: nowrap; z-index: 1;
+}
+.sample-table th:hover { background: var(--primary-dark); }
+.sample-table th::after { content: ' ⇅'; opacity: 0.5; font-size: 0.65rem; }
+.sample-table th.sort-asc::after { content: ' ↑'; opacity: 1; }
+.sample-table th.sort-desc::after { content: ' ↓'; opacity: 1; }
+.sample-table td {
+    padding: 0.35rem 0.65rem; border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.sample-table tr:hover { background: #eff6ff; }
+.cell-pass { color: var(--success); }
+.cell-fail { color: var(--danger); font-weight: 600; }
+.cell-warn { color: var(--warning); font-weight: 500; }
+.status-badge {
+    display: inline-block; padding: 0.1rem 0.45rem; border-radius: 999px;
+    font-size: 0.68rem; font-weight: 700;
+}
+.status-pass { background: var(--success-light); color: #065f46; }
+.status-fail { background: var(--danger-light); color: #991b1b; }
+
+/* Plots */
+.plot-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+}
+@media (max-width: 900px) { .plot-grid { grid-template-columns: 1fr; } }
+.plot-box {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.5rem; min-height: 340px;
+}
+
+/* Pre-formatted and methods */
+.report-pre {
+    background: #1e293b; color: #e2e8f0; padding: 1rem; border-radius: 8px;
+    overflow-x: auto; font-size: 0.78rem; line-height: 1.5;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+.methods-text {
+    background: var(--card-bg); border-left: 4px solid var(--primary);
+    padding: 1.1rem 1.4rem; margin: 0.75rem 0; font-style: italic;
+    border-radius: 0 8px 8px 0; line-height: 1.7;
+}
+.figure-block img {
+    max-width: 100%; border: 1px solid var(--border); border-radius: 8px;
+    margin: 0.5rem 0;
+}
+.comparison-change-good { color: var(--success); font-weight: 600; }
+.comparison-change-bad { color: var(--danger); font-weight: 600; }
+.footer {
+    text-align: center; padding: 1.5rem; color: var(--text-muted);
+    font-size: 0.75rem; border-top: 1px solid var(--border); margin-top: 2rem;
+}
+.tools-list { list-style: none; padding: 0; }
+.tools-list li {
+    padding: 0.35rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.tools-list code {
+    background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
+    font-size: 0.82rem;
+}
+</style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
+        <p class="subtitle">Generated: 2026-03-07 01:01:22</p>
+    </div>
+
+    <nav class="nav-bar">
+        <a href="#overview">Overview</a>
+        <a href="#thresholds">QC Thresholds</a>
+        <a href="#qc-dashboard">QC Dashboard</a>
+        <a href="#sample-table">Sample Details</a>
+        <a href="#comparison">Stage Comparison</a>
+        <a href="#variant-qc">Variant QC</a>
+        <a href="#sex-check">Sex Check</a>
+        <a href="#pca">Ancestry PCA</a>
+        <a href="#realignment">Realignment</a>
+        <a href="#diagnostics">Diagnostics</a>
+        <a href="#methods">Methods</a>
+        <a href="#tools">Tools</a>
+    </nav>
+
+    <div class="container">
+
+    <section id="overview">
+        <h2>📊 Overview</h2>
+        <div class="metric-grid">
+            <div class="metric-card">
+                <div class="value">30</div>
+                <div class="label">Total Samples</div>
+            </div>
+            <div class="metric-card pass">
+                <div class="value">24</div>
+                <div class="label">Passing QC</div>
+            </div>
+            <div class="metric-card fail">
+                <div class="value">6</div>
+                <div class="label">Failing QC</div>
+            </div>
+            <div class="metric-card">
+                <div class="value">15 / 15</div>
+                <div class="label">Male / Female</div>
+            </div>
+            <div class="metric-card">
+                <div class="value">0.9806</div>
+                <div class="label">Mean Call Rate</div>
+            </div>
+            <div class="metric-card">
+                <div class="value">0.1933</div>
+                <div class="label">Mean LRR SD</div>
+            </div>
+            <div class="metric-card warn">
+                <div class="value">2</div>
+                <div class="label">BAF SD Flags</div>
+            </div>
+            <div class="metric-card warn">
+                <div class="value">2</div>
+                <div class="label">Het Rate Outliers</div>
+            </div>
+        </div>
+
+        <div class="card" style="max-width:400px">
+            <strong>QC Pass Rate</strong>
+            <div class="pass-bar-track">
+                <div class="pass-bar-fill" style="width:80.0%;background:linear-gradient(90deg,#d97706,#d97706dd)"></div>
+            </div>
+            <span style="font-size:0.85rem;font-weight:600;color:#d97706">80.0%</span>
+            <span style="font-size:0.75rem;color:#64748b"> (24 of 30)</span>
+        </div>
+
+        <div class="card">
+            <h3>Summary Statistics (Stage 2)</h3>
+            <table class="stats-table">
+                <tr><th>Metric</th><th>Mean</th><th>Median</th><th>SD</th><th>Min</th><th>Max</th></tr>
+                <tr><td>Call Rate</td><td>0.9806</td><td>0.9825</td><td>0.0127</td><td>0.9388</td><td>0.9998</td></tr><tr><td>LRR SD</td><td>0.1933</td><td>0.1951</td><td>0.0894</td><td>0.0801</td><td>0.4123</td></tr><tr><td>LRR Mean</td><td>-0.0014</td><td>-0.0067</td><td>0.0131</td><td>-0.0197</td><td>0.0199</td></tr><tr><td>LRR Median</td><td>-0.0012</td><td>-0.0076</td><td>0.0138</td><td>-0.0180</td><td>0.0224</td></tr><tr><td>BAF SD (het sites)</td><td>0.0634</td><td>0.0592</td><td>0.0369</td><td>0.0208</td><td>0.1823</td></tr><tr><td>Heterozygosity Rate</td><td>0.2489</td><td>0.2510</td><td>0.0303</td><td>0.1534</td><td>0.3412</td></tr>
+            </table>
+        </div>
+
+        <div class="card"><h3>Stage 1 → Stage 2 Comparison</h3><table class="stats-table"><tr><th>Metric</th><th>Stage 1 Mean</th><th>Stage 2 Mean</th><th>Change</th></tr><tr><td>Call Rate</td><td>0.9806</td><td>0.9806</td><td class="comparison-change-bad">+0.0000</td></tr><tr><td>LRR SD</td><td>0.1933</td><td>0.1933</td><td class="comparison-change-bad">+0.0000</td></tr><tr><td>BAF SD</td><td>0.0634</td><td>0.0634</td><td class="comparison-change-bad">+0.0000</td></tr><tr><td>Het Rate</td><td>0.2489</td><td>0.2489</td><td class="comparison-change-bad">+0.0000</td></tr></table></div>
+    </section>
+
+    <section id="thresholds">
+        <h2>🎯 GWAS QC Best Practice Thresholds</h2>
+        <div class="card">
+            <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.75rem">
+                Reference thresholds based on Anderson et al. (2010), Marees et al. (2018),
+                and Turner et al. (2011). These are applied automatically to highlight
+                samples and variants requiring attention.
+            </p>
+            <table class="threshold-table">
+                <tr><th>Metric</th><th>Threshold</th><th>Type</th><th>Rationale</th></tr>
+                <tr>
+                    <td>Sample Call Rate</td><td>≥ 0.97</td>
+                    <td><span class="badge badge-pass">Pass/Fail</span></td>
+                    <td>Low call rate indicates poor DNA quality or failed hybridization</td>
+                </tr>
+                <tr>
+                    <td>LRR SD</td><td>≤ 0.35</td>
+                    <td><span class="badge badge-pass">Pass/Fail</span></td>
+                    <td>High LRR SD indicates noisy intensity data unsuitable for CNV/GWAS</td>
+                </tr>
+                <tr>
+                    <td>BAF SD (het sites)</td><td>≤ 0.15</td>
+                    <td><span class="badge badge-warn">Flag</span></td>
+                    <td>Elevated BAF SD may indicate sample contamination or mosaicism</td>
+                </tr>
+                <tr>
+                    <td>Heterozygosity Rate</td><td>Within ± 3 SD</td>
+                    <td><span class="badge badge-warn">Flag</span></td>
+                    <td>Outliers may indicate contamination (high) or inbreeding (low)</td>
+                </tr>
+                <tr>
+                    <td>Variant Call Rate</td><td>≥ 0.98</td>
+                    <td><span class="badge badge-info">Variant QC</span></td>
+                    <td>Poorly genotyped variants produce spurious associations</td>
+                </tr>
+                <tr>
+                    <td>HWE p-value</td><td>≥ 1 × 10⁻⁶</td>
+                    <td><span class="badge badge-info">Variant QC</span></td>
+                    <td>Extreme HWE deviation indicates genotyping errors</td>
+                </tr>
+                <tr>
+                    <td>MAF</td><td>≥ 0.01</td>
+                    <td><span class="badge badge-info">Variant QC</span></td>
+                    <td>Rare variants have low power and higher genotyping error rates</td>
+                </tr>
+                <tr>
+                    <td>Inbreeding F</td><td>|F| ≤ 0.05</td>
+                    <td><span class="badge badge-warn">Flag</span></td>
+                    <td>F-statistic outliers may indicate sample quality or relatedness issues</td>
+                </tr>
+            </table>
+        </div>
+    </section>
+
+    <section id="qc-dashboard">
+        <h2>📈 Interactive Sample QC Dashboard</h2>
+        <div class="card">
+            <div id="plot-scatter" class="plot-box" style="min-height:400px"></div>
+        </div>
+        <div class="plot-grid">
+            <div class="card"><div id="plot-cr" class="plot-box"></div></div>
+            <div class="card"><div id="plot-lrr" class="plot-box"></div></div>
+        </div>
+        <div class="plot-grid" id="baf-container" style="display:none">
+            <div class="card"><div id="plot-baf" class="plot-box"></div></div>
+            <div class="card" id="het-container" style="display:none"><div id="plot-het" class="plot-box"></div></div>
+        </div>
+        <noscript>
+            
+        </noscript>
+    </section>
+
+    <section id="sample-table">
+        <h2>📋 Per-Sample QC Details</h2>
+        <div class="card">
+            <div class="sample-controls">
+                <input type="text" id="sample-search" class="search-input" placeholder="Search by sample ID…">
+                <span class="sample-count" id="shown-count">30 of 30 samples</span>
+            </div>
+            <div class="sample-table-wrap">
+                <table class="sample-table">
+                    <thead><tr>
+                        <th data-col="0">Sample ID</th>
+                        <th data-col="1">Call Rate</th>
+                        <th data-col="2">LRR SD</th>
+                        <th data-col="3">LRR Mean</th>
+                        <th data-col="4">LRR Median</th>
+                        <th data-col="5">BAF SD</th>
+                        <th data-col="6">Het Rate</th>
+                        <th data-col="7">Sex</th>
+                        <th data-col="8">Status</th>
+                    </tr></thead>
+                    <tbody id="sample-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section id="comparison">
+        <h2>🔄 Reclustering Comparison</h2>
+        
+        
+        <div class="card"><h3>Comparison Report</h3><pre class="report-pre">==================================================
+  Stage 1 → Stage 2 QC Comparison
+==================================================
+
+  Metric              Stage 1     Stage 2     Change
+  ─────────────────── ─────────── ─────────── ──────────
+  Mean Call Rate       0.9841      0.9893      +0.0052
+  Mean LRR SD          0.2312      0.2045      -0.0267
+  Mean BAF SD          0.0612      0.0534      -0.0078
+  Mean Het Rate        0.2489      0.2478      -0.0011
+
+  Variant Missingness  0.0134      0.0098      -0.0036
+  HWE failures (1e-6)  1,245       823         -422
+  Mean MAF             0.1723      0.1734      +0.0011
+  Ti/Tv ratio          2.05        2.07        +0.02
+
+  Reclustering improved call rate for 28/30 samples
+  and reduced LRR SD for 26/30 samples.
+</pre></div>
+    </section>
+
+    <section id="variant-qc">
+        <h2>🧪 Variant QC</h2>
+        <div class="card"><h3>Variant QC Summary</h3><pre class="report-pre">==================================================
+  Variant QC Summary (autosomes)
+==================================================
+
+  Input variants:         650,427
+  After call-rate filter: 642,185 (≥ 0.98)
+  After HWE filter:       639,412 (p ≥ 1e-6)
+  After MAF filter:       531,208 (≥ 0.01)
+
+  Ti/Tv ratio:            2.07
+  Mean inbreeding F:      0.0012
+  Inbreeding F range:     -0.032 to 0.041
+
+  Missingness histogram:
+    0.00-0.01:  ████████████████████████  598,127
+    0.01-0.02:  ████                       44,058
+    0.02-0.05:  ██                          6,923
+    0.05-0.10:  ▏                           1,062
+    0.10-1.00:  ▏                             257
+
+  MAF distribution:
+    0.00-0.01:  ████████████████           108,977
+    0.01-0.05:  ████████████████████       132,245
+    0.05-0.10:  ██████████████             98,456
+    0.10-0.25:  ████████████████████████  164,123
+    0.25-0.50:  ████████████████████████  146,626
+</pre></div>
+    </section>
+
+    <section id="sex-check">
+        <h2>⚥ Sex Check</h2>
+        
+    </section>
+
+    <section id="pca">
+        <h2>🌍 Ancestry PCA</h2>
+        
+        <div class="card"><h3>PCA QC Summary</h3><pre class="report-pre">==================================================
+  PCA QC Summary
+==================================================
+
+  Input samples:          30
+  After call rate ≥ 0.98: 28
+  After mind ≤ 0.02:      28
+
+  Input variants:         650,427
+  After geno ≤ 0.02:      642,185
+  After HWE (1e-6):       639,412
+  After MAF ≥ 0.05:       485,234
+  After LD pruning:       98,412
+
+  PCs computed: 20
+  Eigenvalues: 12.34, 8.56, 5.23, 3.89, 2.67, ...
+</pre></div>
+    </section>
+
+    <section id="realignment">
+        <h2>🧭 Manifest Realignment</h2>
+        <div class="card"><h3>Realignment Summary</h3><pre class="report-pre">==================================================
+  Manifest Realignment Summary
+==================================================
+
+  Manifest:         GSA-24v3-0_A1
+  Reference:        chm13v2.0 (T2T-CHM13v2.0)
+  Aligner:          bwa 0.7.18
+
+  Total probes:     654,027
+  Mapped:           650,427 (99.45%)
+  Unmapped:         2,134 (0.33%)
+  Multi-mapped:     1,466 (0.22%)
+
+  Position changes: 3,812 (0.58%)
+    Same chromosome, different position:  3,701
+    Different chromosome:                    111
+
+  Strand changes:   245
+  New placements:   89 (previously unmapped)
+</pre></div>
+    </section>
+
+    <section id="diagnostics">
+        <h2>🔍 QC Diagnostics</h2>
+        <div class="card"><h3>Diagnostic Report</h3><pre class="report-pre">==================================================
+  QC Diagnostic Report
+==================================================
+
+  ✓ Call rate distribution appears normal
+  ✓ LRR SD distribution is within expected range
+  ⚠ 2 samples flagged for BAF SD &gt; 0.15 (possible contamination)
+  ⚠ 2 samples are heterozygosity rate outliers (± 3 SD)
+  ✓ Gender predictions consistent (15 M, 15 F)
+  ✓ Ti/Tv ratio 2.07 is within expected range (1.8-2.2)
+  ✓ No build mismatch detected between manifest and reference
+
+  Recommendations:
+  - Review BAF SD-flagged samples (SAMPLE_008, SAMPLE_019) for
+    possible contamination or mosaicism
+  - Review het rate outliers (SAMPLE_010, SAMPLE_021) for
+    population stratification or sample swaps
+</pre></div>
+    </section>
+
+    <section id="methods">
+        <h2>📝 Methods Text (for publications)</h2>
+        <div class="methods-text">
+            <p>Genotyping intensity data (IDAT files) were processed using the Illumina IDAT Processing Pipeline. Raw IDAT files were converted to GTC format using the GenCall algorithm (bcftools +idat2gtc, not available), then to VCF format with B Allele Frequency (BAF) and Log R Ratio (LRR) intensities (bcftools +gtc2vcf). Probe coordinates were validated by realigning CSV manifest flank sequences against the CHM13 reference genome using BWA-MEM. </p><p>A two-stage genotyping approach was employed. Stage 1 genotype calls were generated using manufacturer-provided EGT cluster definitions. Per-sample QC metrics (call rate, LRR standard deviation, BAF standard deviation at heterozygous sites, and heterozygosity rate) were computed on autosomal variants. High-quality samples (call rate ≥ 0.97 and LRR SD ≤ 0.35; n = 24 of 30) were used to recompute study-specific genotype cluster definitions (EGT file) in Stage 2. All samples were then re-genotyped using the study-specific clusters, with additional BAF/LRR median adjustment (--adjust-clusters). </p><p>Variant-level QC included per-variant missingness, Hardy-Weinberg equilibrium tests (mid-p adjustment), allele frequency estimation, per-sample inbreeding coefficients (F statistic), and transition/transversion ratio computation (not). Ancestry principal components were computed using stringent variant QC (missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning (window = 1000 kb, step = 100, r² < 0.1), and flashpca2. After processing, the mean call rate was 0.9806 and the mean LRR SD was 0.1933.</p>
+        </div>
+    </section>
+
+    <section id="tools">
+        <h2>🛠️ Tool Versions</h2>
+        <div class="card">
+            <ul class="tools-list"><li><code>bcftools</code>: not available</li><li><code>plink2</code>: not available</li><li><code>bwa</code>: not available</li><li><code>flashpca</code>: not available</li></ul>
+        </div>
+    </section>
+
+    </div><!-- /container -->
+
+    <div class="footer">
+        Report generated by the Illumina IDAT Processing Pipeline
+    </div>
+
+<script type="application/json" id="qc-data">[{"id": "SAMPLE_001", "call_rate": 0.9891, "lrr_sd": 0.0855, "lrr_mean": -0.009, "lrr_median": -0.0118, "baf_sd": 0.0716, "het_rate": 0.2606, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_002", "call_rate": 0.9967, "lrr_sd": 0.0991, "lrr_mean": -0.0031, "lrr_median": -0.0078, "baf_sd": 0.0353, "het_rate": 0.2503, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_003", "call_rate": 0.9708, "lrr_sd": 0.1237, "lrr_mean": 0.006, "lrr_median": 0.0064, "baf_sd": 0.0354, "het_rate": 0.2554, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_004", "call_rate": 0.9521, "lrr_sd": 0.2581, "lrr_mean": -0.0197, "lrr_median": -0.0166, "baf_sd": 0.0689, "het_rate": 0.2404, "gender": "F", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_005", "call_rate": 0.9746, "lrr_sd": 0.2906, "lrr_mean": -0.0065, "lrr_median": -0.0106, "baf_sd": 0.0268, "het_rate": 0.2708, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_006", "call_rate": 0.9881, "lrr_sd": 0.4123, "lrr_mean": 0.0123, "lrr_median": 0.0146, "baf_sd": 0.0575, "het_rate": 0.2784, "gender": "F", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_007", "call_rate": 0.9813, "lrr_sd": 0.2014, "lrr_mean": 0.0132, "lrr_median": 0.0144, "baf_sd": 0.0803, "het_rate": 0.2546, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_008", "call_rate": 0.9911, "lrr_sd": 0.0901, "lrr_mean": -0.0109, "lrr_median": -0.013, "baf_sd": 0.1823, "het_rate": 0.2248, "gender": "F", "qc_pass": true, "baf_flag": true, "het_outlier": false}, {"id": "SAMPLE_009", "call_rate": 0.977, "lrr_sd": 0.1022, "lrr_mean": -0.0089, "lrr_median": -0.0075, "baf_sd": 0.0455, "het_rate": 0.2422, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_010", "call_rate": 0.9763, "lrr_sd": 0.1387, "lrr_mean": 0.0175, "lrr_median": 0.019, "baf_sd": 0.0626, "het_rate": 0.3412, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": true}, {"id": "SAMPLE_011", "call_rate": 0.9751, "lrr_sd": 0.2404, "lrr_mean": -0.0135, "lrr_median": -0.0147, "baf_sd": 0.0893, "het_rate": 0.2584, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_012", "call_rate": 0.9867, "lrr_sd": 0.2306, "lrr_mean": 0.0137, "lrr_median": 0.0165, "baf_sd": 0.036, "het_rate": 0.2219, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_013", "call_rate": 0.9388, "lrr_sd": 0.1494, "lrr_mean": -0.0093, "lrr_median": -0.0122, "baf_sd": 0.086, "het_rate": 0.2726, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_014", "call_rate": 0.9794, "lrr_sd": 0.2242, "lrr_mean": -0.0042, "lrr_median": -0.0001, "baf_sd": 0.0521, "het_rate": 0.2359, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_015", "call_rate": 0.9774, "lrr_sd": 0.3891, "lrr_mean": 0.0025, "lrr_median": 0.0001, "baf_sd": 0.0609, "het_rate": 0.2739, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_016", "call_rate": 0.9819, "lrr_sd": 0.1283, "lrr_mean": 0.0199, "lrr_median": 0.02, "baf_sd": 0.0264, "het_rate": 0.2228, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_017", "call_rate": 0.9733, "lrr_sd": 0.218, "lrr_mean": 0.0117, "lrr_median": 0.0109, "baf_sd": 0.0244, "het_rate": 0.2429, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_018", "call_rate": 0.9998, "lrr_sd": 0.1964, "lrr_mean": 0.0188, "lrr_median": 0.0224, "baf_sd": 0.0208, "het_rate": 0.2632, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_019", "call_rate": 0.9904, "lrr_sd": 0.1981, "lrr_mean": -0.0093, "lrr_median": -0.0079, "baf_sd": 0.1645, "het_rate": 0.2267, "gender": "M", "qc_pass": true, "baf_flag": true, "het_outlier": false}, {"id": "SAMPLE_020", "call_rate": 0.983, "lrr_sd": 0.1798, "lrr_mean": 0.0182, "lrr_median": 0.022, "baf_sd": 0.0384, "het_rate": 0.25, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_021", "call_rate": 0.9753, "lrr_sd": 0.2808, "lrr_mean": 0.0148, "lrr_median": 0.0128, "baf_sd": 0.0647, "het_rate": 0.1534, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": true}, {"id": "SAMPLE_022", "call_rate": 0.9882, "lrr_sd": 0.1136, "lrr_mean": 0.0105, "lrr_median": 0.0109, "baf_sd": 0.0745, "het_rate": 0.2518, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_023", "call_rate": 0.9655, "lrr_sd": 0.0801, "lrr_mean": -0.007, "lrr_median": -0.0118, "baf_sd": 0.085, "het_rate": 0.2727, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_024", "call_rate": 0.9949, "lrr_sd": 0.1477, "lrr_mean": -0.0177, "lrr_median": -0.0139, "baf_sd": 0.0863, "het_rate": 0.2251, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_025", "call_rate": 0.9845, "lrr_sd": 0.3601, "lrr_mean": -0.0172, "lrr_median": -0.0146, "baf_sd": 0.0736, "het_rate": 0.2277, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_026", "call_rate": 0.9842, "lrr_sd": 0.201, "lrr_mean": -0.0094, "lrr_median": -0.0057, "baf_sd": 0.0496, "het_rate": 0.2327, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_027", "call_rate": 0.9861, "lrr_sd": 0.2406, "lrr_mean": -0.012, "lrr_median": -0.0139, "baf_sd": 0.0897, "het_rate": 0.259, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_028", "call_rate": 0.9831, "lrr_sd": 0.1939, "lrr_mean": -0.0152, "lrr_median": -0.018, "baf_sd": 0.0437, "het_rate": 0.2553, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_029", "call_rate": 0.9769, "lrr_sd": 0.1284, "lrr_mean": -0.0172, "lrr_median": -0.0159, "baf_sd": 0.036, "het_rate": 0.2743, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_030", "call_rate": 0.9957, "lrr_sd": 0.0956, "lrr_mean": -0.0105, "lrr_median": -0.0088, "baf_sd": 0.035, "het_rate": 0.2279, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}]</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var el = document.getElementById('qc-data');
+    if (!el) return;
+    var rawData = JSON.parse(el.textContent);
+    if (!rawData || rawData.length === 0) return;
+
+    var C = {pass:'#059669', fail:'#dc2626', warn:'#d97706',
+             blue:'#3b82f6', thresh:'#dc2626', mean:'#059669'};
+    var baseLayout = {
+        font: {family: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif', size: 12},
+        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+        margin: {t: 45, r: 25, b: 55, l: 60}, hovermode: 'closest'
+    };
+    var cfg = {responsive: true, displaylogo: false,
+               modeBarButtonsToRemove: ['lasso2d','select2d']};
+
+    /* ---- Scatter: Call Rate vs LRR SD ---- */
+    var pX=[], pY=[], pI=[], fX=[], fY=[], fI=[];
+    rawData.forEach(function(s) {
+        if (s.call_rate === null || s.lrr_sd === null) return;
+        if (s.qc_pass) { pX.push(s.call_rate); pY.push(s.lrr_sd); pI.push(s.id); }
+        else { fX.push(s.call_rate); fY.push(s.lrr_sd); fI.push(s.id); }
+    });
+    var scTraces = [];
+    if (pX.length) scTraces.push({x:pX,y:pY,text:pI,mode:'markers',type:'scatter',
+        name:'Pass ('+pX.length+')',marker:{color:C.pass,size:6,opacity:0.6},
+        hovertemplate:'<b>%{text}</b><br>Call Rate: %{x:.4f}<br>LRR SD: %{y:.4f}<extra>Pass</extra>'});
+    if (fX.length) scTraces.push({x:fX,y:fY,text:fI,mode:'markers',type:'scatter',
+        name:'Fail ('+fX.length+')',marker:{color:C.fail,size:8,symbol:'x',opacity:0.8},
+        hovertemplate:'<b>%{text}</b><br>Call Rate: %{x:.4f}<br>LRR SD: %{y:.4f}<extra>Fail</extra>'});
+    var scLay = Object.assign({}, baseLayout, {
+        title:{text:'Call Rate vs LRR SD',font:{size:14}},
+        xaxis:{title:'Call Rate',gridcolor:'#f1f5f9',zeroline:false},
+        yaxis:{title:'LRR SD',gridcolor:'#f1f5f9',zeroline:false},
+        shapes:[
+            {type:'line',x0:0.97,x1:0.97,y0:0,y1:1,yref:'paper',line:{color:C.thresh,width:1.5,dash:'dash'}},
+            {type:'line',x0:0,x1:1,y0:0.35,y1:0.35,xref:'paper',line:{color:C.thresh,width:1.5,dash:'dash'}}
+        ],
+        annotations:[
+            {x:0.97,y:1.04,yref:'paper',text:'CR \u2265 0.97',showarrow:false,font:{size:10,color:C.thresh}},
+            {x:1.04,xref:'paper',y:0.35,text:'LRR SD \u2264 0.35',showarrow:false,font:{size:10,color:C.thresh}}
+        ]
+    });
+    var d1 = document.getElementById('plot-scatter');
+    if (d1) Plotly.newPlot(d1, scTraces, scLay, cfg);
+
+    /* ---- Histogram helper ---- */
+    function hist(divId, vals, title, xLbl, thresh, thLbl, dir) {
+        var d = document.getElementById(divId);
+        if (!d || !vals.length) return;
+        var mean = vals.reduce(function(a,b){return a+b;},0)/vals.length;
+        var shapes = [
+            {type:'line',x0:thresh,x1:thresh,y0:0,y1:1,yref:'paper',
+             line:{color:C.thresh,width:2,dash:'dash'}},
+            {type:'line',x0:mean,x1:mean,y0:0,y1:1,yref:'paper',
+             line:{color:C.mean,width:2}}
+        ];
+        var ann = [
+            {x:thresh,y:1.04,yref:'paper',text:thLbl,showarrow:false,font:{size:10,color:C.thresh}},
+            {x:mean,y:1.09,yref:'paper',text:'Mean: '+mean.toFixed(4),showarrow:false,font:{size:10,color:C.mean}}
+        ];
+        Plotly.newPlot(d, [{x:vals,type:'histogram',
+            marker:{color:C.blue,opacity:0.7,line:{color:'white',width:0.5}},
+            hovertemplate:xLbl+': %{x}<br>Count: %{y}<extra></extra>'}],
+            Object.assign({}, baseLayout, {
+                title:{text:title,font:{size:14}},
+                xaxis:{title:xLbl,gridcolor:'#f1f5f9'},
+                yaxis:{title:'Count',gridcolor:'#f1f5f9'},
+                shapes:shapes, annotations:ann
+            }), cfg);
+    }
+
+    var cr=[], lr=[], bf=[], hr=[];
+    rawData.forEach(function(s){
+        if(s.call_rate!==null)cr.push(s.call_rate);
+        if(s.lrr_sd!==null)lr.push(s.lrr_sd);
+        if(s.baf_sd!==null)bf.push(s.baf_sd);
+        if(s.het_rate!==null)hr.push(s.het_rate);
+    });
+    hist('plot-cr',cr,'Call Rate Distribution','Call Rate',0.97,'\u2265 0.97','min');
+    hist('plot-lrr',lr,'LRR SD Distribution','LRR SD',0.35,'\u2264 0.35','max');
+
+    if (bf.length) {
+        hist('plot-baf',bf,'BAF SD Distribution (Het Sites)','BAF SD',0.15,'Flag: 0.15','max');
+        var bc=document.getElementById('baf-container'); if(bc) bc.style.display='';
+    }
+
+    /* ---- Het Rate (special: ±3 SD lines) ---- */
+    if (hr.length) {
+        var hm=hr.reduce(function(a,b){return a+b;},0)/hr.length;
+        var hv=hr.reduce(function(a,b){return a+(b-hm)*(b-hm);},0)/hr.length;
+        var hs=Math.sqrt(hv);
+        var hShp=[{type:'line',x0:hm,x1:hm,y0:0,y1:1,yref:'paper',line:{color:C.mean,width:2}}];
+        var hAnn=[{x:hm,y:1.09,yref:'paper',text:'Mean: '+hm.toFixed(4),showarrow:false,font:{size:10,color:C.mean}}];
+        if(hs>0){
+            hShp.push({type:'line',x0:hm-3*hs,x1:hm-3*hs,y0:0,y1:1,yref:'paper',line:{color:C.thresh,width:1.5,dash:'dash'}});
+            hShp.push({type:'line',x0:hm+3*hs,x1:hm+3*hs,y0:0,y1:1,yref:'paper',line:{color:C.thresh,width:1.5,dash:'dash'}});
+            hAnn.push({x:hm-3*hs,y:1.04,yref:'paper',text:'-3 SD',showarrow:false,font:{size:10,color:C.thresh}});
+            hAnn.push({x:hm+3*hs,y:1.04,yref:'paper',text:'+3 SD',showarrow:false,font:{size:10,color:C.thresh}});
+        }
+        var hd=document.getElementById('plot-het');
+        if(hd) Plotly.newPlot(hd,[{x:hr,type:'histogram',
+            marker:{color:C.blue,opacity:0.7,line:{color:'white',width:0.5}},
+            hovertemplate:'Het Rate: %{x}<br>Count: %{y}<extra></extra>'}],
+            Object.assign({},baseLayout,{
+                title:{text:'Heterozygosity Rate Distribution',font:{size:14}},
+                xaxis:{title:'Heterozygosity Rate',gridcolor:'#f1f5f9'},
+                yaxis:{title:'Count',gridcolor:'#f1f5f9'},
+                shapes:hShp, annotations:hAnn
+            }),cfg);
+        var hc=document.getElementById('het-container'); if(hc) hc.style.display='';
+    }
+
+    /* ---- Per-sample table ---- */
+    var tbody = document.getElementById('sample-tbody');
+    if (tbody) {
+        rawData.forEach(function(s) {
+            var tr = document.createElement('tr');
+            function cc(v,t,dir){
+                if(v===null)return '';
+                if(dir==='min')return v>=t?'cell-pass':'cell-fail';
+                return v<=t?'cell-pass':'cell-fail';
+            }
+            var crC=cc(s.call_rate,0.97,'min'), lrC=cc(s.lrr_sd,0.35,'max');
+            var bfC=s.baf_flag?'cell-warn':'cell-pass';
+            var htC=s.het_outlier?'cell-warn':'cell-pass';
+            var st=s.qc_pass?'<span class="status-badge status-pass">PASS</span>'
+                             :'<span class="status-badge status-fail">FAIL</span>';
+            function f4(v){return v!==null?v.toFixed(4):'NA';}
+            tr.innerHTML=
+                '<td>'+s.id+'</td>'+
+                '<td class="'+crC+'">'+f4(s.call_rate)+'</td>'+
+                '<td class="'+lrC+'">'+f4(s.lrr_sd)+'</td>'+
+                '<td>'+f4(s.lrr_mean)+'</td>'+
+                '<td>'+f4(s.lrr_median)+'</td>'+
+                '<td class="'+bfC+'">'+f4(s.baf_sd)+'</td>'+
+                '<td class="'+htC+'">'+f4(s.het_rate)+'</td>'+
+                '<td>'+s.gender+'</td>'+
+                '<td>'+st+'</td>';
+            tbody.appendChild(tr);
+        });
+    }
+
+    /* ---- Search ---- */
+    var si=document.getElementById('sample-search'), sc=document.getElementById('shown-count');
+    if(si&&tbody){si.addEventListener('input',function(){
+        var f=this.value.toLowerCase(), rows=tbody.getElementsByTagName('tr'), n=0;
+        for(var i=0;i<rows.length;i++){
+            var show=rows[i].cells[0].textContent.toLowerCase().indexOf(f)>-1;
+            rows[i].style.display=show?'':'none'; if(show)n++;
+        }
+        if(sc) sc.textContent=n+' of '+rawData.length+' samples';
+    });}
+
+    /* ---- Sort ---- */
+    var ths=document.querySelectorAll('.sample-table th[data-col]');
+    ths.forEach(function(th){th.addEventListener('click',function(){
+        var c=parseInt(this.dataset.col), asc=this.dataset.asc!=='true';
+        this.dataset.asc=asc;
+        var rows=Array.from(tbody.getElementsByTagName('tr'));
+        rows.sort(function(a,b){
+            var va=a.cells[c].textContent,vb=b.cells[c].textContent;
+            // strip badge html for status column
+            if(va.indexOf('PASS')>-1)va='1'; if(va.indexOf('FAIL')>-1)va='0';
+            if(vb.indexOf('PASS')>-1)vb='1'; if(vb.indexOf('FAIL')>-1)vb='0';
+            var na=parseFloat(va),nb=parseFloat(vb);
+            if(!isNaN(na)&&!isNaN(nb)) return asc?na-nb:nb-na;
+            return asc?va.localeCompare(vb):vb.localeCompare(va);
+        });
+        rows.forEach(function(r){tbody.appendChild(r);});
+        ths.forEach(function(h){h.classList.remove('sort-asc','sort-desc');});
+        this.classList.add(asc?'sort-asc':'sort-desc');
+    });});
+});
+</script>
+</body>
+</html>
