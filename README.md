@@ -22,7 +22,7 @@ The pipeline runs in seven phases:
 
 7. **QC Diagnostics & Report**: Automated QC diagnostics identify potential issues (deflated call rates, inflated LRR SD, build mismatches). A comprehensive **interactive HTML pipeline report** is generated featuring:
    - **Interactive Plotly.js charts** — Call Rate vs LRR SD scatter plot and metric distribution histograms with hover tooltips, zoom, and pan
-   - **GWAS QC best-practice thresholds** — Reference table citing Anderson et al. (2010), Marees et al. (2018), and Turner et al. (2011), covering sample call rate (≥ 0.97), LRR SD (≤ 0.35), BAF SD (≤ 0.15), heterozygosity rate (± 3 SD), variant missingness (< 0.02), HWE p-value (≥ 1e-6), MAF (≥ 0.01), and inbreeding F (|F| ≤ 0.05)
+   - **GWAS QC best-practice thresholds** — Reference table citing Anderson et al. (2010), Marees et al. (2018), and Turner et al. (2011), covering sample call rate (≥ 0.97), LRR SD (≤ 0.35), BAF SD (≤ 0.15), heterozygosity rate (± 3 SD), variant missingness (< 0.02), HWE p-value (≥ 1e-6), MAF (≥ 0.01), and inbreeding F (|F| ≤ 0.05), with per-threshold rationale and citation notes in the report
    - **Per-sample QC table** — Searchable, sortable table with color-coded pass/fail/warning indicators for every sample
    - **Visual overview** — KPI metric cards, QC pass-rate progress bar, stage comparison with color-coded improvement indicators
    - Publication-quality static figures (QC dashboard, PCA scatter, sex check) and auto-generated methods paragraph
@@ -340,6 +340,24 @@ This approach is fundamentally different from just using `--adjust-clusters` in 
 
 See **[docs/qc_comparison.md](docs/qc_comparison.md)** for a detailed explanation of the QC comparison outputs and how to interpret them.
 
+### QC Thresholds and Scientific Rationale
+
+The pipeline report surfaces default QC thresholds that are commonly used in GWAS QC workflows and inherited from `scripts/generate_report.py` and `scripts/ancestry_pca.sh`.
+
+| Metric | Default threshold | Where used | Evidence basis |
+|--------|-------------------|------------|----------------|
+| Sample call rate | `>= 0.97` | Stage 1/2 sample QC pass/fail | Anderson 2010; Marees 2018 |
+| LRR SD | `<= 0.35` | Stage 1/2 sample QC pass/fail | Turner 2011; array intensity QC practice |
+| BAF SD (het sites) | `<= 0.15` (flag) | Sample-level contamination/noise flag | Turner 2011; Marees 2018 |
+| Heterozygosity rate | within `±3 SD` | Sample outlier flagging | Anderson 2010; Marees 2018 |
+| Variant missingness | `< 0.02` | Variant QC summaries / filtering guidance | Anderson 2010; Turner 2011 |
+| HWE p-value | `>= 1e-6` | Variant QC summaries / filtering guidance | Anderson 2010; Marees 2018 |
+| Variant MAF | `>= 0.01` | Variant QC summaries / filtering guidance | Marees 2018 |
+| PCA MAF | `>= 0.05` | `ancestry_pca.sh` default projection set | Common ancestry PCA stabilization practice |
+| Inbreeding F | `|F| <= 0.05` (flag) | Sample outlier flagging | Turner 2011 |
+
+These are robust defaults, but they are not one-size-fits-all. For very small cohorts, founder populations, case-only designs, or rare-variant-focused studies, thresholds should be reviewed with domain context and adjusted using pipeline options where appropriate.
+
 ### Pre/Post Reclustering QC Comparison
 
 After Stage 2 completes, a QC comparison report and diagnostic plots are automatically generated in `stage2/qc/comparison/`. These quantify the improvement from reclustering across all samples and variants.
@@ -393,6 +411,9 @@ The pipeline's BAF and LRR output is directly suitable for CNV detection. See **
 
 ## References
 
+- Anderson C.A. et al. *Data quality control in genetic case-control association studies.* Nat Protoc 5, 1564–1573 (2010). [DOI: 10.1038/nprot.2010.116](https://doi.org/10.1038/nprot.2010.116)
+- Marees A.T. et al. *A tutorial on conducting genome-wide association studies: Quality control and statistical analysis.* Int J Methods Psychiatr Res 27:e1608 (2018). [DOI: 10.1002/mpr.1608](https://doi.org/10.1002/mpr.1608)
+- Turner S. et al. *Quality Control Procedures for Genome-Wide Association Studies.* Curr Protoc Hum Genet, Unit 1.19 (2011). [DOI: 10.1002/0471142905.hg0119s68](https://doi.org/10.1002/0471142905.hg0119s68)
 - Loh P., Genovese G., McCarroll S., Price A. et al. *Insights about clonal expansions from 8,342 mosaic chromosomal alterations.* Nature 559, 350–355 (2018). [DOI: 10.1038/s41586-018-0321-x](https://doi.org/10.1038/s41586-018-0321-x)
 - Liu A. et al. *Genetic drivers and cellular selection of female mosaic X chromosome loss.* Nature (2024). [DOI: 10.1038/s41586-024-07533-7](https://doi.org/10.1038/s41586-024-07533-7)
 - [gtc2vcf](https://github.com/freeseek/gtc2vcf) — Convert Illumina/Affymetrix intensity data to VCF without Windows

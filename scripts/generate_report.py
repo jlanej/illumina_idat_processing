@@ -39,9 +39,10 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 # GWAS QC best-practice thresholds
 # References:
-#   - Anderson et al. (2010) Nat Protoc 5:1564-73
-#   - Marees et al. (2018) Int J Methods Psychiatr Res 27:e1608
-#   - Turner et al. (2011) Curr Protoc Hum Genet Ch.1:Unit1.19
+#   - Anderson et al. (2010) Nat Protoc 5:1564-73. doi:10.1038/nprot.2010.116
+#   - Marees et al. (2018) Int J Methods Psychiatr Res 27:e1608. doi:10.1002/mpr.1608
+#   - Turner et al. (2011) Curr Protoc Hum Genet Ch.1:Unit1.19.
+#     doi:10.1002/0471142905.hg0119s68
 # ---------------------------------------------------------------------------
 GWAS_THRESHOLDS = {
     'call_rate_min': 0.97,
@@ -431,7 +432,9 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"were generated using manufacturer-provided EGT cluster definitions. "
         f"Per-sample QC metrics (call rate, LRR standard deviation, BAF standard "
         f"deviation at heterozygous sites, and heterozygosity rate) were computed "
-        f"on autosomal variants. High-quality samples (call rate ≥ 0.97 and "
+        f"on autosomal variants. Following common GWAS QC guidance "
+        f"(Anderson et al., 2010; Marees et al., 2018; Turner et al., 2011), "
+        f"high-quality samples (call rate ≥ 0.97 and "
         f"LRR SD ≤ 0.35; n = {n_pass} of {n}) were used to recompute "
         f"study-specific genotype cluster definitions (EGT file) in Stage 2. "
         f"All samples were then re-genotyped using the study-specific clusters, "
@@ -442,7 +445,7 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"per-sample inbreeding coefficients (F statistic), and transition/"
         f"transversion ratio computation ({plink_cite}). "
         f"Ancestry principal components were computed using stringent variant QC "
-        f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning "
+        f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5% for PCA stability), LD pruning "
         f"(window = 1000 kb, step = 1, r² < 0.1), and flashpca2. "
         f"After processing, the mean call rate was {cr:.4f} and the mean "
         f"LRR SD was {sd:.4f}."
@@ -1356,52 +1359,58 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         <div class="card">
             <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.75rem">
                 Reference thresholds based on Anderson et al. (2010), Marees et al. (2018),
-                and Turner et al. (2011). These are applied automatically to highlight
-                samples and variants requiring attention.
+                and Turner et al. (2011). These defaults are used to highlight samples and
+                variants requiring attention, and should be interpreted with study design,
+                ancestry composition, and downstream analysis goals in mind.
             </p>
             <table class="threshold-table">
-                <tr><th>Metric</th><th>Threshold</th><th>Type</th><th>Rationale</th></tr>
+                <tr><th>Metric</th><th>Threshold</th><th>Type</th><th>Rationale / Evidence</th></tr>
                 <tr>
                     <td>Sample Call Rate</td><td>≥ 0.97</td>
                     <td><span class="badge badge-pass">Pass/Fail</span></td>
-                    <td>Low call rate indicates poor DNA quality or failed hybridization</td>
+                    <td>Low call rate indicates poor DNA quality or failed hybridization (Anderson 2010; Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>LRR SD</td><td>≤ 0.35</td>
                     <td><span class="badge badge-pass">Pass/Fail</span></td>
-                    <td>High LRR SD indicates noisy intensity data unsuitable for CNV/GWAS</td>
+                    <td>High LRR SD indicates noisy intensity data unsuitable for CNV/GWAS (Turner 2011)</td>
                 </tr>
                 <tr>
                     <td>BAF SD (het sites)</td><td>≤ 0.15</td>
                     <td><span class="badge badge-warn">Flag</span></td>
-                    <td>Elevated BAF SD may indicate sample contamination or mosaicism</td>
+                    <td>Elevated BAF SD may indicate contamination or unresolved intensity outliers (Turner 2011; Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>Heterozygosity Rate</td><td>Within ± 3 SD</td>
                     <td><span class="badge badge-warn">Flag</span></td>
-                    <td>Outliers may indicate contamination (high) or inbreeding (low)</td>
+                    <td>Outliers may indicate contamination (high) or inbreeding (low) (Anderson 2010; Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>Variant Call Rate</td><td>≥ 0.98</td>
                     <td><span class="badge badge-info">Variant QC</span></td>
-                    <td>Poorly genotyped variants produce spurious associations</td>
+                    <td>Poorly genotyped variants produce spurious associations (Anderson 2010; Turner 2011)</td>
                 </tr>
                 <tr>
                     <td>HWE p-value</td><td>≥ 1 × 10⁻⁶</td>
                     <td><span class="badge badge-info">Variant QC</span></td>
-                    <td>Extreme HWE deviation indicates genotyping errors</td>
+                    <td>Extreme HWE deviation indicates genotyping errors (Anderson 2010; Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>MAF</td><td>≥ 0.01</td>
                     <td><span class="badge badge-info">Variant QC</span></td>
-                    <td>Rare variants have low power and higher genotyping error rates</td>
+                    <td>Rare variants have low power and higher error sensitivity in GWAS; PCA step uses MAF ≥ 0.05 for stable loadings (Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>Inbreeding F</td><td>|F| ≤ 0.05</td>
                     <td><span class="badge badge-warn">Flag</span></td>
-                    <td>F-statistic outliers may indicate sample quality or relatedness issues</td>
+                    <td>F-statistic outliers may indicate sample quality or relatedness issues (Turner 2011)</td>
                 </tr>
             </table>
+            <p style="font-size:0.78rem;color:#64748b;margin-top:0.65rem">
+                Key references: Anderson et al. 2010 (doi:10.1038/nprot.2010.116),
+                Marees et al. 2018 (doi:10.1002/mpr.1608),
+                Turner et al. 2011 (doi:10.1002/0471142905.hg0119s68).
+            </p>
         </div>
     </section>
 

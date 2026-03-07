@@ -136,6 +136,24 @@ else
     (( FAIL++ )) || true
 fi
 
+if grep -q 'doi:10.1038/nprot.2010.116' "${REPORT}" && \
+   grep -q 'doi:10.1002/mpr.1608' "${REPORT}" && \
+   grep -q 'doi:10.1002/0471142905.hg0119s68' "${REPORT}"; then
+    echo "  PASS: Threshold evidence citations present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Threshold evidence citations missing"
+    (( FAIL++ )) || true
+fi
+
+if grep -q 'PCA step uses MAF ≥ 0.05 for stable loadings' "${REPORT}"; then
+    echo "  PASS: MAF context note present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: MAF context note missing"
+    (( FAIL++ )) || true
+fi
+
 # --- Test 6: Per-sample QC table ---
 echo "--- Test 6: Per-sample QC table ---"
 if grep -q 'sample-tbody' "${REPORT}"; then
