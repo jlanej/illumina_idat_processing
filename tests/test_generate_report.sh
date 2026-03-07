@@ -245,6 +245,26 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 11b: Compiled citations summary ---
+echo "--- Test 11b: Compiled citations summary ---"
+CITATIONS="${TMP_DIR}/citations_summary.tsv"
+if [[ -f "${CITATIONS}" ]]; then
+    echo "  PASS: Citations summary TSV generated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Citations summary TSV not generated"
+    (( FAIL++ )) || true
+fi
+
+if grep -q 'GWAS Methods and Best-Practice Citations' "${REPORT}" && \
+   grep -q 'doi:10.1093/gigascience/giab008' "${REPORT}"; then
+    echo "  PASS: Citations section and DOI links present in report"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Citations section or DOI links missing in report"
+    (( FAIL++ )) || true
+fi
+
 # --- Test 12: Modern CSS variables ---
 echo "--- Test 12: Modern CSS ---"
 if grep -q '\-\-primary' "${REPORT}" && grep -q '\-\-success' "${REPORT}"; then
@@ -270,6 +290,7 @@ for required_file in \
     pipeline_report.html \
     summary_statistics.tsv \
     methods_text.txt \
+    citations_summary.tsv \
     pca_projections.tsv \
     ancestry_pca_qc_summary.txt \
     realign_summary.txt \
