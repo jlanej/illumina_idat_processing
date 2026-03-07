@@ -445,8 +445,9 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"per-sample inbreeding coefficients (F statistic), and transition/"
         f"transversion ratio computation ({plink_cite}). "
         f"Ancestry principal components were computed using stringent variant QC "
-        f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5% for PCA stability), LD pruning "
+        f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning "
         f"(window = 1000 kb, step = 1, r² < 0.1), and flashpca2. "
+        f"This stricter PCA MAF threshold was used to improve loading stability. "
         f"After processing, the mean call rate was {cr:.4f} and the mean "
         f"LRR SD was {sd:.4f}."
     )
@@ -1378,12 +1379,12 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 <tr>
                     <td>BAF SD (het sites)</td><td>≤ 0.15</td>
                     <td><span class="badge badge-warn">Flag</span></td>
-                    <td>Elevated BAF SD may indicate contamination or unresolved intensity outliers (Turner 2011; Marees 2018)</td>
+                    <td>Elevated BAF SD may indicate contamination or noisy heterozygous intensity clusters (Turner 2011; Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>Heterozygosity Rate</td><td>Within ± 3 SD</td>
                     <td><span class="badge badge-warn">Flag</span></td>
-                    <td>Outliers may indicate contamination (high) or inbreeding (low) (Anderson 2010; Marees 2018)</td>
+                    <td>Outliers may indicate contamination (high) or inbreeding (low); interpret against cohort ancestry structure (Anderson 2010; Marees 2018)</td>
                 </tr>
                 <tr>
                     <td>Variant Call Rate</td><td>≥ 0.98</td>
