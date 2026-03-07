@@ -24,7 +24,7 @@ echo "============================================"
 echo ""
 
 # --- Create mock pipeline output ---
-mkdir -p "${TMP_DIR}/stage2/qc" "${TMP_DIR}/stage1/qc"
+mkdir -p "${TMP_DIR}/stage2/qc" "${TMP_DIR}/stage1/qc" "${TMP_DIR}/ancestry_pca"
 
 cat > "${TMP_DIR}/stage2/qc/stage2_sample_qc.tsv" << 'EOF'
 sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
@@ -38,6 +38,17 @@ sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
 S001	0.9945	0.1723	-0.0018	-0.0009	0.0345	0.2312	M
 S002	0.9554	0.4523	0.0389	0.0278	0.1712	0.2934	F
 S003	0.9972	0.1434	-0.0009	-0.0004	0.0298	0.2323	M
+EOF
+
+cat > "${TMP_DIR}/ancestry_pca/pca_projections.tsv" << 'EOF'
+FID	IID	PC1	PC2	PC3	PC4
+S001	S001	-0.0200	0.0100	0.0020	0.0010
+S002	S002	0.0100	-0.0200	-0.0010	0.0005
+S003	S003	0.0300	0.0200	0.0015	-0.0020
+EOF
+
+cat > "${TMP_DIR}/mock_data_notice.txt" << 'EOF'
+This report is an example generated from deterministic mock data for demonstration purposes only.
 EOF
 
 # --- Test 1: Generate report ---
@@ -65,7 +76,7 @@ fi
 
 # --- Test 3: Report contains interactive plot containers ---
 echo "--- Test 3: Interactive plot containers ---"
-for div_id in plot-scatter plot-cr plot-lrr; do
+for div_id in plot-scatter plot-cr plot-lrr plot-pca12 plot-pca34; do
     if grep -q "id=\"${div_id}\"" "${REPORT}"; then
         echo "  PASS: Plot container '${div_id}' found"
         (( PASS++ )) || true
@@ -75,8 +86,18 @@ for div_id in plot-scatter plot-cr plot-lrr; do
     fi
 done
 
-# --- Test 4: GWAS QC thresholds reference table ---
-echo "--- Test 4: GWAS QC thresholds section ---"
+# --- Test 4: Mock data banner ---
+echo "--- Test 4: Mock data banner ---"
+if grep -q 'Example Output (Mock Data)' "${REPORT}"; then
+    echo "  PASS: Mock/example banner present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Mock/example banner missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 5: GWAS QC thresholds reference table ---
+echo "--- Test 5: GWAS QC thresholds section ---"
 if grep -q 'GWAS QC Best Practice Thresholds' "${REPORT}"; then
     echo "  PASS: GWAS QC thresholds section present"
     (( PASS++ )) || true
@@ -93,8 +114,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 5: Per-sample QC table ---
-echo "--- Test 5: Per-sample QC table ---"
+# --- Test 6: Per-sample QC table ---
+echo "--- Test 6: Per-sample QC table ---"
 if grep -q 'sample-tbody' "${REPORT}"; then
     echo "  PASS: Sample table body element found"
     (( PASS++ )) || true
@@ -111,8 +132,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 6: QC data JSON embedded ---
-echo "--- Test 6: QC data JSON ---"
+# --- Test 7: QC data JSON embedded ---
+echo "--- Test 7: QC data JSON ---"
 if grep -q 'id="qc-data"' "${REPORT}"; then
     echo "  PASS: QC data JSON block found"
     (( PASS++ )) || true
@@ -130,8 +151,18 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 7: Pass/fail classification in JSON ---
-echo "--- Test 7: Pass/fail classification ---"
+# --- Test 7b: PCA data JSON embedded ---
+echo "--- Test 7b: PCA data JSON ---"
+if grep -q 'id="pca-data"' "${REPORT}" && grep -q '"pc1"' "${REPORT}" && grep -q '"S001"' "${REPORT}"; then
+    echo "  PASS: PCA data JSON block found with sample data"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: PCA data JSON block missing or incomplete"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 8: Pass/fail classification in JSON ---
+echo "--- Test 8: Pass/fail classification ---"
 # S001 and S003 should pass (CR >= 0.97, LRR SD <= 0.35)
 # S002 should fail (CR 0.9654 < 0.97, LRR SD 0.4123 > 0.35)
 if grep -q '"qc_pass": true' "${REPORT}" && grep -q '"qc_pass": false' "${REPORT}"; then
@@ -142,8 +173,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 8: Stage comparison table ---
-echo "--- Test 8: Stage comparison ---"
+# --- Test 9: Stage comparison table ---
+echo "--- Test 9: Stage comparison ---"
 if grep -q 'Stage 1' "${REPORT}" && grep -q 'Stage 2' "${REPORT}"; then
     echo "  PASS: Stage comparison present"
     (( PASS++ )) || true
@@ -152,8 +183,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 9: Summary statistics TSV ---
-echo "--- Test 9: Summary statistics TSV ---"
+# --- Test 10: Summary statistics TSV ---
+echo "--- Test 10: Summary statistics TSV ---"
 STATS="${TMP_DIR}/summary_statistics.tsv"
 if [[ -f "${STATS}" ]]; then
     echo "  PASS: Summary statistics TSV generated"
@@ -163,8 +194,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 10: Methods text ---
-echo "--- Test 10: Methods text ---"
+# --- Test 11: Methods text ---
+echo "--- Test 11: Methods text ---"
 METHODS="${TMP_DIR}/methods_text.txt"
 if [[ -f "${METHODS}" ]]; then
     echo "  PASS: Methods text file generated"
@@ -174,8 +205,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 11: Modern CSS variables ---
-echo "--- Test 11: Modern CSS ---"
+# --- Test 12: Modern CSS variables ---
+echo "--- Test 12: Modern CSS ---"
 if grep -q '\-\-primary' "${REPORT}" && grep -q '\-\-success' "${REPORT}"; then
     echo "  PASS: CSS custom properties (variables) present"
     (( PASS++ )) || true
@@ -184,8 +215,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 12: BAF flag count in JSON ---
-echo "--- Test 12: BAF SD flag ---"
+# --- Test 13: BAF flag count in JSON ---
+echo "--- Test 13: BAF SD flag ---"
 # S002 has BAF SD 0.1623 > 0.15, should be flagged
 if grep -q '"baf_flag": true' "${REPORT}"; then
     echo "  PASS: BAF SD flag present in JSON"
@@ -195,8 +226,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 13: GWAS threshold constants ---
-echo "--- Test 13: GWAS threshold constants in Python ---"
+# --- Test 14: GWAS threshold constants ---
+echo "--- Test 14: GWAS threshold constants in Python ---"
 if python3 -c "
 import sys
 sys.path.insert(0, '${REPO_DIR}/scripts')
@@ -216,8 +247,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 14: compute_summary_stats enhancements ---
-echo "--- Test 14: compute_summary_stats enhancements ---"
+# --- Test 15: compute_summary_stats enhancements ---
+echo "--- Test 15: compute_summary_stats enhancements ---"
 if python3 -c "
 import sys
 sys.path.insert(0, '${REPO_DIR}/scripts')
@@ -239,8 +270,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 15: Boundary value pass/fail classification ---
-echo "--- Test 15: Boundary value pass/fail classification ---"
+# --- Test 16: Boundary value pass/fail classification ---
+echo "--- Test 16: Boundary value pass/fail classification ---"
 BOUNDARY_DIR="${TMP_DIR}/boundary"
 mkdir -p "${BOUNDARY_DIR}"
 cat > "${BOUNDARY_DIR}/boundary_qc.tsv" << 'BEOF'

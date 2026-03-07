@@ -284,6 +284,14 @@ def generate_pca_data(output_dir, n_samples=30):
     return filepath
 
 
+def generate_mock_notice(output_dir):
+    """Write a marker text indicating this output is synthetic example data."""
+    filepath = os.path.join(output_dir, 'mock_data_notice.txt')
+    with open(filepath, 'w') as f:
+        f.write("This report is an example generated from deterministic mock data for demonstration purposes only.")
+    return filepath
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate deterministic mock pipeline output for testing"
@@ -327,6 +335,9 @@ def main():
     # PCA data
     pca = generate_pca_data(args.output_dir, n)
     print(f"  PCA projections:   {pca}")
+
+    note = generate_mock_notice(args.output_dir)
+    print(f"  Mock notice:      {note}")
 
     print("\nDone. Run generate_report.py --output-dir to build the HTML report.")
 

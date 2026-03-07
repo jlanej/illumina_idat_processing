@@ -261,6 +261,28 @@ def create_sample_qc_dashboard(qc_rows, stage_label=''):
     return fig
 
 
+def _read_pca_projections(pca_file):
+    """Read PCA projections as a dict of sample_id -> list(PC values)."""
+    if not os.path.exists(pca_file):
+        return {}
+
+    pca_data = {}
+    with open(pca_file) as f:
+        header = f.readline()  # skip header
+        for line in f:
+            fields = line.strip().split('\t') if '\t' in line else line.strip().split()
+            if len(fields) < 4:
+                continue
+            # IID is second column in PLINK/flashpca output (FID, IID, PC1, PC2, ...)
+            sample_id = fields[1] if len(fields) > 1 else fields[0]
+            try:
+                pcs = [float(x) for x in fields[2:]]
+                pca_data[sample_id] = pcs
+            except (ValueError, IndexError):
+                pass
+    return pca_data
+
+
 def create_pca_plot(pca_file, qc_rows):
     """Create PCA scatter plots (PC1 vs PC2, PC3 vs PC4) colored by predicted sex."""
     try:
@@ -273,23 +295,7 @@ def create_pca_plot(pca_file, qc_rows):
     if not os.path.exists(pca_file):
         return None
 
-    # Read PCA projections
-    pca_data = {}
-    with open(pca_file) as f:
-        header = f.readline().strip().split('\t')
-        if len(header) < 4:
-            header = f.readline().strip().split()  # whitespace-separated
-        for line in f:
-            fields = line.strip().split('\t') if '\t' in line else line.strip().split()
-            if len(fields) < 4:
-                continue
-            # IID is second column (FID, IID, PC1, PC2, ...)
-            sample_id = fields[1] if len(fields) > 1 else fields[0]
-            try:
-                pcs = [float(x) for x in fields[2:]]
-                pca_data[sample_id] = pcs
-            except (ValueError, IndexError):
-                pass
+    pca_data = _read_pca_projections(pca_file)
 
     if not pca_data:
         return None
@@ -508,6 +514,7 @@ def generate_html_report(output_dir):
     # PCA file
     pca_file = os.path.join(output_dir, 'ancestry_pca', 'pca_projections.tsv')
     pca_summary = read_text(os.path.join(output_dir, 'ancestry_pca', 'qc_summary.txt'))
+    mock_notice = read_text(os.path.join(output_dir, 'mock_data_notice.txt'))
 
     # Generate methods text
     genome = 'CHM13'  # Could parse from config, but CHM13 is default
@@ -563,11 +570,13 @@ def generate_html_report(output_dir):
               file=sys.stderr)
 
     # ---- Build HTML ----
+    pca_json = _prepare_pca_json(pca_file, qc_rows) if os.path.exists(pca_file) else '[]'
     html = _build_html(stats, stage1_stats,
                        figures, realign_text, comparison_text,
                        variant_qc_text, diag_text, methods_text,
                        pca_summary, tool_versions, stage_label,
-                       qc_rows=qc_rows)
+                       qc_rows=qc_rows, pca_json=pca_json,
+                       mock_notice=mock_notice or '')
 
     report_path = os.path.join(output_dir, 'pipeline_report.html')
     with open(report_path, 'w') as f:
@@ -653,6 +662,38 @@ def _prepare_sample_json(qc_rows, stats):
     return json.dumps(samples)
 
 
+def _prepare_pca_json(pca_file, qc_rows):
+    """Serialize PCA projection data to JSON for interactive Plotly charts."""
+    def _clean(v):
+        if v is None:
+            return None
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return round(v, 6)
+
+    pca_data = _read_pca_projections(pca_file)
+    if not pca_data:
+        return '[]'
+
+    sex_map = {
+        r.get('sample_id', ''): r.get('computed_gender', 'NA')
+        for r in (qc_rows or [])
+    }
+    points = []
+    for sid, pcs in sorted(pca_data.items()):
+        if len(pcs) < 2:
+            continue
+        points.append({
+            'id': sid,
+            'gender': sex_map.get(sid, 'NA'),
+            'pc1': _clean(pcs[0]),
+            'pc2': _clean(pcs[1]),
+            'pc3': _clean(pcs[2]) if len(pcs) > 2 else None,
+            'pc4': _clean(pcs[3]) if len(pcs) > 3 else None,
+        })
+    return json.dumps(points)
+
+
 def _get_report_css():
     """Return CSS for the HTML report."""
     return """
@@ -685,6 +726,12 @@ body {
 }
 .header h1 { font-size: 1.7rem; font-weight: 700; margin: 0 0 0.3rem; }
 .header .subtitle { opacity: 0.85; font-size: 0.85rem; margin: 0; }
+
+.mock-banner {
+    background: #fffbeb; color: #92400e; border: 1px solid #fde68a;
+    border-left: 4px solid #d97706; border-radius: 10px;
+    padding: 0.85rem 1rem; margin-bottom: 1rem; font-size: 0.86rem;
+}
 
 .nav-bar {
     background: var(--card-bg); border-bottom: 1px solid var(--border);
@@ -972,6 +1019,62 @@ document.addEventListener('DOMContentLoaded', function() {
         var hc=document.getElementById('het-container'); if(hc) hc.style.display='';
     }
 
+    /* ---- Interactive PCA ---- */
+    var pcaEl = document.getElementById('pca-data');
+    if (pcaEl) {
+        var pcaData = JSON.parse(pcaEl.textContent || '[]');
+        if (pcaData && pcaData.length) {
+            var sexStyle = {
+                'M': {label:'Male', color:'#4393C3'},
+                '1': {label:'Male', color:'#4393C3'},
+                'F': {label:'Female', color:'#D6604D'},
+                '2': {label:'Female', color:'#D6604D'},
+                'NA': {label:'Unknown', color:'#6b7280'},
+                '': {label:'Unknown', color:'#6b7280'}
+            };
+
+            function pcaPlot(divId, xKey, yKey, title) {
+                var d = document.getElementById(divId);
+                if (!d) return 0;
+                var grouped = {};
+                pcaData.forEach(function(p) {
+                    if (p[xKey] === null || p[yKey] === null) return;
+                    var sx = (p.gender || 'NA').toString();
+                    var style = sexStyle[sx] || sexStyle['NA'];
+                    if (!grouped[style.label]) {
+                        grouped[style.label] = {x:[], y:[], text:[], color:style.color};
+                    }
+                    grouped[style.label].x.push(p[xKey]);
+                    grouped[style.label].y.push(p[yKey]);
+                    grouped[style.label].text.push(p.id);
+                });
+                var traces = Object.keys(grouped).sort().map(function(label) {
+                    var g = grouped[label];
+                    return {
+                        x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
+                        name:label+' (n='+g.x.length+')',
+                        marker:{color:g.color, size:7, opacity:0.65},
+                        hovertemplate:'<b>%{text}</b><br>'+xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<extra>'+label+'</extra>'
+                    };
+                });
+                if (!traces.length) return 0;
+                Plotly.newPlot(d, traces, Object.assign({}, baseLayout, {
+                    title:{text:title,font:{size:14}},
+                    xaxis:{title:xKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
+                    yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false}
+                }), cfg);
+                return traces.reduce(function(n, t){return n + t.x.length;}, 0);
+            }
+
+            pcaPlot('plot-pca12', 'pc1', 'pc2', 'PC1 vs PC2');
+            var n34 = pcaPlot('plot-pca34', 'pc3', 'pc4', 'PC3 vs PC4');
+            if (n34 > 0) {
+                var c34 = document.getElementById('pca34-container');
+                if (c34) c34.style.display = '';
+            }
+        }
+    }
+
     /* ---- Per-sample table ---- */
     var tbody = document.getElementById('sample-tbody');
     if (tbody) {
@@ -1039,13 +1142,21 @@ document.addEventListener('DOMContentLoaded', function() {
 def _build_html(stats, stage1_stats, figures, realign_text,
                 comparison_text, variant_qc_text, diag_text,
                 methods_text, pca_summary, tool_versions, stage_label,
-                qc_rows=None):
+                qc_rows=None, pca_json='[]', mock_notice=''):
     """Build the HTML report string with interactive Plotly charts."""
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     # --- Prepare interactive data ---
     sample_json = _prepare_sample_json(qc_rows, stats) if qc_rows else '[]'
+    mock_notice_html = ''
+    if mock_notice:
+        escaped_notice = (mock_notice.strip().replace('&', '&amp;')
+                          .replace('<', '&lt;')
+                          .replace('>', '&gt;')
+                          .replace('"', '&quot;')
+                          .replace("'", '&#39;'))
+        mock_notice_html = f'<div class="mock-banner"><strong>Example Output (Mock Data):</strong> {escaped_notice}</div>'
 
     # --- Static content helpers ---
     def _stat_row(label, metric, s):
@@ -1140,6 +1251,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     </nav>
 
     <div class="container">
+    {mock_notice_html}
 
     <section id="overview">
         <h2>📊 Overview</h2>
@@ -1315,7 +1427,13 @@ def _build_html(stats, stage1_stats, figures, realign_text,
 
     <section id="pca">
         <h2>🌍 Ancestry PCA</h2>
-        {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
+        <div class="plot-grid">
+            <div class="card"><div id="plot-pca12" class="plot-box"></div></div>
+            <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
+        </div>
+        <noscript>
+            {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
+        </noscript>
         {_pre_block(pca_summary, 'PCA QC Summary')}
     </section>
 
@@ -1360,6 +1478,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     html += '</head>\n<body>\n'
     html += html_body
     html += f'\n<script type="application/json" id="qc-data">{sample_json}</script>\n'
+    html += f'<script type="application/json" id="pca-data">{pca_json}</script>\n'
     html += f'<script>{js}</script>\n'
     html += '</body>\n</html>'
 
@@ -1392,4 +1511,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
