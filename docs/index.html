@@ -215,7 +215,7 @@ section h2 {
 
     <div class="header">
         <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
-        <p class="subtitle">Generated: 2026-03-07 16:07:12</p>
+        <p class="subtitle">Generated: 2026-03-07 16:23:01</p>
     </div>
 
     <nav class="nav-bar">
@@ -229,6 +229,7 @@ section h2 {
         <a href="#pca">Ancestry PCA</a>
         <a href="#realignment">Realignment</a>
         <a href="#diagnostics">Diagnostics</a>
+        <a href="#citations">Citations</a>
         <a href="#methods">Methods</a>
         <a href="#tools">Tools</a>
     </nav>
@@ -530,6 +531,20 @@ section h2 {
   - Review het rate outliers (SAMPLE_010, SAMPLE_021) for
     population stratification or sample swaps
 </pre></div>
+    </section>
+
+    <section id="citations">
+        <h2>📚 GWAS Methods and Best-Practice Citations</h2>
+        <div class="card">
+            <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.75rem">
+                Compiled citation summary for methods, tools, and algorithms used in this
+                pipeline. The same content is also exported as <code>citations_summary.tsv</code>.
+            </p>
+            <table class="threshold-table">
+                <tr><th>Citation</th><th>DOI</th><th>Cited for</th><th>Pipeline application</th></tr>
+                <tr><td>Anderson et al. 2010, Nat Protoc 5:1564-1573</td><td><a href="https://doi.org/10.1038/nprot.2010.116" target="_blank" rel="noopener">doi:10.1038/nprot.2010.116</a></td><td>Foundational GWAS sample/variant QC guidance</td><td>Supports sample call rate and heterozygosity outlier review; supports variant call rate and HWE filtering guidance.</td></tr><tr><td>Marees et al. 2018, Int J Methods Psychiatr Res 27:e1608</td><td><a href="https://doi.org/10.1002/mpr.1608" target="_blank" rel="noopener">doi:10.1002/mpr.1608</a></td><td>Modern practical GWAS QC workflow recommendations</td><td>Supports contamination/noise interpretation (BAF SD, heterozygosity), variant QC thresholds, and stricter PCA MAF filtering for stability.</td></tr><tr><td>Turner et al. 2011, Curr Protoc Hum Genet Unit 1.19</td><td><a href="https://doi.org/10.1002/0471142905.hg0119s68" target="_blank" rel="noopener">doi:10.1002/0471142905.hg0119s68</a></td><td>Array-focused genotype QC and filtering practice</td><td>Supports LRR/BAF quality interpretation, variant missingness thresholds, and inbreeding/relatedness flagging context.</td></tr><tr><td>Danecek et al. 2021, Gigascience 10(2):giab008</td><td><a href="https://doi.org/10.1093/gigascience/giab008" target="_blank" rel="noopener">doi:10.1093/gigascience/giab008</a></td><td>bcftools framework for variant processing</td><td>Supports IDAT-to-GTC/VCF processing and downstream variant manipulations.</td></tr><tr><td>Li and Durbin 2009, Bioinformatics 25(14):1754-1760</td><td><a href="https://doi.org/10.1093/bioinformatics/btp324" target="_blank" rel="noopener">doi:10.1093/bioinformatics/btp324</a></td><td>BWA alignment algorithm</td><td>Supports manifest probe flank realignment to the selected reference genome.</td></tr><tr><td>Chang et al. 2015, Gigascience 4:7</td><td><a href="https://doi.org/10.1186/s13742-015-0047-8" target="_blank" rel="noopener">doi:10.1186/s13742-015-0047-8</a></td><td>PLINK analytical framework for large-scale genotype QC</td><td>Supports variant-level QC metrics, HWE/missingness/MAF filtering, and LD pruning in ancestry PCA preparation.</td></tr><tr><td>Abraham et al. 2017, Bioinformatics 33(17):2776-2778</td><td><a href="https://doi.org/10.1093/bioinformatics/btx299" target="_blank" rel="noopener">doi:10.1093/bioinformatics/btx299</a></td><td>flashpca2 randomized PCA implementation</td><td>Supports computationally efficient ancestry PCA for large genotype matrices.</td></tr>
+            </table>
+        </div>
     </section>
 
     <section id="methods">
