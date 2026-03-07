@@ -56,6 +56,70 @@ GWAS_THRESHOLDS = {
 }
 
 
+GWAS_METHODS_CITATIONS = [
+    {
+        'citation': 'Anderson et al. 2010, Nat Protoc 5:1564-1573',
+        'doi': '10.1038/nprot.2010.116',
+        'cited_for': 'Foundational GWAS sample/variant QC guidance',
+        'pipeline_application': (
+            'Supports sample call rate and heterozygosity outlier review; '
+            'supports variant call rate and HWE filtering guidance.'
+        ),
+    },
+    {
+        'citation': 'Marees et al. 2018, Int J Methods Psychiatr Res 27:e1608',
+        'doi': '10.1002/mpr.1608',
+        'cited_for': 'Modern practical GWAS QC workflow recommendations',
+        'pipeline_application': (
+            'Supports contamination/noise interpretation (BAF SD, heterozygosity), '
+            'variant QC thresholds, and stricter PCA MAF filtering for stability.'
+        ),
+    },
+    {
+        'citation': 'Turner et al. 2011, Curr Protoc Hum Genet Unit 1.19',
+        'doi': '10.1002/0471142905.hg0119s68',
+        'cited_for': 'Array-focused genotype QC and filtering practice',
+        'pipeline_application': (
+            'Supports LRR/BAF quality interpretation, variant missingness thresholds, '
+            'and inbreeding/relatedness flagging context.'
+        ),
+    },
+    {
+        'citation': 'Danecek et al. 2021, Gigascience 10(2):giab008',
+        'doi': '10.1093/gigascience/giab008',
+        'cited_for': 'bcftools framework for variant processing',
+        'pipeline_application': (
+            'Supports IDAT-to-GTC/VCF processing and downstream variant manipulations.'
+        ),
+    },
+    {
+        'citation': 'Li and Durbin 2009, Bioinformatics 25(14):1754-1760',
+        'doi': '10.1093/bioinformatics/btp324',
+        'cited_for': 'BWA alignment algorithm',
+        'pipeline_application': (
+            'Supports manifest probe flank realignment to the selected reference genome.'
+        ),
+    },
+    {
+        'citation': 'Chang et al. 2015, Gigascience 4:7',
+        'doi': '10.1186/s13742-015-0047-8',
+        'cited_for': 'PLINK analytical framework for large-scale genotype QC',
+        'pipeline_application': (
+            'Supports variant-level QC metrics, HWE/missingness/MAF filtering, '
+            'and LD pruning in ancestry PCA preparation.'
+        ),
+    },
+    {
+        'citation': 'Abraham et al. 2017, Bioinformatics 33(17):2776-2778',
+        'doi': '10.1093/bioinformatics/btx299',
+        'cited_for': 'flashpca2 randomized PCA implementation',
+        'pipeline_application': (
+            'Supports computationally efficient ancestry PCA for large genotype matrices.'
+        ),
+    },
+]
+
+
 def get_tool_versions():
     """Collect versions of key tools."""
     versions = {}
@@ -596,6 +660,9 @@ def generate_html_report(output_dir):
     with open(methods_path, 'w') as f:
         f.write(methods_text)
 
+    citations_path = os.path.join(output_dir, 'citations_summary.tsv')
+    _write_citations_summary_tsv(citations_path)
+
     _consolidate_summary_outputs(output_dir)
 
     return report_path
@@ -611,6 +678,7 @@ def _consolidate_summary_outputs(output_dir):
         'pipeline_report.html',
         'summary_statistics.tsv',
         'methods_text.txt',
+        'citations_summary.tsv',
         'compiled_sample_sheet.tsv',
         'qc_diagnostic_report.txt',
         'qc_dashboard.png',
@@ -665,6 +733,17 @@ def _write_summary_tsv(stats, filepath):
                 f.write(f"{label} (mean ± SD)\t{mean:.4f} ± {sd:.4f}\n")
                 f.write(f"{label} (median)\t{median:.4f}\n")
                 f.write(f"{label} (range)\t{mn:.4f} – {mx:.4f}\n")
+
+
+def _write_citations_summary_tsv(filepath):
+    """Write a compiled best-practice citations summary TSV."""
+    with open(filepath, 'w') as f:
+        f.write("Citation\tDOI\tCited for\tPipeline application\n")
+        for row in GWAS_METHODS_CITATIONS:
+            f.write(
+                f"{row['citation']}\t{row['doi']}\t"
+                f"{row['cited_for']}\t{row['pipeline_application']}\n"
+            )
 
 
 def _prepare_sample_json(qc_rows, stats):
@@ -1264,6 +1343,21 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         tools_html += f'<li><code>{tool}</code>: {display_ver}</li>'
     tools_html += '</ul>'
 
+    def _esc(text):
+        return (text.replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;'))
+
+    citation_rows = ''
+    for row in GWAS_METHODS_CITATIONS:
+        doi = row['doi']
+        citation_rows += (
+            f"<tr><td>{_esc(row['citation'])}</td>"
+            f"<td><a href=\"https://doi.org/{doi}\" target=\"_blank\" rel=\"noopener\">doi:{doi}</a></td>"
+            f"<td>{_esc(row['cited_for'])}</td>"
+            f"<td>{_esc(row['pipeline_application'])}</td></tr>"
+        )
+
     # Pass rate
     pass_rate = stats.get('pass_rate', 0)
     pass_color = '#059669' if pass_rate >= 90 else '#d97706' if pass_rate >= 70 else '#dc2626'
@@ -1291,6 +1385,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         <a href="#pca">Ancestry PCA</a>
         <a href="#realignment">Realignment</a>
         <a href="#diagnostics">Diagnostics</a>
+        <a href="#citations">Citations</a>
         <a href="#methods">Methods</a>
         <a href="#tools">Tools</a>
     </nav>
@@ -1498,6 +1593,20 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         {_pre_block(diag_text, 'Diagnostic Report')}
     </section>
 
+    <section id="citations">
+        <h2>📚 GWAS Methods and Best-Practice Citations</h2>
+        <div class="card">
+            <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.75rem">
+                Compiled citation summary for methods, tools, and algorithms used in this
+                pipeline. The same content is also exported as <code>citations_summary.tsv</code>.
+            </p>
+            <table class="threshold-table">
+                <tr><th>Citation</th><th>DOI</th><th>Cited for</th><th>Pipeline application</th></tr>
+                {citation_rows}
+            </table>
+        </div>
+    </section>
+
     <section id="methods">
         <h2>📝 Methods Text (for publications)</h2>
         <div class="methods-text">
@@ -1555,6 +1664,7 @@ def main():
         print(f"Pipeline report: {report_path}")
         print(f"Summary stats:   {os.path.join(args.output_dir, 'summary_statistics.tsv')}")
         print(f"Methods text:    {os.path.join(args.output_dir, 'methods_text.txt')}")
+        print(f"Citations TSV:   {os.path.join(args.output_dir, 'citations_summary.tsv')}")
         print(f"Summary dir:     {os.path.join(args.output_dir, 'summary')}")
     else:
         print("Error: Could not generate report.", file=sys.stderr)
