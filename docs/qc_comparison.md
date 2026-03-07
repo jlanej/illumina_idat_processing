@@ -14,6 +14,8 @@ The comparison covers:
 - **Hardy-Weinberg equilibrium (HWE)** — conformance to expected allele frequency ratios
 - **Minor allele frequency (MAF)** — allele frequency distribution across variants
 
+Default thresholds in these comparisons (call rate ≥ 0.97, LRR SD ≤ 0.35, variant missingness ≤ 0.02, HWE p ≥ 1e-6, MAF ≥ 0.01) follow common GWAS QC guidance from Anderson et al. (2010), Marees et al. (2018), and Turner et al. (2011). They should be treated as robust starting points and tuned when cohort design or ancestry structure warrants stricter or more permissive cutoffs.
+
 ## Output Files
 
 | File | Description |
@@ -163,3 +165,9 @@ A typical expectation for a well-powered study with ≥ 500 samples:
 - LRR SD reduction: 15–40%
 - Samples with improved call rate: > 80%
 - New variants passing 1% missingness: > 10,000
+
+## References
+
+- Anderson C.A. et al. *Data quality control in genetic case-control association studies.* Nat Protoc 5, 1564–1573 (2010). [DOI: 10.1038/nprot.2010.116](https://doi.org/10.1038/nprot.2010.116)
+- Marees A.T. et al. *A tutorial on conducting genome-wide association studies: Quality control and statistical analysis.* Int J Methods Psychiatr Res 27:e1608 (2018). [DOI: 10.1002/mpr.1608](https://doi.org/10.1002/mpr.1608)
+- Turner S. et al. *Quality Control Procedures for Genome-Wide Association Studies.* Curr Protoc Hum Genet, Unit 1.19 (2011). [DOI: 10.1002/0471142905.hg0119s68](https://doi.org/10.1002/0471142905.hg0119s68)
