@@ -223,7 +223,7 @@ if [[ "${HAVE_FLASHPCA}" == "true" && -f "${PREFIX}_ldpruned.bed" ]]; then
         --ndim "${N_PCS}" \
         --outpc "${PREFIX}_pcs.txt" \
         --outval "${OUTPUT_DIR}/pca_eigenvalues.txt" \
-        --outvec "${PREFIX}_loadings.txt" \
+        --outload "${PREFIX}_loadings.txt" \
         --outmeansd "${PREFIX}_meansd.txt" \
         --numthreads "${THREADS}" 2>&1 | tail -5
 
