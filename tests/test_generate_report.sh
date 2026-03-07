@@ -24,7 +24,9 @@ echo "============================================"
 echo ""
 
 # --- Create mock pipeline output ---
-mkdir -p "${TMP_DIR}/stage2/qc" "${TMP_DIR}/stage1/qc" "${TMP_DIR}/ancestry_pca"
+mkdir -p "${TMP_DIR}/stage2/qc" "${TMP_DIR}/stage1/qc" "${TMP_DIR}/ancestry_pca" \
+         "${TMP_DIR}/realigned_manifests" "${TMP_DIR}/stage2/qc/comparison" \
+         "${TMP_DIR}/stage2/qc/variant_qc" "${TMP_DIR}/sex_check"
 
 cat > "${TMP_DIR}/stage2/qc/stage2_sample_qc.tsv" << 'EOF'
 sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
@@ -46,6 +48,26 @@ S001	S001	-0.0200	0.0100	0.0020	0.0010
 S002	S002	0.0100	-0.0200	-0.0010	0.0005
 S003	S003	0.0300	0.0200	0.0015	-0.0020
 EOF
+
+cat > "${TMP_DIR}/ancestry_pca/qc_summary.txt" << 'EOF'
+Ancestry PCA QC summary (mock)
+EOF
+
+cat > "${TMP_DIR}/realigned_manifests/realign_summary.txt" << 'EOF'
+Manifest realignment summary (mock)
+EOF
+
+cat > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_report.txt" << 'EOF'
+QC comparison report (mock)
+EOF
+
+cat > "${TMP_DIR}/stage2/qc/variant_qc/variant_qc_summary.txt" << 'EOF'
+Variant QC summary (mock)
+EOF
+
+printf 'mock-png' > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_samples.png"
+printf 'mock-png' > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_variants.png"
+printf 'mock-png' > "${TMP_DIR}/sex_check/sex_check_chrXY_lrr.png"
 
 cat > "${TMP_DIR}/mock_data_notice.txt" << 'EOF'
 This report is an example generated from deterministic mock data for demonstration purposes only.
@@ -215,8 +237,38 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 13: BAF flag count in JSON ---
-echo "--- Test 13: BAF SD flag ---"
+# --- Test 13: Consolidated summary directory ---
+echo "--- Test 13: Consolidated summary directory ---"
+SUMMARY_DIR="${TMP_DIR}/summary"
+if [[ -d "${SUMMARY_DIR}" ]]; then
+    echo "  PASS: Summary directory generated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Summary directory missing"
+    (( FAIL++ )) || true
+fi
+
+for required_file in \
+    pipeline_report.html \
+    summary_statistics.tsv \
+    methods_text.txt \
+    pca_projections.tsv \
+    ancestry_pca_qc_summary.txt \
+    realign_summary.txt \
+    qc_comparison_report.txt \
+    variant_qc_summary_stage2.txt \
+    sex_check_chrXY_lrr.png; do
+    if [[ -f "${SUMMARY_DIR}/${required_file}" ]]; then
+        echo "  PASS: Summary artifact '${required_file}' present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Summary artifact '${required_file}' missing"
+        (( FAIL++ )) || true
+    fi
+done
+
+# --- Test 14: BAF flag count in JSON ---
+echo "--- Test 14: BAF SD flag ---"
 # S002 has BAF SD 0.1623 > 0.15, should be flagged
 if grep -q '"baf_flag": true' "${REPORT}"; then
     echo "  PASS: BAF SD flag present in JSON"
@@ -226,8 +278,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 14: GWAS threshold constants ---
-echo "--- Test 14: GWAS threshold constants in Python ---"
+# --- Test 15: GWAS threshold constants ---
+echo "--- Test 15: GWAS threshold constants in Python ---"
 if python3 -c "
 import sys
 sys.path.insert(0, '${REPO_DIR}/scripts')
@@ -247,8 +299,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 15: compute_summary_stats enhancements ---
-echo "--- Test 15: compute_summary_stats enhancements ---"
+# --- Test 16: compute_summary_stats enhancements ---
+echo "--- Test 16: compute_summary_stats enhancements ---"
 if python3 -c "
 import sys
 sys.path.insert(0, '${REPO_DIR}/scripts')
@@ -270,8 +322,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 16: Boundary value pass/fail classification ---
-echo "--- Test 16: Boundary value pass/fail classification ---"
+# --- Test 17: Boundary value pass/fail classification ---
+echo "--- Test 17: Boundary value pass/fail classification ---"
 BOUNDARY_DIR="${TMP_DIR}/boundary"
 mkdir -p "${BOUNDARY_DIR}"
 cat > "${BOUNDARY_DIR}/boundary_qc.tsv" << 'BEOF'

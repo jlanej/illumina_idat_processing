@@ -530,6 +530,9 @@ if command -v python3 &>/dev/null; then
     if [[ -f "${OUTPUT_DIR}/methods_text.txt" ]]; then
         echo "Methods text:        ${OUTPUT_DIR}/methods_text.txt"
     fi
+    if [[ -d "${OUTPUT_DIR}/summary" ]]; then
+        echo "Consolidated summary: ${OUTPUT_DIR}/summary/"
+    fi
 else
     echo "Note: python3 not found; skipping report generation."
 fi
@@ -560,4 +563,6 @@ fi
 if [[ -f "${OUTPUT_DIR}/methods_text.txt" ]]; then
     echo "  Methods text:     ${OUTPUT_DIR}/methods_text.txt"
 fi
-
+if [[ -d "${OUTPUT_DIR}/summary" ]]; then
+    echo "  Summary bundle:   ${OUTPUT_DIR}/summary/"
+fi
