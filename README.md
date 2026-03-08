@@ -6,7 +6,7 @@ Inspired by [MoChA](https://github.com/freeseek/mocha) and [MoChA WDL](https://g
 
 ## Overview
 
-The pipeline runs in seven phases:
+The pipeline runs in eight phases:
 
 1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
@@ -18,9 +18,11 @@ The pipeline runs in seven phases:
 
 5. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
 
-6. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F) and ancestry PCs (default 20) for every sample.
+6. **Peddy QC**: Run [peddy](https://github.com/brentp/peddy) for automated pedigree/sex/ancestry quality control. Peddy validates sex from genotypes, predicts ancestry by projecting onto 1000 Genomes principal components, and checks relatedness between all sample pairs. If a pedigree file (`--ped-file`) is provided it is validated; otherwise a minimal PED (unrelated singletons) is generated. A final pedigree incorporating peddy's discovered relationships is produced. Peddy's sample-level metrics (ancestry prediction, predicted sex, heterozygosity, PCs) are merged into the compiled sample sheet with a `peddy_` prefix. **Genome-aware**: when the pipeline genome is not GRCh38 (e.g. T2T-CHM13), `bcftools +liftover` is used to convert variant coordinates to GRCh38, variant IDs are set to `CHROM:POS:REF:ALT` to match peddy's GRCH38 sites list, and only matching sites are retained — producing a small, correctly-coordinated VCF for peddy regardless of the source reference build.
 
-7. **QC Diagnostics & Report**: Automated QC diagnostics identify potential issues (deflated call rates, inflated LRR SD, build mismatches). A comprehensive **interactive HTML pipeline report** is generated featuring:
+7. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F), ancestry PCs (default 20), and peddy sample-level metrics (ancestry prediction, sex check, heterozygosity) for every sample.
+
+8. **QC Diagnostics & Report**: Automated QC diagnostics identify potential issues (deflated call rates, inflated LRR SD, build mismatches). A comprehensive **interactive HTML pipeline report** is generated featuring:
    - **Interactive Plotly.js charts** — Call Rate vs LRR SD scatter plot and metric distribution histograms with hover tooltips, zoom, and pan
    - **GWAS QC best-practice thresholds** — Reference table citing Anderson et al. (2010), Marees et al. (2018), and Turner et al. (2011), covering sample call rate (≥ 0.97), LRR SD (≤ 0.35), BAF SD (≤ 0.15), heterozygosity rate (± 3 SD), variant missingness (< 0.02), HWE p-value (≥ 1e-6), MAF (≥ 0.01), and inbreeding F (|F| ≤ 0.05), with per-threshold rationale and citation notes in the report
    - **Compiled methods citations summary** — Exported as `citations_summary.tsv` and rendered in the report, listing each citation, what it supports, and how that method/tool/algorithm is applied in this pipeline
@@ -135,8 +137,10 @@ apptainer exec --bind $PWD illumina_idat_processing_main.sif \
 | `--min-call-rate FLOAT` | Min call rate for HQ samples in Stage 2 (default: 0.97) |
 | `--max-lrr-sd FLOAT` | Max LRR SD for HQ samples in Stage 2 (default: 0.35) |
 | `--sample-name-map FILE` | Two-column tab-delimited file mapping IDAT root names to desired sample names |
+| `--ped-file FILE` | Pedigree file (.ped/.fam) for peddy relationship validation. If not provided, a minimal PED (unrelated singletons) is generated |
 | `--force-rename` | Allow renaming even when fewer than 50% of samples match the name map |
 | `--skip-stage2` | Skip Stage 2 reclustering |
+| `--skip-peddy` | Skip peddy pedigree/sex/ancestry QC step |
 | `--skip-download` | Do not auto-download manifests or reference |
 | `--skip-failures` | Continue past corrupt/truncated IDAT files instead of halting |
 | `--force` | Force re-run of all steps, ignoring checkpoints |
@@ -271,7 +275,15 @@ output/
 │   ├── pca_eigenvalues.txt          # PCA eigenvalues
 │   ├── pca_qc_samples.txt           # QC'd sample set used for PCA
 │   └── qc_summary.txt               # QC filtering summary
-├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + inbreeding F)
+├── peddy/                           # Peddy pedigree/sex/ancestry QC
+│   ├── peddy.het_check.csv          # Ancestry prediction, het ratio, PCs per sample
+│   ├── peddy.sex_check.csv          # Sex check: predicted vs PED sex per sample
+│   ├── peddy.ped_check.csv          # Pairwise relatedness checks
+│   ├── peddy.peddy.ped              # Enhanced PED with QC flags
+│   ├── peddy_final.ped              # Final pedigree with discovered relationships
+│   ├── peddy.html                   # Peddy interactive report
+│   └── peddy.background_pca.json    # Ancestry PCA projection data
+├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + peddy metrics)
 ├── qc_diagnostic_report.txt         # Automated QC diagnostic report
 ├── pipeline_report.html             # Comprehensive HTML report with figures
 ├── summary_statistics.tsv           # Publication-ready summary statistics table

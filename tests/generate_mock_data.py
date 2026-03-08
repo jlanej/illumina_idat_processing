@@ -317,6 +317,125 @@ def generate_mock_notice(output_dir):
     return filepath
 
 
+def generate_peddy_data(output_dir, n_samples=30):
+    """Write mock peddy output files (het_check.csv, sex_check.csv, ped_check.csv, peddy.ped).
+
+    Simulates peddy's ancestry prediction, sex check, and relatedness analysis.
+    """
+    peddy_dir = os.path.join(output_dir, 'peddy')
+    os.makedirs(peddy_dir, exist_ok=True)
+    rng = _rng()
+
+    ancestry_groups = ['EUR', 'AFR', 'EAS', 'AMR', 'SAS']
+
+    # --- het_check.csv ---
+    het_path = os.path.join(peddy_dir, 'peddy.het_check.csv')
+    with open(het_path, 'w') as f:
+        f.write('sample_id,sampled_sites,mean_depth,median_depth,depth_outlier,'
+                'het_count,het_ratio,ratio_outlier,idr_baf,p10,p90,'
+                'PC1,PC2,PC3,PC4,ancestry-prediction,ancestry-prob\n')
+        for i in range(n_samples):
+            sid = f"SAMPLE_{i + 1:03d}"
+            cluster = i % 3
+            ancestry = ancestry_groups[cluster % len(ancestry_groups)]
+            prob = round(rng.uniform(0.85, 0.99), 4)
+            sites = rng.randint(15000, 20000)
+            depth = round(rng.uniform(25.0, 45.0), 1)
+            het_count = rng.randint(3000, 5500)
+            het_ratio = round(het_count / sites, 4)
+            ratio_outlier = 'False'
+            if i == 9:
+                ratio_outlier = 'True'
+            pc1 = round([-0.015, 0.008, 0.025][cluster] + rng.gauss(0, 0.004), 6)
+            pc2 = round([0.008, -0.015, 0.018][cluster] + rng.gauss(0, 0.004), 6)
+            pc3 = round(rng.gauss(0, 0.003), 6)
+            pc4 = round(rng.gauss(0, 0.003), 6)
+            idr = round(rng.uniform(0.01, 0.04), 4)
+            p10 = round(rng.uniform(0.0, 0.05), 4)
+            p90 = round(p10 + idr + rng.uniform(0.85, 0.95), 4)
+            f.write(f'{sid},{sites},{depth},{depth},False,'
+                    f'{het_count},{het_ratio},{ratio_outlier},{idr},{p10},{p90},'
+                    f'{pc1},{pc2},{pc3},{pc4},{ancestry},{prob}\n')
+
+    # --- sex_check.csv ---
+    sex_path = os.path.join(peddy_dir, 'peddy.sex_check.csv')
+    with open(sex_path, 'w') as f:
+        f.write('sample_id,error,het_count,hom_alt_count,hom_ref_count,'
+                'het_ratio,ped_sex,predicted_sex\n')
+        for i in range(n_samples):
+            sid = f"SAMPLE_{i + 1:03d}"
+            male = (i % 2 == 0)
+            predicted = 'male' if male else 'female'
+            ped_sex = 'male' if male else 'female'
+            error = 'False'
+            if male:
+                het_c = rng.randint(5, 30)
+                hom_alt = rng.randint(200, 400)
+                hom_ref = rng.randint(4000, 6000)
+            else:
+                het_c = rng.randint(1500, 3000)
+                hom_alt = rng.randint(1000, 2000)
+                hom_ref = rng.randint(2000, 4000)
+            hr = round(het_c / (het_c + hom_alt + hom_ref), 4) if (het_c + hom_alt + hom_ref) > 0 else 0
+            f.write(f'{sid},{error},{het_c},{hom_alt},{hom_ref},'
+                    f'{hr},{ped_sex},{predicted}\n')
+
+    # --- ped_check.csv ---
+    ped_path = os.path.join(peddy_dir, 'peddy.ped_check.csv')
+    with open(ped_path, 'w') as f:
+        f.write('sample_a,sample_b,n,rel,pedigree_relatedness,rel_difference,'
+                'ibs0,ibs2,shared_hets,hets_a,hets_b,pedigree_parents\n')
+        # Write a few representative pairs
+        for i in range(min(5, n_samples)):
+            for j in range(i + 1, min(6, n_samples)):
+                sid_a = f"SAMPLE_{i + 1:03d}"
+                sid_b = f"SAMPLE_{j + 1:03d}"
+                rel = round(rng.uniform(-0.05, 0.05), 4)
+                ibs0 = rng.randint(1000, 3000)
+                ibs2 = rng.randint(8000, 12000)
+                shared = rng.randint(2000, 4000)
+                ha = rng.randint(3000, 5000)
+                hb = rng.randint(3000, 5000)
+                f.write(f'{sid_a},{sid_b},{rng.randint(15000, 20000)},{rel},'
+                        f'0.0,{rel},  {ibs0},{ibs2},{shared},{ha},{hb},False\n')
+
+    # --- peddy.ped (enhanced pedigree) ---
+    ped_path = os.path.join(peddy_dir, 'peddy.peddy.ped')
+    with open(ped_path, 'w') as f:
+        for i in range(n_samples):
+            sid = f"SAMPLE_{i + 1:03d}"
+            sex = '1' if i % 2 == 0 else '2'
+            f.write(f'{sid}\t{sid}\t0\t0\t{sex}\t-9\n')
+
+    # --- peddy_final.ped ---
+    final_path = os.path.join(peddy_dir, 'peddy_final.ped')
+    with open(final_path, 'w') as f:
+        for i in range(n_samples):
+            sid = f"SAMPLE_{i + 1:03d}"
+            sex = '1' if i % 2 == 0 else '2'
+            f.write(f'{sid}\t{sid}\t0\t0\t{sex}\t-9\n')
+
+    # --- background_pca.json (ancestry PCA projection) ---
+    bg_pca_path = os.path.join(peddy_dir, 'peddy.background_pca.json')
+    import json
+    bg_data = []
+    for i in range(n_samples):
+        sid = f"SAMPLE_{i + 1:03d}"
+        cluster = i % 3
+        bg_data.append({
+            'sample_id': sid,
+            'PC1': round([-0.015, 0.008, 0.025][cluster] + rng.gauss(0, 0.004), 6),
+            'PC2': round([0.008, -0.015, 0.018][cluster] + rng.gauss(0, 0.004), 6),
+            'PC3': round(rng.gauss(0, 0.003), 6),
+            'PC4': round(rng.gauss(0, 0.003), 6),
+            'ancestry': ancestry_groups[cluster % len(ancestry_groups)],
+        })
+    with open(bg_pca_path, 'w') as f:
+        json.dump(bg_data, f)
+
+    return het_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate deterministic mock pipeline output for testing"
@@ -363,6 +482,9 @@ def main():
 
     sex_check = generate_sex_check_data(args.output_dir, n)
     print(f"  Sex check table:   {sex_check}")
+
+    peddy = generate_peddy_data(args.output_dir, n)
+    print(f"  Peddy data:        {peddy}")
 
     note = generate_mock_notice(args.output_dir)
     print(f"  Mock notice:      {note}")

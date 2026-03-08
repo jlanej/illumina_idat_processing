@@ -117,6 +117,24 @@ GWAS_METHODS_CITATIONS = [
             'Supports computationally efficient ancestry PCA for large genotype matrices.'
         ),
     },
+    {
+        'citation': 'Pedersen and Quinlan 2017, Am J Hum Genet 100(3):406-413',
+        'doi': '10.1016/j.ajhg.2017.01.017',
+        'cited_for': 'peddy pedigree/sex/ancestry QC',
+        'pipeline_application': (
+            'Supports automated sex check, ancestry prediction, and relatedness '
+            'validation from VCF genotypes via the peddy tool.'
+        ),
+    },
+    {
+        'citation': 'Genovese et al. 2024, Bioinformatics 40(2):btae038',
+        'doi': '10.1093/bioinformatics/btae038',
+        'cited_for': 'bcftools/liftover assembly-coordinate conversion',
+        'pipeline_application': (
+            'Supports coordinate conversion from non-GRCh38 builds to GRCh38 '
+            'for peddy site matching via bcftools +liftover.'
+        ),
+    },
 ]
 
 
@@ -128,6 +146,7 @@ def get_tool_versions():
         ('plink2', ['plink2', '--version']),
         ('bwa', ['bwa']),  # bwa prints version to stderr
         ('flashpca', ['flashpca', '--version']),
+        ('peddy', ['python3', '-m', 'peddy', '--version']),
     ]:
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -163,6 +182,20 @@ def read_text(filepath):
         return None
     with open(filepath) as f:
         return f.read()
+
+
+def read_csv(filepath):
+    """Read a CSV file, return (header, list of row dicts)."""
+    import csv
+    if not os.path.exists(filepath):
+        return [], []
+    rows = []
+    with open(filepath) as f:
+        reader = csv.DictReader(f)
+        header = reader.fieldnames or []
+        for row in reader:
+            rows.append(row)
+    return header, rows
 
 
 def safe_float(val, default=None):
@@ -586,6 +619,9 @@ def generate_html_report(output_dir):
     pca_summary = read_text(os.path.join(output_dir, 'ancestry_pca', 'qc_summary.txt'))
     mock_notice = read_text(os.path.join(output_dir, 'mock_data_notice.txt'))
 
+    # Peddy directory
+    peddy_dir = os.path.join(output_dir, 'peddy')
+
     # Generate methods text
     genome = 'CHM13'  # Could parse from config, but CHM13 is default
     methods_text = generate_methods_text(stats, tool_versions, genome)
@@ -642,12 +678,14 @@ def generate_html_report(output_dir):
     # ---- Build HTML ----
     pca_json = _prepare_pca_json(pca_file, qc_rows) if os.path.exists(pca_file) else '[]'
     sex_check_json = _prepare_sex_check_json(sex_check_table)
+    peddy_json = _prepare_peddy_json(peddy_dir)
     html = _build_html(stats, stage1_stats,
                        figures, realign_text, comparison_text,
                        variant_qc_text, diag_text, methods_text,
                        pca_summary, tool_versions, stage_label,
                        qc_rows=qc_rows, pca_json=pca_json,
                        sex_check_json=sex_check_json,
+                       peddy_json=peddy_json,
                        mock_notice=mock_notice or '')
 
     report_path = os.path.join(output_dir, 'pipeline_report.html')
@@ -705,6 +743,11 @@ def _consolidate_summary_outputs(output_dir):
         (os.path.join('stage2', 'qc', 'comparison', 'qc_comparison_variants.png'), 'qc_comparison_variants.png'),
         (os.path.join('stage2', 'qc', 'variant_qc', 'variant_qc_summary.txt'), 'variant_qc_summary_stage2.txt'),
         (os.path.join('stage1', 'qc', 'variant_qc', 'variant_qc_summary.txt'), 'variant_qc_summary_stage1.txt'),
+        (os.path.join('peddy', 'peddy.het_check.csv'), 'peddy.het_check.csv'),
+        (os.path.join('peddy', 'peddy.sex_check.csv'), 'peddy.sex_check.csv'),
+        (os.path.join('peddy', 'peddy.ped_check.csv'), 'peddy.ped_check.csv'),
+        (os.path.join('peddy', 'peddy.peddy.ped'), 'peddy.peddy.ped'),
+        (os.path.join('peddy', 'peddy_final.ped'), 'peddy_final.ped'),
     ]:
         src = os.path.join(output_dir, relpath)
         if os.path.isfile(src):
@@ -841,6 +884,36 @@ def _prepare_sex_check_json(sex_check_file):
             'gender': row.get('computed_gender', 'NA'),
             'chrx_lrr_median': round(x, 6),
             'chry_lrr_median': round(y, 6),
+        })
+    return json.dumps(points)
+
+
+def _prepare_peddy_json(peddy_dir):
+    """Serialize peddy het_check data to JSON for ancestry PCA overlay.
+
+    Returns JSON array of objects with sample_id, ancestry prediction,
+    peddy PCs, and het ratio.
+    """
+    het_file = os.path.join(peddy_dir, 'peddy.het_check.csv')
+    if not os.path.exists(het_file):
+        return '[]'
+
+    _, rows = read_csv(het_file)
+    points = []
+    for row in rows:
+        pc1 = safe_float(row.get('PC1'))
+        pc2 = safe_float(row.get('PC2'))
+        if pc1 is None or pc2 is None:
+            continue
+        points.append({
+            'id': row.get('sample_id', ''),
+            'ancestry': row.get('ancestry-prediction', 'UNKNOWN'),
+            'ancestry_prob': round(safe_float(row.get('ancestry-prob', 0)) or 0, 4),
+            'pc1': round(pc1, 6),
+            'pc2': round(pc2, 6),
+            'pc3': round(safe_float(row.get('PC3')) or 0, 6),
+            'pc4': round(safe_float(row.get('PC4')) or 0, 6),
+            'het_ratio': round(safe_float(row.get('het_ratio')) or 0, 6),
         })
     return json.dumps(points)
 
@@ -1698,6 +1771,94 @@ document.addEventListener('DOMContentLoaded', function() {
         ths.forEach(function(h){h.classList.remove('sort-asc','sort-desc');});
         this.classList.add(asc?'sort-asc':'sort-desc');
     });});
+
+    /* ---- Peddy Ancestry PCA ---- */
+    var peddyEl = document.getElementById('peddy-data');
+    if (peddyEl) {
+        var peddyData = JSON.parse(peddyEl.textContent || '[]');
+        if (peddyData && peddyData.length) {
+            var ANCESTRY_COLORS = {
+                'EUR': '#2563eb', 'AFR': '#dc2626', 'EAS': '#059669',
+                'AMR': '#d97706', 'SAS': '#7c3aed', 'UNKNOWN': '#6b7280'
+            };
+
+            function peddyPcaPlot(divId, xKey, yKey, title) {
+                var d = document.getElementById(divId);
+                if (!d) return;
+                var grouped = {};
+                peddyData.forEach(function(p) {
+                    if (p[xKey] === null || p[yKey] === null) return;
+                    var anc = p.ancestry || 'UNKNOWN';
+                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
+                    grouped[anc].x.push(p[xKey]);
+                    grouped[anc].y.push(p[yKey]);
+                    grouped[anc].text.push(p.id + ' (' + anc + ', p=' + (p.ancestry_prob || 0).toFixed(2) + ')');
+                });
+                var traces = Object.keys(grouped).sort().map(function(anc) {
+                    var g = grouped[anc];
+                    return {
+                        x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
+                        name:anc+' (n='+g.x.length+')',
+                        marker:{color:g.color, size:6, opacity:0.7},
+                        hovertemplate:'<b>%{text}</b><br>'+xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<extra>'+anc+'</extra>'
+                    };
+                });
+                if (!traces.length) return;
+                Plotly.newPlot(d, traces, Object.assign({}, baseLayout, {
+                    title:{text:title,font:{size:14}},
+                    xaxis:{title:xKey.toUpperCase()+' (peddy)',gridcolor:'#f1f5f9',zeroline:false},
+                    yaxis:{title:yKey.toUpperCase()+' (peddy)',gridcolor:'#f1f5f9',zeroline:false}
+                }), cfg);
+            }
+
+            peddyPcaPlot('plot-peddy-pca12', 'pc1', 'pc2', 'Peddy Ancestry PCA: PC1 vs PC2');
+            peddyPcaPlot('plot-peddy-pca34', 'pc3', 'pc4', 'Peddy Ancestry PCA: PC3 vs PC4');
+
+            /* Overlay toggle for pipeline PCA */
+            var overlayBtn = document.getElementById('peddy-overlay-toggle');
+            var pcaPlotDiv = document.getElementById('plot-pca12');
+            if (overlayBtn && pcaPlotDiv && pcaPlotDiv.data) {
+                overlayBtn.addEventListener('click', function() {
+                    var isActive = this.classList.toggle('active');
+                    if (isActive) {
+                        this.textContent = 'Hide peddy ancestry overlay';
+                        var grouped = {};
+                        peddyData.forEach(function(p) {
+                            if (p.pc1 === null || p.pc2 === null) return;
+                            var anc = p.ancestry || 'UNKNOWN';
+                            if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
+                            grouped[anc].x.push(p.pc1);
+                            grouped[anc].y.push(p.pc2);
+                            grouped[anc].text.push(p.id + ' [peddy: ' + anc + ']');
+                        });
+                        var newTraces = Object.keys(grouped).sort().map(function(anc) {
+                            var g = grouped[anc];
+                            return {
+                                x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
+                                name:'peddy:'+anc+' (n='+g.x.length+')',
+                                marker:{color:g.color, size:8, opacity:0.5, symbol:'diamond'},
+                                hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<extra>peddy:'+anc+'</extra>'
+                            };
+                        });
+                        Plotly.addTraces(pcaPlotDiv, newTraces);
+                    } else {
+                        this.textContent = 'Overlay peddy ancestry';
+                        var nOriginal = pcaPlotDiv.data.length;
+                        var ancestryCount = Object.keys(ANCESTRY_COLORS).length;
+                        if (nOriginal > ancestryCount) {
+                            var toRemove = [];
+                            for (var ri = nOriginal - 1; ri >= 0; ri--) {
+                                if (pcaPlotDiv.data[ri].name && pcaPlotDiv.data[ri].name.indexOf('peddy:') === 0) {
+                                    toRemove.push(ri);
+                                }
+                            }
+                            if (toRemove.length) Plotly.deleteTraces(pcaPlotDiv, toRemove);
+                        }
+                    }
+                });
+            }
+        }
+    }
 });
 """
 
@@ -1705,7 +1866,8 @@ document.addEventListener('DOMContentLoaded', function() {
 def _build_html(stats, stage1_stats, figures, realign_text,
                 comparison_text, variant_qc_text, diag_text,
                 methods_text, pca_summary, tool_versions, stage_label,
-                qc_rows=None, pca_json='[]', sex_check_json='[]', mock_notice=''):
+                qc_rows=None, pca_json='[]', sex_check_json='[]',
+                peddy_json='[]', mock_notice=''):
     """Build the HTML report string with interactive Plotly charts."""
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1822,6 +1984,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         <a href="#variant-qc">Variant QC</a>
         <a href="#sex-check">Sex Check</a>
         <a href="#pca">Ancestry PCA</a>
+        <a href="#peddy">Peddy QC</a>
         <a href="#realignment">Realignment</a>
         <a href="#diagnostics">Diagnostics</a>
         <a href="#citations">Citations</a>
@@ -2036,6 +2199,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             <input id="pca-cluster-pcs" class="plot-input" type="number" min="2" max="20" value="4">
             <button id="pca-cluster-run" class="plot-btn" type="button">Run k-means</button>
             <button id="pca-cluster-export" class="plot-btn" type="button" disabled>Export clusters</button>
+            <button id="peddy-overlay-toggle" class="plot-btn" type="button">Overlay peddy ancestry</button>
             <span id="pca-cluster-status" class="plot-status">No clusters computed.</span>
         </div>
         <div class="plot-grid" id="pca-2d-grid">
@@ -2048,6 +2212,23 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
         </noscript>
         {_pre_block(pca_summary, 'PCA QC Summary')}
+    </section>
+
+    <section id="peddy">
+        <h2>🔬 Peddy QC (Pedigree/Sex/Ancestry)</h2>
+        <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.75rem">
+            Peddy validates sex, ancestry, and relatedness from VCF genotypes.
+            Ancestry predictions are colored by predicted population (EUR, AFR, EAS, AMR, SAS).
+        </p>
+        <div class="plot-grid">
+            <div class="card"><div id="plot-peddy-pca12" class="plot-box"></div></div>
+            <div class="card"><div id="plot-peddy-pca34" class="plot-box"></div></div>
+        </div>
+        <div class="plot-controls-note">
+            Peddy ancestry PCA projections colored by predicted population.
+            Use the &ldquo;Overlay peddy ancestry&rdquo; button in the Ancestry PCA section
+            above to overlay peddy predictions on the pipeline&rsquo;s own PCA plots.
+        </div>
     </section>
 
     <section id="realignment">
@@ -2107,6 +2288,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     html += f'\n<script type="application/json" id="qc-data">{sample_json}</script>\n'
     html += f'<script type="application/json" id="pca-data">{pca_json}</script>\n'
     html += f'<script type="application/json" id="sex-data">{sex_check_json}</script>\n'
+    html += f'<script type="application/json" id="peddy-data">{peddy_json}</script>\n'
     html += f'<script>{js}</script>\n'
     html += '</body>\n</html>'
 
