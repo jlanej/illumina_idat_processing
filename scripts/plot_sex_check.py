@@ -195,6 +195,20 @@ def create_sex_check_plot(chrx_medians, chry_medians, sample_names,
     return plot_path
 
 
+def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
+                          output_dir):
+    """Write per-sample chrX/chrY median LRR values used by sex check plots."""
+    table_path = os.path.join(output_dir, 'sex_check_chrXY_lrr.tsv')
+    with open(table_path, 'w') as out:
+        out.write("sample_id\tchrx_lrr_median\tchry_lrr_median\tcomputed_gender\n")
+        for i, name in enumerate(sample_names):
+            if i not in chrx_medians or i not in chry_medians:
+                continue
+            sex = sex_map.get(name, 'NA')
+            out.write(f"{name}\t{chrx_medians[i]:.6f}\t{chry_medians[i]:.6f}\t{sex}\n")
+    return table_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate sex check plot: median chrX LRR vs median chrY LRR"
@@ -234,11 +248,16 @@ def main():
     plot_path = create_sex_check_plot(
         chrx_medians, chry_medians, sample_names, sex_map, args.output_dir
     )
+    table_path = write_sex_check_table(
+        chrx_medians, chry_medians, sample_names, sex_map, args.output_dir
+    )
 
     if plot_path:
         print(f"  Sex check plot: {plot_path}")
     else:
         print("  Warning: Sex check plot could not be generated.")
+    if table_path:
+        print(f"  Sex check table: {table_path}")
 
 
 if __name__ == "__main__":

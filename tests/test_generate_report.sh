@@ -68,6 +68,12 @@ EOF
 printf 'mock-png' > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_samples.png"
 printf 'mock-png' > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_variants.png"
 printf 'mock-png' > "${TMP_DIR}/sex_check/sex_check_chrXY_lrr.png"
+cat > "${TMP_DIR}/sex_check/sex_check_chrXY_lrr.tsv" << 'EOF'
+sample_id	chrx_lrr_median	chry_lrr_median	computed_gender
+S001	-0.1200	0.0900	M
+S002	0.0400	-0.0800	F
+S003	-0.1000	0.0700	M
+EOF
 
 cat > "${TMP_DIR}/mock_data_notice.txt" << 'EOF'
 This report is an example generated from deterministic mock data for demonstration purposes only.
@@ -98,7 +104,7 @@ fi
 
 # --- Test 3: Report contains interactive plot containers ---
 echo "--- Test 3: Interactive plot containers ---"
-for div_id in plot-scatter plot-cr plot-lrr plot-pca12 plot-pca34; do
+for div_id in plot-scatter plot-cr plot-lrr plot-pca12 plot-pca34 plot-sex-check; do
     if grep -q "id=\"${div_id}\"" "${REPORT}"; then
         echo "  PASS: Plot container '${div_id}' found"
         (( PASS++ )) || true
@@ -115,6 +121,24 @@ if grep -q 'Example Output (Mock Data)' "${REPORT}"; then
     (( PASS++ )) || true
 else
     echo "  FAIL: Mock/example banner missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 4b: Scatter/density controls ---
+echo "--- Test 4b: Scatter/density controls ---"
+if grep -q "label:'Scatter'" "${REPORT}" && grep -q "label:'Density'" "${REPORT}"; then
+    echo "  PASS: Scatter/density mode toggle controls present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Scatter/density mode toggle controls missing"
+    (( FAIL++ )) || true
+fi
+
+if grep -q "marker:{color:g.color, size:5, opacity:0.65}" "${REPORT}"; then
+    echo "  PASS: PCA default point size updated"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: PCA default point size not updated"
     (( FAIL++ )) || true
 fi
 
@@ -198,6 +222,16 @@ if grep -q 'id="pca-data"' "${REPORT}" && grep -q '"pc1"' "${REPORT}" && grep -q
     (( PASS++ )) || true
 else
     echo "  FAIL: PCA data JSON block missing or incomplete"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 7c: Sex check data JSON embedded ---
+echo "--- Test 7c: Sex check data JSON ---"
+if grep -q 'id="sex-data"' "${REPORT}" && grep -q '"chrx_lrr_median"' "${REPORT}" && grep -q '"S001"' "${REPORT}"; then
+    echo "  PASS: Sex check data JSON block found with sample data"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sex check data JSON block missing or incomplete"
     (( FAIL++ )) || true
 fi
 
@@ -296,7 +330,8 @@ for required_file in \
     realign_summary.txt \
     qc_comparison_report.txt \
     variant_qc_summary_stage2.txt \
-    sex_check_chrXY_lrr.png; do
+    sex_check_chrXY_lrr.png \
+    sex_check_chrXY_lrr.tsv; do
     if [[ -f "${SUMMARY_DIR}/${required_file}" ]]; then
         echo "  PASS: Summary artifact '${required_file}' present"
         (( PASS++ )) || true

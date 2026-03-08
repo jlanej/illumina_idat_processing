@@ -537,6 +537,27 @@ else
     echo "Note: python3 not found; skipping report generation."
 fi
 
+if [[ ! -d "${OUTPUT_DIR}/summary" ]]; then
+    mkdir -p "${OUTPUT_DIR}/summary"
+    for f in \
+        pipeline_report.html \
+        summary_statistics.tsv \
+        methods_text.txt \
+        citations_summary.tsv \
+        compiled_sample_sheet.tsv \
+        qc_diagnostic_report.txt; do
+        if [[ -f "${OUTPUT_DIR}/${f}" ]]; then
+            cp -f "${OUTPUT_DIR}/${f}" "${OUTPUT_DIR}/summary/${f}"
+        fi
+    done
+    if [[ -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.png" ]]; then
+        cp -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.png" "${OUTPUT_DIR}/summary/sex_check_chrXY_lrr.png"
+    fi
+    if [[ -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.tsv" ]]; then
+        cp -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.tsv" "${OUTPUT_DIR}/summary/sex_check_chrXY_lrr.tsv"
+    fi
+fi
+
 echo ""
 echo "======================================================"
 echo "  All Steps Complete"
