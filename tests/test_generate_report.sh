@@ -79,6 +79,41 @@ cat > "${TMP_DIR}/mock_data_notice.txt" << 'EOF'
 This report is an example generated from deterministic mock data for demonstration purposes only.
 EOF
 
+# --- Create mock peddy output ---
+mkdir -p "${TMP_DIR}/peddy"
+
+cat > "${TMP_DIR}/peddy/peddy.het_check.csv" << 'EOF'
+sample_id,sampled_sites,mean_depth,median_depth,depth_outlier,het_count,het_ratio,ratio_outlier,idr_baf,p10,p90,PC1,PC2,PC3,PC4,ancestry-prediction,ancestry-prob
+S001,18000,32.5,32.5,False,4200,0.2333,False,0.02,0.01,0.88,-0.015,0.008,0.001,0.002,EUR,0.95
+S002,17500,28.3,28.3,False,5100,0.2914,False,0.03,0.02,0.90,0.008,-0.015,-0.001,0.001,AFR,0.88
+S003,19000,35.1,35.1,False,4400,0.2316,False,0.02,0.01,0.89,0.025,0.018,0.002,-0.003,EAS,0.92
+EOF
+
+cat > "${TMP_DIR}/peddy/peddy.sex_check.csv" << 'EOF'
+sample_id,error,het_count,hom_alt_count,hom_ref_count,het_ratio,ped_sex,predicted_sex
+S001,False,15,300,5000,0.0028,male,male
+S002,False,2200,1500,3000,0.3284,female,female
+S003,False,10,350,5200,0.0018,male,male
+EOF
+
+cat > "${TMP_DIR}/peddy/peddy.ped_check.csv" << 'EOF'
+sample_a,sample_b,n,rel,pedigree_relatedness,rel_difference,ibs0,ibs2,shared_hets,hets_a,hets_b,pedigree_parents
+S001,S002,18000,0.0123,0.0,0.0123,2000,10000,3000,4000,4500,False
+S001,S003,18000,-0.0034,0.0,-0.0034,2500,9500,2800,4000,4200,False
+EOF
+
+cat > "${TMP_DIR}/peddy/peddy.peddy.ped" << 'EOF'
+S001	S001	0	0	1	-9
+S002	S002	0	0	2	-9
+S003	S003	0	0	1	-9
+EOF
+
+cat > "${TMP_DIR}/peddy/peddy_final.ped" << 'EOF'
+S001	S001	0	0	1	-9
+S002	S002	0	0	2	-9
+S003	S003	0	0	1	-9
+EOF
+
 # --- Test 1: Generate report ---
 echo "--- Test 1: Report generation ---"
 python3 "${REPO_DIR}/scripts/generate_report.py" --output-dir "${TMP_DIR}" >/dev/null 2>&1
@@ -458,6 +493,83 @@ else
     echo "  FAIL: Boundary value classification incorrect"
     (( FAIL++ )) || true
 fi
+
+# --- Test 18: Peddy data JSON ---
+echo "--- Test 18: Peddy data JSON ---"
+if grep -q 'id="peddy-data"' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q '"ancestry"' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy data JSON block found with ancestry data"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy data JSON block missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 18b: Peddy section ---
+echo "--- Test 18b: Peddy QC section ---"
+if grep -q 'id="peddy"' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'Peddy QC' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy QC section present in report"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy QC section missing from report"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 18c: Peddy PCA plot containers ---
+echo "--- Test 18c: Peddy PCA plot containers ---"
+if grep -q 'plot-peddy-pca12' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'plot-peddy-pca34' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy PCA plot containers found"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy PCA plot containers missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 18d: Peddy overlay toggle button ---
+echo "--- Test 18d: Peddy ancestry overlay toggle ---"
+if grep -q 'peddy-overlay-toggle' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'Overlay peddy ancestry' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy ancestry overlay toggle present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy ancestry overlay toggle missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 18e: Peddy nav link ---
+echo "--- Test 18e: Peddy nav link ---"
+if grep -q 'href="#peddy"' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy nav link present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy nav link missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 18f: Peddy citation ---
+echo "--- Test 18f: Peddy citation ---"
+if grep -q 'Pedersen and Quinlan' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q '10.1016/j.ajhg.2017.01.017' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy citation (Pedersen and Quinlan 2017) present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy citation missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 18g: Peddy summary artifacts ---
+echo "--- Test 18g: Peddy summary artifacts ---"
+for artifact in peddy.het_check.csv peddy.sex_check.csv peddy.ped_check.csv peddy.peddy.ped peddy_final.ped; do
+    if [[ -f "${TMP_DIR}/summary/${artifact}" ]]; then
+        echo "  PASS: Summary artifact '${artifact}' present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Summary artifact '${artifact}' missing"
+        (( FAIL++ )) || true
+    fi
+done
 
 echo ""
 echo "============================================"
