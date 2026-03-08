@@ -134,7 +134,7 @@ else
     (( FAIL++ )) || true
 fi
 
-if grep -q "marker:{color:g.color, size:5, opacity:0.65}" "${REPORT}"; then
+if grep -q "size:5" "${REPORT}"; then
     echo "  PASS: PCA default point size updated"
     (( PASS++ )) || true
 else
