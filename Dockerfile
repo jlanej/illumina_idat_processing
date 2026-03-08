@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install peddy for pedigree/sex/ancestry QC
 RUN pip3 install --break-system-packages peddy
 
-# Build bcftools with gtc2vcf and mocha plugins
+# Build bcftools with gtc2vcf, mocha, and liftover plugins
 WORKDIR /tmp/build
 RUN wget -q "https://github.com/samtools/bcftools/releases/download/${BCFTOOLS_VERSION}/bcftools-${BCFTOOLS_VERSION}.tar.bz2" && \
     tar xjf "bcftools-${BCFTOOLS_VERSION}.tar.bz2" && \
@@ -47,6 +47,7 @@ RUN wget -q "https://github.com/samtools/bcftools/releases/download/${BCFTOOLS_V
     for f in mocha.h beta_binom.h genome_rules.h mocha.c mochatools.c extendFMT.c; do \
         wget -q -P plugins "https://raw.githubusercontent.com/freeseek/mocha/master/${f}"; \
     done && \
+    wget -q -P plugins "https://raw.githubusercontent.com/freeseek/score/master/liftover.c" && \
     make -j"$(nproc)" && \
     make install && \
     cp plugins/*.so /usr/local/libexec/bcftools/ && \

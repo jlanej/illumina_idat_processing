@@ -482,8 +482,15 @@ else
         PEDDY_ARGS=(
             --vcf "${FINAL_VCF}"
             --output-dir "${PEDDY_DIR}"
+            --genome "${GENOME}"
             --threads "${THREADS}"
         )
+        if [[ -n "${REF_FASTA}" && -f "${REF_FASTA}" ]]; then
+            PEDDY_ARGS+=(--src-fasta "${REF_FASTA}")
+        fi
+        if [[ -n "${REF_DIR}" ]]; then
+            PEDDY_ARGS+=(--ref-dir "${REF_DIR}")
+        fi
         if [[ -n "${PED_FILE}" && -f "${PED_FILE}" ]]; then
             PEDDY_ARGS+=(--ped-file "${PED_FILE}")
         fi
