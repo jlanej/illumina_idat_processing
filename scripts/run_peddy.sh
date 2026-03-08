@@ -202,8 +202,8 @@ echo ""
 echo "Peddy output files:"
 for f in "${EXPECTED_OUTPUTS[@]}"; do
     if [[ -f "$f" ]]; then
-        local_rows=$(wc -l < "$f" | tr -d ' ')
-        echo "  $(basename "$f"): ${local_rows} lines"
+        row_count=$(wc -l < "$f" | tr -d ' ')
+        echo "  $(basename "$f"): ${row_count} lines"
     else
         echo "  $(basename "$f"): MISSING"
     fi
