@@ -1216,6 +1216,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!traces.length) return 0;
                 traces.push({
                     x:allX, y:allY, type:'histogram2d', name:'Density',
+                    nbinsx:35, nbinsy:35,
                     colorscale:[
                         [0.0, 'rgba(37,99,235,0)'],
                         [0.05, 'rgba(37,99,235,0.2)'],
@@ -1238,6 +1239,14 @@ document.addEventListener('DOMContentLoaded', function() {
                              args:[{'visible': traces.map(function(_, i){return i < traces.length - 1;})}]},
                             {label:'Density', method:'restyle',
                              args:[{'visible': traces.map(function(_, i){return i === traces.length - 1;})}]}
+                        ]
+                    },{
+                        type:'buttons', direction:'right', x:0, y:1.18,
+                        xanchor:'left', yanchor:'top', showactive:true,
+                        buttons:[
+                            {label:'Bins: Coarse', method:'restyle', args:[{'nbinsx':20,'nbinsy':20}, [traces.length - 1]]},
+                            {label:'Bins: Medium', method:'restyle', args:[{'nbinsx':35,'nbinsy':35}, [traces.length - 1]]},
+                            {label:'Bins: Fine', method:'restyle', args:[{'nbinsx':55,'nbinsy':55}, [traces.length - 1]]}
                         ]
                     }]
                 }), cfg);
@@ -1295,6 +1304,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (traces2.length) {
                 traces2.push({
                     x:allX2, y:allY2, type:'histogram2d', name:'Density',
+                    nbinsx:35, nbinsy:35,
                     colorscale:[
                         [0.0, 'rgba(37,99,235,0)'],
                         [0.05, 'rgba(37,99,235,0.2)'],
@@ -1319,6 +1329,14 @@ document.addEventListener('DOMContentLoaded', function() {
                                  args:[{'visible': traces2.map(function(_, i){return i < traces2.length - 1;})}]},
                                 {label:'Density', method:'restyle',
                                  args:[{'visible': traces2.map(function(_, i){return i === traces2.length - 1;})}]}
+                            ]
+                        },{
+                            type:'buttons', direction:'right', x:0, y:1.18,
+                            xanchor:'left', yanchor:'top', showactive:true,
+                            buttons:[
+                                {label:'Bins: Coarse', method:'restyle', args:[{'nbinsx':20,'nbinsy':20}, [traces2.length - 1]]},
+                                {label:'Bins: Medium', method:'restyle', args:[{'nbinsx':35,'nbinsy':35}, [traces2.length - 1]]},
+                                {label:'Bins: Fine', method:'restyle', args:[{'nbinsx':55,'nbinsy':55}, [traces2.length - 1]]}
                             ]
                         }]
                     }), cfg);
@@ -1697,7 +1715,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     <section id="sex-check">
         <h2>⚥ Sex Check</h2>
         <div class="card"><div id="plot-sex-check" class="plot-box"></div>
-            <div class="plot-controls-note">Use the plot controls to toggle between scatter and density views.</div>
+            <div class="plot-controls-note">Use the plot controls to toggle scatter/density and adjust density binning.</div>
         </div>
         <noscript>
         {_fig_block('sex_check', 'Median chrX vs chrY LRR by Predicted Sex')}
@@ -1710,7 +1728,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             <div class="card"><div id="plot-pca12" class="plot-box"></div></div>
             <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
         </div>
-        <div class="plot-controls-note">Use the plot controls to toggle between scatter and density views.</div>
+        <div class="plot-controls-note">Use the plot controls to toggle scatter/density and adjust density binning.</div>
         <noscript>
             {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
         </noscript>
