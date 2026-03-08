@@ -818,7 +818,8 @@ def _prepare_pca_json(pca_file, qc_rows):
             'pc2': _clean(pcs[1]),
             'pc3': _clean(pcs[2]) if len(pcs) > 2 else None,
             'pc4': _clean(pcs[3]) if len(pcs) > 3 else None,
-            'pcs': [_clean(v) for v in pcs],
+            # Preserve the full PC vector for interactive, user-configurable clustering in the HTML report.
+            'all_pcs': [_clean(v) for v in pcs],
         })
     return json.dumps(points)
 
@@ -1219,6 +1220,8 @@ document.addEventListener('DOMContentLoaded', function() {
         k = Math.max(1, Math.min(k, n));
 
         var centroids = [];
+        // k-means++ seeding: choose one random observed point, then sample subsequent
+        // centroids with probability proportional to squared distance from nearest centroid.
         var first = Math.floor(Math.random() * n);
         centroids.push(points[first].slice());
         while (centroids.length < k) {
@@ -1305,7 +1308,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (pcaEl) {
         var pcaData = JSON.parse(pcaEl.textContent || '[]');
         if (pcaData && pcaData.length) {
-            var palette = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0f766e', '#be123c', '#4d7c0f', '#334155', '#c2410c'];
+            // Color palette for cluster labels in interactive ancestry views.
+            var CLUSTER_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0f766e', '#be123c', '#4d7c0f', '#334155', '#c2410c'];
+            var KMEANS_MAX_ITER = 60;
             var pcaState = {
                 mode: 'sex',
                 assignments: null,
@@ -1329,7 +1334,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             function pointColor(point, idx) {
                 if (pcaState.mode === 'cluster' && pcaState.assignments && pcaState.assignments[idx] !== undefined) {
-                    return palette[pcaState.assignments[idx] % palette.length];
+                    return CLUSTER_COLORS[pcaState.assignments[idx] % CLUSTER_COLORS.length];
                 }
                 var sx = normSex(point.gender);
                 if (sx === 'M') return '#4393C3';
@@ -1476,8 +1481,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 pcsUsed = Math.max(2, pcsUsed);
                 var vectors = [];
                 var idxMap = [];
+                var availablePcCount = pcaData.reduce(function(acc, p) {
+                    return Math.max(acc, (p.all_pcs || []).length);
+                }, 0);
+                if (availablePcCount && pcsUsed > availablePcCount) {
+                    pcsUsed = availablePcCount;
+                    pcsInput.value = String(pcsUsed);
+                }
                 pcaData.forEach(function(p, idx) {
-                    var pcs = p.pcs || [p.pc1, p.pc2, p.pc3, p.pc4].filter(function(v){ return v !== null && v !== undefined; });
+                    var pcs = p.all_pcs || [];
                     if (!pcs || pcs.length < pcsUsed) return;
                     var vec = pcs.slice(0, pcsUsed);
                     if (vec.some(function(v){ return v === null || v === undefined; })) return;
@@ -1488,7 +1500,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     statusEl.textContent = 'Not enough PCA points for clustering.';
                     return;
                 }
-                var result = kmeans(vectors, k, 60);
+                var result = kmeans(vectors, k, KMEANS_MAX_ITER);
                 if (!result) {
                     statusEl.textContent = 'Clustering failed.';
                     return;
