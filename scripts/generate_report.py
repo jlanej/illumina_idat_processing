@@ -1143,9 +1143,27 @@ section h2 {
 }
 .plot-btn {
     border: 1px solid var(--border); border-radius: 6px; background: #f8fafc;
-    padding: 0.32rem 0.55rem; font-size: 0.76rem; cursor: pointer;
+    padding: 0.32rem 0.65rem; font-size: 0.76rem; cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    white-space: nowrap;
 }
-.plot-btn:hover { border-color: var(--primary); color: var(--primary); }
+.plot-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-light); }
+.plot-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+.plot-btn.active:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+.plot-btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+.btn-group {
+    display: flex; border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--border);
+}
+.btn-group .plot-btn {
+    border-radius: 0; border: none; border-right: 1px solid var(--border);
+}
+.btn-group .plot-btn:last-child { border-right: none; }
+.btn-group .plot-btn.active { border-color: transparent; }
+.control-sep {
+    width: 1px; background: var(--border); height: 22px;
+    align-self: center; flex-shrink: 0; margin: 0 0.15rem;
+}
 .plot-status { font-size: 0.75rem; color: var(--text-muted); }
 """
 
@@ -1273,17 +1291,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'NA';
     }
 
-    function renderDensityToggleButtons(traceCount, densityIdx) {
-        return [{
-            type:'buttons', direction:'right', x:1, y:1.18,
-            xanchor:'right', yanchor:'top', showactive:true,
-            buttons:[
-                {label:'Scatter', method:'restyle',
-                 args:[{'visible': Array.from({length: traceCount}, function(_, i){ return i !== densityIdx; })}]},
-                {label:'Density', method:'restyle',
-                 args:[{'visible': Array.from({length: traceCount}, function(_, i){ return i === densityIdx; })}]}
-            ]
-        }];
+    function renderDensityToggleButtons() {
+        return []; // Scatter/Density controls are handled by external HTML buttons
     }
 
     function kmeans(points, k, maxIter) {
@@ -1390,6 +1399,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 k: null,
                 pcsUsed: null,
                 binSize: 35,
+                viewMode: 'scatter',
+                peddyOverlayActive: false,
+                onAfterRefresh: null,
                 plots2d: [],
                 hasPc3: pcaData.some(function(p){ return p.pc3 !== null && p.pc3 !== undefined; }),
                 hasPc4: pcaData.some(function(p){ return p.pc4 !== null && p.pc4 !== undefined; })
@@ -1461,7 +1473,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
                     updatemenus: renderDensityToggleButtons(traces.length, densityIdx)
                 }), cfg);
-                return {div:d, densityIndex:densityIdx, n:allX.length};
+                return {div:d, densityIndex:densityIdx, traceCount:traces.length, n:allX.length};
             }
 
             function pcaPlot3d() {
@@ -1510,6 +1522,22 @@ document.addEventListener('DOMContentLoaded', function() {
                     c34.style.display = 'none';
                 }
                 pcaPlot3d();
+                applyPcaViewMode(pcaState.viewMode);
+                if (pcaState.onAfterRefresh) pcaState.onAfterRefresh();
+            }
+
+            function applyPcaViewMode(mode) {
+                pcaState.viewMode = mode;
+                var scatterBtn = document.getElementById('pca-scatter-btn');
+                var densityBtn = document.getElementById('pca-density-btn');
+                if (scatterBtn) scatterBtn.classList.toggle('active', mode === 'scatter');
+                if (densityBtn) densityBtn.classList.toggle('active', mode === 'density');
+                pcaState.plots2d.forEach(function(meta) {
+                    var visible = Array.from({length: meta.traceCount}, function(_, i) {
+                        return mode === 'density' ? i === meta.densityIndex : i !== meta.densityIndex;
+                    });
+                    Plotly.restyle(meta.div, {visible: visible});
+                });
             }
 
             function applyPcaDensityBins(value) {
@@ -1607,6 +1635,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
+            var pcaScatterBtn = document.getElementById('pca-scatter-btn');
+            var pcaDensityBtn = document.getElementById('pca-density-btn');
+            if (pcaScatterBtn) pcaScatterBtn.addEventListener('click', function() { applyPcaViewMode('scatter'); });
+            if (pcaDensityBtn) pcaDensityBtn.addEventListener('click', function() { applyPcaViewMode('density'); });
+
             var toggleBtn = document.getElementById('pca-view-toggle');
             var grid2d = document.getElementById('pca-2d-grid');
             var view3d = document.getElementById('pca-3d-container');
@@ -1620,6 +1653,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         view3d.style.display = show3d ? '' : 'none';
                         grid2d.style.display = show3d ? 'none' : '';
                         this.textContent = show3d ? 'Show 2D view' : 'Show 3D view';
+                        this.classList.toggle('active', show3d);
                     });
                 }
             }
@@ -1687,11 +1721,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 var sexDiv = document.getElementById('plot-sex-check');
                 if (sexDiv) {
+                    var sexTraceCount = traces2.length;
                     Plotly.newPlot(sexDiv, traces2, Object.assign({}, baseLayout, {
                         title:{text:'Sex Check: Median chrX vs chrY LRR',font:{size:14}},
                         xaxis:{title:'Median chrX LRR',gridcolor:'#f1f5f9',zeroline:false},
-                        yaxis:{title:'Median chrY LRR',gridcolor:'#f1f5f9',zeroline:false},
-                        updatemenus: renderDensityToggleButtons(traces2.length, densityIdx2)
+                        yaxis:{title:'Median chrY LRR',gridcolor:'#f1f5f9',zeroline:false}
                     }), cfg);
 
                     var sexSlider = document.getElementById('sex-density-bins');
@@ -1706,6 +1740,19 @@ document.addEventListener('DOMContentLoaded', function() {
                             Plotly.restyle(sexDiv, {'nbinsx': bins, 'nbinsy': bins}, [densityIdx2]);
                         });
                     }
+
+                    var sexScatterBtn = document.getElementById('sex-scatter-btn');
+                    var sexDensityBtn = document.getElementById('sex-density-btn');
+                    function setSexViewMode(mode) {
+                        var visible = Array.from({length: sexTraceCount}, function(_, i) {
+                            return mode === 'density' ? i === densityIdx2 : i !== densityIdx2;
+                        });
+                        Plotly.restyle(sexDiv, {visible: visible});
+                        if (sexScatterBtn) sexScatterBtn.classList.toggle('active', mode === 'scatter');
+                        if (sexDensityBtn) sexDensityBtn.classList.toggle('active', mode === 'density');
+                    }
+                    if (sexScatterBtn) sexScatterBtn.addEventListener('click', function() { setSexViewMode('scatter'); });
+                    if (sexDensityBtn) sexDensityBtn.addEventListener('click', function() { setSexViewMode('density'); });
                 }
             }
         }
@@ -1814,46 +1861,101 @@ document.addEventListener('DOMContentLoaded', function() {
             peddyPcaPlot('plot-peddy-pca12', 'pc1', 'pc2', 'Peddy Ancestry PCA: PC1 vs PC2');
             peddyPcaPlot('plot-peddy-pca34', 'pc3', 'pc4', 'Peddy Ancestry PCA: PC3 vs PC4');
 
+            /* Build peddy overlay traces for 2D (scatter) */
+            function buildPeddyTraces2d() {
+                var grouped = {};
+                peddyData.forEach(function(p) {
+                    if (p.pc1 === null || p.pc2 === null) return;
+                    var anc = p.ancestry || 'UNKNOWN';
+                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
+                    grouped[anc].x.push(p.pc1);
+                    grouped[anc].y.push(p.pc2);
+                    grouped[anc].text.push(p.id + ' [peddy: ' + anc + ']');
+                });
+                return Object.keys(grouped).sort().map(function(anc) {
+                    var g = grouped[anc];
+                    return {
+                        x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
+                        name:'peddy:'+anc+' (n='+g.x.length+')',
+                        marker:{color:g.color, size:8, opacity:0.5, symbol:'diamond'},
+                        hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<extra>peddy:'+anc+'</extra>'
+                    };
+                });
+            }
+
+            /* Build peddy overlay traces for 3D */
+            function buildPeddyTraces3d() {
+                var grouped = {};
+                peddyData.forEach(function(p) {
+                    if (p.pc1 === null || p.pc2 === null || p.pc3 === null) return;
+                    var anc = p.ancestry || 'UNKNOWN';
+                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], z:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
+                    grouped[anc].x.push(p.pc1);
+                    grouped[anc].y.push(p.pc2);
+                    grouped[anc].z.push(p.pc3);
+                    grouped[anc].text.push(p.id + ' [peddy: ' + anc + ']');
+                });
+                return Object.keys(grouped).sort().map(function(anc) {
+                    var g = grouped[anc];
+                    return {
+                        type:'scatter3d', mode:'markers',
+                        name:'peddy:'+anc+' (n='+g.x.length+')',
+                        x:g.x, y:g.y, z:g.z, text:g.text,
+                        marker:{color:g.color, size:5, opacity:0.5, symbol:'diamond'},
+                        hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<br>PC3: %{z:.4f}<extra>peddy:'+anc+'</extra>'
+                    };
+                });
+            }
+
+            /* Remove peddy traces from a Plotly div */
+            function removePeddyTraces(plotDiv) {
+                if (!plotDiv || !plotDiv.data) return;
+                var toRemove = [];
+                for (var ri = plotDiv.data.length - 1; ri >= 0; ri--) {
+                    if (plotDiv.data[ri].name && plotDiv.data[ri].name.indexOf('peddy:') === 0) {
+                        toRemove.push(ri);
+                    }
+                }
+                if (toRemove.length) Plotly.deleteTraces(plotDiv, toRemove);
+            }
+
+            /* Re-apply peddy overlay after plot refresh (called via pcaState.onAfterRefresh) */
+            pcaState.onAfterRefresh = function() {
+                if (!pcaState.peddyOverlayActive) return;
+                var pcaPlotDiv2d = document.getElementById('plot-pca12');
+                if (pcaPlotDiv2d && pcaPlotDiv2d.data) {
+                    removePeddyTraces(pcaPlotDiv2d);
+                    var t2d = buildPeddyTraces2d();
+                    if (t2d.length) Plotly.addTraces(pcaPlotDiv2d, t2d);
+                }
+                var pcaPlotDiv3d = document.getElementById('plot-pca3d');
+                if (pcaPlotDiv3d && pcaPlotDiv3d.data) {
+                    removePeddyTraces(pcaPlotDiv3d);
+                    var t3d = buildPeddyTraces3d();
+                    if (t3d.length) Plotly.addTraces(pcaPlotDiv3d, t3d);
+                }
+            };
+
             /* Overlay toggle for pipeline PCA */
             var overlayBtn = document.getElementById('peddy-overlay-toggle');
             var pcaPlotDiv = document.getElementById('plot-pca12');
             if (overlayBtn && pcaPlotDiv && pcaPlotDiv.data) {
                 overlayBtn.addEventListener('click', function() {
                     var isActive = this.classList.toggle('active');
+                    pcaState.peddyOverlayActive = isActive;
+                    var pca3dDiv = document.getElementById('plot-pca3d');
                     if (isActive) {
-                        this.textContent = 'Hide peddy ancestry overlay';
-                        var grouped = {};
-                        peddyData.forEach(function(p) {
-                            if (p.pc1 === null || p.pc2 === null) return;
-                            var anc = p.ancestry || 'UNKNOWN';
-                            if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
-                            grouped[anc].x.push(p.pc1);
-                            grouped[anc].y.push(p.pc2);
-                            grouped[anc].text.push(p.id + ' [peddy: ' + anc + ']');
-                        });
-                        var newTraces = Object.keys(grouped).sort().map(function(anc) {
-                            var g = grouped[anc];
-                            return {
-                                x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
-                                name:'peddy:'+anc+' (n='+g.x.length+')',
-                                marker:{color:g.color, size:8, opacity:0.5, symbol:'diamond'},
-                                hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<extra>peddy:'+anc+'</extra>'
-                            };
-                        });
-                        Plotly.addTraces(pcaPlotDiv, newTraces);
+                        this.textContent = 'Hide peddy overlay';
+                        var newTraces2d = buildPeddyTraces2d();
+                        if (newTraces2d.length) Plotly.addTraces(pcaPlotDiv, newTraces2d);
+                        if (pca3dDiv && pca3dDiv.data) {
+                            var newTraces3d = buildPeddyTraces3d();
+                            if (newTraces3d.length) Plotly.addTraces(pca3dDiv, newTraces3d);
+                        }
                     } else {
                         this.textContent = 'Overlay peddy ancestry';
-                        var nOriginal = pcaPlotDiv.data.length;
-                        var ancestryCount = Object.keys(ANCESTRY_COLORS).length;
-                        if (nOriginal > ancestryCount) {
-                            var toRemove = [];
-                            for (var ri = nOriginal - 1; ri >= 0; ri--) {
-                                if (pcaPlotDiv.data[ri].name && pcaPlotDiv.data[ri].name.indexOf('peddy:') === 0) {
-                                    toRemove.push(ri);
-                                }
-                            }
-                            if (toRemove.length) Plotly.deleteTraces(pcaPlotDiv, toRemove);
-                        }
+                        removePeddyTraces(pcaPlotDiv);
+                        removePeddyTraces(pca3dDiv);
                     }
                 });
             }
@@ -2171,12 +2273,15 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     <section id="sex-check">
         <h2>⚥ Sex Check</h2>
         <div class="plot-controls">
-            <label for="sex-density-bins">Density bins: <span id="sex-density-bins-value">35</span></label>
+            <div class="btn-group">
+                <button id="sex-scatter-btn" class="plot-btn active" type="button">Scatter</button>
+                <button id="sex-density-btn" class="plot-btn" type="button">Density</button>
+            </div>
+            <div class="control-sep"></div>
+            <label for="sex-density-bins">Bins: <span id="sex-density-bins-value">35</span></label>
             <input id="sex-density-bins" class="plot-slider" type="range" min="10" max="80" value="35" step="1">
         </div>
-        <div class="card"><div id="plot-sex-check" class="plot-box"></div>
-            <div class="plot-controls-note">Use Scatter/Density buttons on the plot, and the slider to control density bin size.</div>
-        </div>
+        <div class="card"><div id="plot-sex-check" class="plot-box"></div></div>
         <noscript>
         {_fig_block('sex_check', 'Median chrX vs chrY LRR by Predicted Sex')}
         </noscript>
@@ -2185,20 +2290,28 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     <section id="pca">
         <h2>🌍 Ancestry PCA</h2>
         <div class="plot-controls">
-            <button id="pca-view-toggle" class="plot-btn" type="button">Show 3D view</button>
-            <label for="pca-density-bins">Density bins: <span id="pca-density-bins-value">35</span></label>
+            <div class="btn-group">
+                <button id="pca-scatter-btn" class="plot-btn active" type="button">Scatter</button>
+                <button id="pca-density-btn" class="plot-btn" type="button">Density</button>
+            </div>
+            <label for="pca-density-bins">Bins: <span id="pca-density-bins-value">35</span></label>
             <input id="pca-density-bins" class="plot-slider" type="range" min="10" max="80" value="35" step="1">
+            <div class="control-sep"></div>
+            <button id="pca-view-toggle" class="plot-btn" type="button">Show 3D view</button>
+            <div class="control-sep"></div>
             <label for="pca-color-mode">Color by</label>
             <select id="pca-color-mode" class="plot-input">
                 <option value="sex">Sex</option>
                 <option value="cluster">Cluster</option>
             </select>
+            <div class="control-sep"></div>
             <label for="pca-cluster-k">k</label>
             <input id="pca-cluster-k" class="plot-input" type="number" min="2" max="12" value="3">
             <label for="pca-cluster-pcs">PCs</label>
             <input id="pca-cluster-pcs" class="plot-input" type="number" min="2" max="20" value="4">
             <button id="pca-cluster-run" class="plot-btn" type="button">Run k-means</button>
             <button id="pca-cluster-export" class="plot-btn" type="button" disabled>Export clusters</button>
+            <div class="control-sep"></div>
             <button id="peddy-overlay-toggle" class="plot-btn" type="button">Overlay peddy ancestry</button>
             <span id="pca-cluster-status" class="plot-status">No clusters computed.</span>
         </div>
@@ -2207,7 +2320,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
         </div>
         <div class="card" id="pca-3d-container" style="display:none"><div id="plot-pca3d" class="plot-box"></div></div>
-        <div class="plot-controls-note">Toggle 2D/3D PCA views and run customizable k-means clustering for on-the-fly ancestry grouping.</div>
+        <div class="plot-controls-note">Toggle Scatter/Density views, switch 2D/3D, and run customizable k-means clustering for ancestry grouping. Peddy overlay adds diamond markers colored by predicted ancestry population.</div>
         <noscript>
             {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
         </noscript>
