@@ -104,7 +104,7 @@ fi
 
 # --- Test 3: Report contains interactive plot containers ---
 echo "--- Test 3: Interactive plot containers ---"
-for div_id in plot-scatter plot-cr plot-lrr plot-pca12 plot-pca34 plot-sex-check; do
+for div_id in plot-scatter plot-cr plot-lrr plot-pca12 plot-pca34 plot-pca3d plot-sex-check; do
     if grep -q "id=\"${div_id}\"" "${REPORT}"; then
         echo "  PASS: Plot container '${div_id}' found"
         (( PASS++ )) || true
@@ -134,13 +134,12 @@ else
     (( FAIL++ )) || true
 fi
 
-if grep -q "label:'Bins: Coarse'" "${REPORT}" && \
-   grep -q "label:'Bins: Medium'" "${REPORT}" && \
-   grep -q "label:'Bins: Fine'" "${REPORT}"; then
-    echo "  PASS: Density bin toggle controls present"
+if grep -q 'id="pca-density-bins"' "${REPORT}" && \
+   grep -q 'id="sex-density-bins"' "${REPORT}"; then
+    echo "  PASS: Density bin slider controls present"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Density bin toggle controls missing"
+    echo "  FAIL: Density bin slider controls missing"
     (( FAIL++ )) || true
 fi
 
@@ -149,6 +148,17 @@ if grep -q "size:5" "${REPORT}"; then
     (( PASS++ )) || true
 else
     echo "  FAIL: PCA default point size not updated"
+    (( FAIL++ )) || true
+fi
+
+if grep -q 'id="pca-view-toggle"' "${REPORT}" && \
+   grep -q 'id="pca-cluster-run"' "${REPORT}" && \
+   grep -q 'id="pca-cluster-export"' "${REPORT}" && \
+   grep -q 'ancestry_cluster_assignments.tsv' "${REPORT}"; then
+    echo "  PASS: PCA 3D toggle and clustering/export controls present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: PCA 3D toggle and clustering/export controls missing"
     (( FAIL++ )) || true
 fi
 
