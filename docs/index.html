@@ -256,7 +256,7 @@ section h2 {
 
     <div class="header">
         <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
-        <p class="subtitle">Generated: 2026-03-08 21:34:06</p>
+        <p class="subtitle">Generated: 2026-03-08 22:00:49</p>
     </div>
 
     <nav class="nav-bar">
@@ -538,7 +538,8 @@ section h2 {
             <button id="pca-cluster-run" class="plot-btn" type="button">Run k-means</button>
             <button id="pca-cluster-export" class="plot-btn" type="button" disabled>Export clusters</button>
             <div class="control-sep"></div>
-            <button id="peddy-overlay-toggle" class="plot-btn" type="button">Overlay peddy ancestry</button>
+            <button id="peddy-overlay-toggle" class="plot-btn" type="button">Color by peddy ancestry</button>
+            <button id="peddy-pcs-toggle" class="plot-btn" type="button">Show peddy PCs</button>
             <span id="pca-cluster-status" class="plot-status">No clusters computed.</span>
         </div>
         <div class="plot-grid" id="pca-2d-grid">
@@ -546,7 +547,7 @@ section h2 {
             <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
         </div>
         <div class="card" id="pca-3d-container" style="display:none"><div id="plot-pca3d" class="plot-box"></div></div>
-        <div class="plot-controls-note">Toggle Scatter/Density views, switch 2D/3D, and run customizable k-means clustering for ancestry grouping. Peddy overlay adds diamond markers colored by predicted ancestry population.</div>
+        <div class="plot-controls-note">Toggle Scatter/Density views, switch 2D/3D, and run customizable k-means clustering for ancestry grouping. &ldquo;Color by peddy ancestry&rdquo; recolors the pipeline&rsquo;s own samples by their peddy-predicted ancestry (no coordinate mixing). &ldquo;Show peddy PCs&rdquo; reveals a separate section with peddy&rsquo;s own PCA plots (peddy coordinate space, not comparable to pipeline PCs).</div>
         <noscript>
             
         </noscript>
@@ -574,15 +575,18 @@ section h2 {
         <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.75rem">
             Peddy validates sex, ancestry, and relatedness from VCF genotypes.
             Ancestry predictions are colored by predicted population (EUR, AFR, EAS, AMR, SAS).
+            <strong>Note:</strong> Peddy PCs are projected onto the 1000 Genomes reference panel
+            and are in a separate coordinate space from the pipeline&rsquo;s own PCA &mdash;
+            the two are not directly comparable.
         </p>
         <div class="plot-grid">
             <div class="card"><div id="plot-peddy-pca12" class="plot-box"></div></div>
             <div class="card"><div id="plot-peddy-pca34" class="plot-box"></div></div>
         </div>
         <div class="plot-controls-note">
-            Peddy ancestry PCA projections colored by predicted population.
-            Use the &ldquo;Overlay peddy ancestry&rdquo; button in the Ancestry PCA section
-            above to overlay peddy predictions on the pipeline&rsquo;s own PCA plots.
+            Peddy ancestry PCA projections colored by predicted population (peddy&rsquo;s own coordinate space).
+            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section above to recolor
+            the pipeline&rsquo;s own samples by their peddy ancestry predictions without mixing coordinate spaces.
         </div>
     </section>
 
@@ -892,7 +896,24 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pcaData && pcaData.length) {
             // Color palette for cluster labels in interactive ancestry views.
             var CLUSTER_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0f766e', '#be123c', '#4d7c0f', '#334155', '#c2410c'];
+            var ANCESTRY_COLORS = {
+                'EUR': '#2563eb', 'AFR': '#dc2626', 'EAS': '#059669',
+                'AMR': '#d97706', 'SAS': '#7c3aed', 'UNKNOWN': '#6b7280'
+            };
             var KMEANS_MAX_ITER = 60;
+            /* Build a map from sample_id -> peddy ancestry prediction for overlay recoloring.
+               This allows the overlay button to recolor the pipeline's own samples by their
+               peddy-predicted ancestry without mixing incompatible PC coordinate spaces. */
+            var peddyAncestryMap = {};
+            (function() {
+                var el = document.getElementById('peddy-data');
+                if (!el) return;
+                try {
+                    JSON.parse(el.textContent || '[]').forEach(function(p) {
+                        if (p.id && p.ancestry) peddyAncestryMap[p.id] = p.ancestry;
+                    });
+                } catch(e) {}
+            })();
             var pcaState = {
                 mode: 'sex',
                 assignments: null,
@@ -901,13 +922,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 binSize: 35,
                 viewMode: 'scatter',
                 peddyOverlayActive: false,
-                onAfterRefresh: null,
                 plots2d: [],
                 hasPc3: pcaData.some(function(p){ return p.pc3 !== null && p.pc3 !== undefined; }),
                 hasPc4: pcaData.some(function(p){ return p.pc4 !== null && p.pc4 !== undefined; })
             };
 
             function pointLabel(point, idx) {
+                if (pcaState.peddyOverlayActive && peddyAncestryMap[point.id]) {
+                    return 'peddy:' + peddyAncestryMap[point.id];
+                }
                 if (pcaState.mode === 'cluster' && pcaState.assignments && pcaState.assignments[idx] !== undefined) {
                     return 'Cluster ' + (pcaState.assignments[idx] + 1);
                 }
@@ -918,6 +941,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             function pointColor(point, idx) {
+                if (pcaState.peddyOverlayActive && peddyAncestryMap[point.id]) {
+                    return ANCESTRY_COLORS[peddyAncestryMap[point.id]] || '#6b7280';
+                }
                 if (pcaState.mode === 'cluster' && pcaState.assignments && pcaState.assignments[idx] !== undefined) {
                     return CLUSTER_COLORS[pcaState.assignments[idx] % CLUSTER_COLORS.length];
                 }
@@ -1023,7 +1049,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 pcaPlot3d();
                 applyPcaViewMode(pcaState.viewMode);
-                if (pcaState.onAfterRefresh) pcaState.onAfterRefresh();
             }
 
             function applyPcaViewMode(mode) {
@@ -1169,6 +1194,34 @@ document.addEventListener('DOMContentLoaded', function() {
             if (clusterBtn) clusterBtn.addEventListener('click', runClustering);
             var exportBtn2 = document.getElementById('pca-cluster-export');
             if (exportBtn2) exportBtn2.addEventListener('click', exportClusters);
+
+            /* Peddy ancestry color overlay: recolors pipeline samples by predicted ancestry.
+               Uses peddy's ancestry predictions from het_check data matched by sample ID.
+               The pipeline's own PC coordinates are preserved — only the coloring changes. */
+            var overlayBtn = document.getElementById('peddy-overlay-toggle');
+            if (overlayBtn) {
+                overlayBtn.addEventListener('click', function() {
+                    var isActive = this.classList.toggle('active');
+                    pcaState.peddyOverlayActive = isActive;
+                    this.textContent = isActive ? 'Hide peddy ancestry colors' : 'Color by peddy ancestry';
+                    refreshPcaPlots();
+                });
+            }
+
+            /* Peddy PCs section toggle: shows or hides the separate Peddy PCA section.
+               Peddy PCs live in peddy's own coordinate space (1000G reference panel projection)
+               and are NOT comparable to the pipeline PCA coordinate space. */
+            var peddyPcsBtn = document.getElementById('peddy-pcs-toggle');
+            if (peddyPcsBtn) {
+                var peddySectionEl = document.getElementById('peddy');
+                if (peddySectionEl) peddySectionEl.style.display = 'none';
+                peddyPcsBtn.addEventListener('click', function() {
+                    var hidden = !peddySectionEl || peddySectionEl.style.display === 'none';
+                    if (peddySectionEl) peddySectionEl.style.display = hidden ? '' : 'none';
+                    this.textContent = hidden ? 'Hide peddy PCs' : 'Show peddy PCs';
+                    this.classList.toggle('active', hidden);
+                });
+            }
         }
     }
 
@@ -1324,7 +1377,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (peddyEl) {
         var peddyData = JSON.parse(peddyEl.textContent || '[]');
         if (peddyData && peddyData.length) {
-            var ANCESTRY_COLORS = {
+            var PEDDY_ANCESTRY_COLORS = {
                 'EUR': '#2563eb', 'AFR': '#dc2626', 'EAS': '#059669',
                 'AMR': '#d97706', 'SAS': '#7c3aed', 'UNKNOWN': '#6b7280'
             };
@@ -1336,7 +1389,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 peddyData.forEach(function(p) {
                     if (p[xKey] === null || p[yKey] === null) return;
                     var anc = p.ancestry || 'UNKNOWN';
-                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
+                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: PEDDY_ANCESTRY_COLORS[anc] || '#6b7280'};
                     grouped[anc].x.push(p[xKey]);
                     grouped[anc].y.push(p[yKey]);
                     grouped[anc].text.push(p.id + ' (' + anc + ', p=' + (p.ancestry_prob || 0).toFixed(2) + ')');
@@ -1360,105 +1413,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             peddyPcaPlot('plot-peddy-pca12', 'pc1', 'pc2', 'Peddy Ancestry PCA: PC1 vs PC2');
             peddyPcaPlot('plot-peddy-pca34', 'pc3', 'pc4', 'Peddy Ancestry PCA: PC3 vs PC4');
-
-            /* Build peddy overlay traces for 2D (scatter) */
-            function buildPeddyTraces2d() {
-                var grouped = {};
-                peddyData.forEach(function(p) {
-                    if (p.pc1 === null || p.pc2 === null) return;
-                    var anc = p.ancestry || 'UNKNOWN';
-                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
-                    grouped[anc].x.push(p.pc1);
-                    grouped[anc].y.push(p.pc2);
-                    grouped[anc].text.push(p.id + ' [peddy: ' + anc + ']');
-                });
-                return Object.keys(grouped).sort().map(function(anc) {
-                    var g = grouped[anc];
-                    return {
-                        x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
-                        name:'peddy:'+anc+' (n='+g.x.length+')',
-                        marker:{color:g.color, size:8, opacity:0.5, symbol:'diamond'},
-                        hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<extra>peddy:'+anc+'</extra>'
-                    };
-                });
-            }
-
-            /* Build peddy overlay traces for 3D */
-            function buildPeddyTraces3d() {
-                var grouped = {};
-                peddyData.forEach(function(p) {
-                    if (p.pc1 === null || p.pc2 === null || p.pc3 === null) return;
-                    var anc = p.ancestry || 'UNKNOWN';
-                    if (!grouped[anc]) grouped[anc] = {x:[], y:[], z:[], text:[], color: ANCESTRY_COLORS[anc] || '#6b7280'};
-                    grouped[anc].x.push(p.pc1);
-                    grouped[anc].y.push(p.pc2);
-                    grouped[anc].z.push(p.pc3);
-                    grouped[anc].text.push(p.id + ' [peddy: ' + anc + ']');
-                });
-                return Object.keys(grouped).sort().map(function(anc) {
-                    var g = grouped[anc];
-                    return {
-                        type:'scatter3d', mode:'markers',
-                        name:'peddy:'+anc+' (n='+g.x.length+')',
-                        x:g.x, y:g.y, z:g.z, text:g.text,
-                        marker:{color:g.color, size:5, opacity:0.5, symbol:'diamond'},
-                        hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<br>PC3: %{z:.4f}<extra>peddy:'+anc+'</extra>'
-                    };
-                });
-            }
-
-            /* Remove peddy traces from a Plotly div */
-            function removePeddyTraces(plotDiv) {
-                if (!plotDiv || !plotDiv.data) return;
-                var toRemove = [];
-                for (var ri = plotDiv.data.length - 1; ri >= 0; ri--) {
-                    if (plotDiv.data[ri].name && plotDiv.data[ri].name.indexOf('peddy:') === 0) {
-                        toRemove.push(ri);
-                    }
-                }
-                if (toRemove.length) Plotly.deleteTraces(plotDiv, toRemove);
-            }
-
-            /* Re-apply peddy overlay after plot refresh (called via pcaState.onAfterRefresh) */
-            pcaState.onAfterRefresh = function() {
-                if (!pcaState.peddyOverlayActive) return;
-                var pcaPlotDiv2d = document.getElementById('plot-pca12');
-                if (pcaPlotDiv2d && pcaPlotDiv2d.data) {
-                    removePeddyTraces(pcaPlotDiv2d);
-                    var t2d = buildPeddyTraces2d();
-                    if (t2d.length) Plotly.addTraces(pcaPlotDiv2d, t2d);
-                }
-                var pcaPlotDiv3d = document.getElementById('plot-pca3d');
-                if (pcaPlotDiv3d && pcaPlotDiv3d.data) {
-                    removePeddyTraces(pcaPlotDiv3d);
-                    var t3d = buildPeddyTraces3d();
-                    if (t3d.length) Plotly.addTraces(pcaPlotDiv3d, t3d);
-                }
-            };
-
-            /* Overlay toggle for pipeline PCA */
-            var overlayBtn = document.getElementById('peddy-overlay-toggle');
-            var pcaPlotDiv = document.getElementById('plot-pca12');
-            if (overlayBtn && pcaPlotDiv && pcaPlotDiv.data) {
-                overlayBtn.addEventListener('click', function() {
-                    var isActive = this.classList.toggle('active');
-                    pcaState.peddyOverlayActive = isActive;
-                    var pca3dDiv = document.getElementById('plot-pca3d');
-                    if (isActive) {
-                        this.textContent = 'Hide peddy overlay';
-                        var newTraces2d = buildPeddyTraces2d();
-                        if (newTraces2d.length) Plotly.addTraces(pcaPlotDiv, newTraces2d);
-                        if (pca3dDiv && pca3dDiv.data) {
-                            var newTraces3d = buildPeddyTraces3d();
-                            if (newTraces3d.length) Plotly.addTraces(pca3dDiv, newTraces3d);
-                        }
-                    } else {
-                        this.textContent = 'Overlay peddy ancestry';
-                        removePeddyTraces(pcaPlotDiv);
-                        removePeddyTraces(pca3dDiv);
-                    }
-                });
-            }
         }
     }
 });
