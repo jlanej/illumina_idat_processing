@@ -209,13 +209,16 @@ section h2 {
     background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
     font-size: 0.82rem;
 }
+.plot-controls-note {
+    font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem;
+}
 </style>
 </head>
 <body>
 
     <div class="header">
         <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
-        <p class="subtitle">Generated: 2026-03-07 16:23:01</p>
+        <p class="subtitle">Generated: 2026-03-08 02:09:44</p>
     </div>
 
     <nav class="nav-bar">
@@ -456,7 +459,12 @@ section h2 {
 
     <section id="sex-check">
         <h2>⚥ Sex Check</h2>
+        <div class="card"><div id="plot-sex-check" class="plot-box"></div>
+            <div class="plot-controls-note">Use the plot controls to toggle between scatter and density views.</div>
+        </div>
+        <noscript>
         
+        </noscript>
     </section>
 
     <section id="pca">
@@ -465,6 +473,7 @@ section h2 {
             <div class="card"><div id="plot-pca12" class="plot-box"></div></div>
             <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
         </div>
+        <div class="plot-controls-note">Use the plot controls to toggle between scatter and density views.</div>
         <noscript>
             
         </noscript>
@@ -569,6 +578,7 @@ section h2 {
 
 <script type="application/json" id="qc-data">[{"id": "SAMPLE_001", "call_rate": 0.9891, "lrr_sd": 0.0855, "lrr_mean": -0.009, "lrr_median": -0.0118, "baf_sd": 0.0716, "het_rate": 0.2606, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_002", "call_rate": 0.9967, "lrr_sd": 0.0991, "lrr_mean": -0.0031, "lrr_median": -0.0078, "baf_sd": 0.0353, "het_rate": 0.2503, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_003", "call_rate": 0.9708, "lrr_sd": 0.1237, "lrr_mean": 0.006, "lrr_median": 0.0064, "baf_sd": 0.0354, "het_rate": 0.2554, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_004", "call_rate": 0.9521, "lrr_sd": 0.2581, "lrr_mean": -0.0197, "lrr_median": -0.0166, "baf_sd": 0.0689, "het_rate": 0.2404, "gender": "F", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_005", "call_rate": 0.9746, "lrr_sd": 0.2906, "lrr_mean": -0.0065, "lrr_median": -0.0106, "baf_sd": 0.0268, "het_rate": 0.2708, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_006", "call_rate": 0.9881, "lrr_sd": 0.4123, "lrr_mean": 0.0123, "lrr_median": 0.0146, "baf_sd": 0.0575, "het_rate": 0.2784, "gender": "F", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_007", "call_rate": 0.9813, "lrr_sd": 0.2014, "lrr_mean": 0.0132, "lrr_median": 0.0144, "baf_sd": 0.0803, "het_rate": 0.2546, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_008", "call_rate": 0.9911, "lrr_sd": 0.0901, "lrr_mean": -0.0109, "lrr_median": -0.013, "baf_sd": 0.1823, "het_rate": 0.2248, "gender": "F", "qc_pass": true, "baf_flag": true, "het_outlier": false}, {"id": "SAMPLE_009", "call_rate": 0.977, "lrr_sd": 0.1022, "lrr_mean": -0.0089, "lrr_median": -0.0075, "baf_sd": 0.0455, "het_rate": 0.2422, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_010", "call_rate": 0.9763, "lrr_sd": 0.1387, "lrr_mean": 0.0175, "lrr_median": 0.019, "baf_sd": 0.0626, "het_rate": 0.3412, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": true}, {"id": "SAMPLE_011", "call_rate": 0.9751, "lrr_sd": 0.2404, "lrr_mean": -0.0135, "lrr_median": -0.0147, "baf_sd": 0.0893, "het_rate": 0.2584, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_012", "call_rate": 0.9867, "lrr_sd": 0.2306, "lrr_mean": 0.0137, "lrr_median": 0.0165, "baf_sd": 0.036, "het_rate": 0.2219, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_013", "call_rate": 0.9388, "lrr_sd": 0.1494, "lrr_mean": -0.0093, "lrr_median": -0.0122, "baf_sd": 0.086, "het_rate": 0.2726, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_014", "call_rate": 0.9794, "lrr_sd": 0.2242, "lrr_mean": -0.0042, "lrr_median": -0.0001, "baf_sd": 0.0521, "het_rate": 0.2359, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_015", "call_rate": 0.9774, "lrr_sd": 0.3891, "lrr_mean": 0.0025, "lrr_median": 0.0001, "baf_sd": 0.0609, "het_rate": 0.2739, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_016", "call_rate": 0.9819, "lrr_sd": 0.1283, "lrr_mean": 0.0199, "lrr_median": 0.02, "baf_sd": 0.0264, "het_rate": 0.2228, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_017", "call_rate": 0.9733, "lrr_sd": 0.218, "lrr_mean": 0.0117, "lrr_median": 0.0109, "baf_sd": 0.0244, "het_rate": 0.2429, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_018", "call_rate": 0.9998, "lrr_sd": 0.1964, "lrr_mean": 0.0188, "lrr_median": 0.0224, "baf_sd": 0.0208, "het_rate": 0.2632, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_019", "call_rate": 0.9904, "lrr_sd": 0.1981, "lrr_mean": -0.0093, "lrr_median": -0.0079, "baf_sd": 0.1645, "het_rate": 0.2267, "gender": "M", "qc_pass": true, "baf_flag": true, "het_outlier": false}, {"id": "SAMPLE_020", "call_rate": 0.983, "lrr_sd": 0.1798, "lrr_mean": 0.0182, "lrr_median": 0.022, "baf_sd": 0.0384, "het_rate": 0.25, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_021", "call_rate": 0.9753, "lrr_sd": 0.2808, "lrr_mean": 0.0148, "lrr_median": 0.0128, "baf_sd": 0.0647, "het_rate": 0.1534, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": true}, {"id": "SAMPLE_022", "call_rate": 0.9882, "lrr_sd": 0.1136, "lrr_mean": 0.0105, "lrr_median": 0.0109, "baf_sd": 0.0745, "het_rate": 0.2518, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_023", "call_rate": 0.9655, "lrr_sd": 0.0801, "lrr_mean": -0.007, "lrr_median": -0.0118, "baf_sd": 0.085, "het_rate": 0.2727, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_024", "call_rate": 0.9949, "lrr_sd": 0.1477, "lrr_mean": -0.0177, "lrr_median": -0.0139, "baf_sd": 0.0863, "het_rate": 0.2251, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_025", "call_rate": 0.9845, "lrr_sd": 0.3601, "lrr_mean": -0.0172, "lrr_median": -0.0146, "baf_sd": 0.0736, "het_rate": 0.2277, "gender": "M", "qc_pass": false, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_026", "call_rate": 0.9842, "lrr_sd": 0.201, "lrr_mean": -0.0094, "lrr_median": -0.0057, "baf_sd": 0.0496, "het_rate": 0.2327, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_027", "call_rate": 0.9861, "lrr_sd": 0.2406, "lrr_mean": -0.012, "lrr_median": -0.0139, "baf_sd": 0.0897, "het_rate": 0.259, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_028", "call_rate": 0.9831, "lrr_sd": 0.1939, "lrr_mean": -0.0152, "lrr_median": -0.018, "baf_sd": 0.0437, "het_rate": 0.2553, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_029", "call_rate": 0.9769, "lrr_sd": 0.1284, "lrr_mean": -0.0172, "lrr_median": -0.0159, "baf_sd": 0.036, "het_rate": 0.2743, "gender": "M", "qc_pass": true, "baf_flag": false, "het_outlier": false}, {"id": "SAMPLE_030", "call_rate": 0.9957, "lrr_sd": 0.0956, "lrr_mean": -0.0105, "lrr_median": -0.0088, "baf_sd": 0.035, "het_rate": 0.2279, "gender": "F", "qc_pass": true, "baf_flag": false, "het_outlier": false}]</script>
 <script type="application/json" id="pca-data">[{"id": "SAMPLE_001", "gender": "M", "pc1": -0.02072, "pc2": 0.009135, "pc3": -0.000334, "pc4": 0.002106}, {"id": "SAMPLE_002", "gender": "F", "pc1": 0.012659, "pc2": -0.027268, "pc3": -0.000937, "pc4": 0.001471}, {"id": "SAMPLE_003", "gender": "M", "pc1": 0.029569, "pc2": 0.018531, "pc3": 0.000343, "pc4": 0.002456}, {"id": "SAMPLE_004", "gender": "F", "pc1": -0.012868, "pc2": 0.00953, "pc3": -0.004269, "pc4": -0.001596}, {"id": "SAMPLE_005", "gender": "M", "pc1": 0.006383, "pc2": -0.021468, "pc3": -0.005524, "pc4": -0.003247}, {"id": "SAMPLE_006", "gender": "F", "pc1": 0.037965, "pc2": 0.020576, "pc3": -0.001549, "pc4": -0.003385}, {"id": "SAMPLE_007", "gender": "M", "pc1": -0.019511, "pc2": 0.003794, "pc3": 0.00066, "pc4": -0.003629}, {"id": "SAMPLE_008", "gender": "F", "pc1": 0.003759, "pc2": -0.019023, "pc3": -0.000575, "pc4": 0.006061}, {"id": "SAMPLE_009", "gender": "M", "pc1": 0.03637, "pc2": 0.023046, "pc3": 0.00086, "pc4": 0.006458}, {"id": "SAMPLE_010", "gender": "F", "pc1": -0.020981, "pc2": 0.002585, "pc3": 0.001359, "pc4": -0.000136}, {"id": "SAMPLE_011", "gender": "M", "pc1": 0.021205, "pc2": -0.022211, "pc3": 0.001052, "pc4": -0.001473}, {"id": "SAMPLE_012", "gender": "F", "pc1": 0.036452, "pc2": 0.018715, "pc3": -0.004807, "pc4": -0.001305}, {"id": "SAMPLE_013", "gender": "M", "pc1": -0.025785, "pc2": 0.013217, "pc3": -0.006937, "pc4": -0.001}, {"id": "SAMPLE_014", "gender": "F", "pc1": 0.017533, "pc2": -0.026997, "pc3": -0.0012, "pc4": 0.001285}, {"id": "SAMPLE_015", "gender": "M", "pc1": 0.029318, "pc2": 0.016696, "pc3": -0.001562, "pc4": -0.001754}, {"id": "SAMPLE_016", "gender": "F", "pc1": -0.01483, "pc2": 0.006435, "pc3": 0.00201, "pc4": -0.003418}, {"id": "SAMPLE_017", "gender": "M", "pc1": 0.019016, "pc2": -0.030278, "pc3": 0.002308, "pc4": -0.005749}, {"id": "SAMPLE_018", "gender": "F", "pc1": 0.03101, "pc2": 0.016551, "pc3": 0.001944, "pc4": 0.000291}, {"id": "SAMPLE_019", "gender": "M", "pc1": -0.020583, "pc2": 0.005701, "pc3": -0.00282, "pc4": -0.002222}, {"id": "SAMPLE_020", "gender": "F", "pc1": 0.009202, "pc2": -0.02415, "pc3": -0.001119, "pc4": 0.002863}, {"id": "SAMPLE_021", "gender": "M", "pc1": 0.026759, "pc2": 0.021232, "pc3": -0.006363, "pc4": 0.001082}, {"id": "SAMPLE_022", "gender": "F", "pc1": -0.026054, "pc2": 0.013609, "pc3": 0.001584, "pc4": 0.004352}, {"id": "SAMPLE_023", "gender": "M", "pc1": 0.002646, "pc2": -0.032908, "pc3": -0.006062, "pc4": -0.004145}, {"id": "SAMPLE_024", "gender": "F", "pc1": 0.033625, "pc2": 0.021919, "pc3": -0.000358, "pc4": 0.002609}, {"id": "SAMPLE_025", "gender": "M", "pc1": -0.020397, "pc2": 0.010371, "pc3": -0.002996, "pc4": 0.004029}, {"id": "SAMPLE_026", "gender": "F", "pc1": 0.009159, "pc2": -0.020812, "pc3": -0.003041, "pc4": 0.002389}, {"id": "SAMPLE_027", "gender": "M", "pc1": 0.034641, "pc2": 0.019997, "pc3": -0.00307, "pc4": -0.004234}, {"id": "SAMPLE_028", "gender": "F", "pc1": -0.014545, "pc2": -0.001725, "pc3": 0.000532, "pc4": 0.00043}, {"id": "SAMPLE_029", "gender": "M", "pc1": 0.005668, "pc2": -0.017907, "pc3": -0.002739, "pc4": -0.000103}, {"id": "SAMPLE_030", "gender": "F", "pc1": 0.028873, "pc2": 0.029704, "pc3": 0.000621, "pc4": -0.001117}]</script>
+<script type="application/json" id="sex-data">[]</script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     var el = document.getElementById('qc-data');
@@ -701,6 +711,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 var d = document.getElementById(divId);
                 if (!d) return 0;
                 var grouped = {};
+                var allX = [];
+                var allY = [];
                 pcaData.forEach(function(p) {
                     if (p[xKey] === null || p[yKey] === null) return;
                     var sx = (p.gender || 'NA').toString();
@@ -711,23 +723,47 @@ document.addEventListener('DOMContentLoaded', function() {
                     grouped[style.label].x.push(p[xKey]);
                     grouped[style.label].y.push(p[yKey]);
                     grouped[style.label].text.push(p.id);
+                    allX.push(p[xKey]);
+                    allY.push(p[yKey]);
                 });
                 var traces = Object.keys(grouped).sort().map(function(label) {
                     var g = grouped[label];
                     return {
                         x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
                         name:label+' (n='+g.x.length+')',
-                        marker:{color:g.color, size:7, opacity:0.65},
+                        marker:{color:g.color, size:5, opacity:0.65},
                         hovertemplate:'<b>%{text}</b><br>'+xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<extra>'+label+'</extra>'
                     };
                 });
                 if (!traces.length) return 0;
+                traces.push({
+                    x:allX, y:allY, type:'histogram2d', name:'Density',
+                    colorscale:[
+                        [0.0, 'rgba(37,99,235,0)'],
+                        [0.05, 'rgba(37,99,235,0.2)'],
+                        [0.4, 'rgba(37,99,235,0.5)'],
+                        [1.0, 'rgba(30,64,175,0.85)']
+                    ],
+                    zmin:0, showscale:true, colorbar:{title:'Count'},
+                    hovertemplate:xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<br>Count: %{z}<extra>Density</extra>',
+                    visible:false
+                });
                 Plotly.newPlot(d, traces, Object.assign({}, baseLayout, {
                     title:{text:title,font:{size:14}},
                     xaxis:{title:xKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
-                    yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false}
+                    yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
+                    updatemenus:[{
+                        type:'buttons', direction:'right', x:1, y:1.18,
+                        xanchor:'right', yanchor:'top', showactive:true,
+                        buttons:[
+                            {label:'Scatter', method:'restyle',
+                             args:[{'visible': traces.map(function(_, i){return i < traces.length - 1;})}]},
+                            {label:'Density', method:'restyle',
+                             args:[{'visible': traces.map(function(_, i){return i === traces.length - 1;})}]}
+                        ]
+                    }]
                 }), cfg);
-                return traces.reduce(function(n, t){return n + t.x.length;}, 0);
+                return allX.length;
             }
 
             pcaPlot('plot-pca12', 'pc1', 'pc2', 'PC1 vs PC2');
@@ -735,6 +771,80 @@ document.addEventListener('DOMContentLoaded', function() {
             if (n34 > 0) {
                 var c34 = document.getElementById('pca34-container');
                 if (c34) c34.style.display = '';
+            }
+        }
+    }
+
+    /* ---- Interactive sex check ---- */
+    var sexEl = document.getElementById('sex-data');
+    if (sexEl) {
+        var sexData = JSON.parse(sexEl.textContent || '[]');
+        if (sexData && sexData.length) {
+            var sexStyle2 = {
+                'M': {label:'Male', color:'#4393C3'},
+                '1': {label:'Male', color:'#4393C3'},
+                'F': {label:'Female', color:'#D6604D'},
+                '2': {label:'Female', color:'#D6604D'},
+                'NA': {label:'Unknown', color:'#6b7280'},
+                '': {label:'Unknown', color:'#6b7280'}
+            };
+            var grouped2 = {};
+            var allX2 = [];
+            var allY2 = [];
+            sexData.forEach(function(p) {
+                if (p.chrx_lrr_median === null || p.chry_lrr_median === null) return;
+                var sx = (p.gender || 'NA').toString();
+                var style = sexStyle2[sx] || sexStyle2['NA'];
+                if (!grouped2[style.label]) {
+                    grouped2[style.label] = {x:[], y:[], text:[], color:style.color};
+                }
+                grouped2[style.label].x.push(p.chrx_lrr_median);
+                grouped2[style.label].y.push(p.chry_lrr_median);
+                grouped2[style.label].text.push(p.id);
+                allX2.push(p.chrx_lrr_median);
+                allY2.push(p.chry_lrr_median);
+            });
+
+            var traces2 = Object.keys(grouped2).sort().map(function(label) {
+                var g = grouped2[label];
+                return {
+                    x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
+                    name:label+' (n='+g.x.length+')',
+                    marker:{color:g.color, size:5, opacity:0.65},
+                    hovertemplate:'<b>%{text}</b><br>Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<extra>'+label+'</extra>'
+                };
+            });
+            if (traces2.length) {
+                traces2.push({
+                    x:allX2, y:allY2, type:'histogram2d', name:'Density',
+                    colorscale:[
+                        [0.0, 'rgba(37,99,235,0)'],
+                        [0.05, 'rgba(37,99,235,0.2)'],
+                        [0.4, 'rgba(37,99,235,0.5)'],
+                        [1.0, 'rgba(30,64,175,0.85)']
+                    ],
+                    zmin:0, showscale:true, colorbar:{title:'Count'},
+                    hovertemplate:'Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<br>Count: %{z}<extra>Density</extra>',
+                    visible:false
+                });
+                var sexDiv = document.getElementById('plot-sex-check');
+                if (sexDiv) {
+                    Plotly.newPlot(sexDiv, traces2, Object.assign({}, baseLayout, {
+                        title:{text:'Sex Check: Median chrX vs chrY LRR',font:{size:14}},
+                        xaxis:{title:'Median chrX LRR',gridcolor:'#f1f5f9',zeroline:false},
+                        yaxis:{title:'Median chrY LRR',gridcolor:'#f1f5f9',zeroline:false},
+                        updatemenus:[{
+                            type:'buttons', direction:'right', x:1, y:1.18,
+                            xanchor:'right', yanchor:'top', showactive:true,
+                            buttons:[
+                                {label:'Scatter', method:'restyle',
+                                 args:[{'visible': traces2.map(function(_, i){return i < traces2.length - 1;})}]},
+                                {label:'Density', method:'restyle',
+                                 args:[{'visible': traces2.map(function(_, i){return i === traces2.length - 1;})}]}
+                            ]
+                        }]
+                    }), cfg);
+                }
             }
         }
     }
