@@ -134,6 +134,16 @@ else
     (( FAIL++ )) || true
 fi
 
+if grep -q "label:'Bins: Coarse'" "${REPORT}" && \
+   grep -q "label:'Bins: Medium'" "${REPORT}" && \
+   grep -q "label:'Bins: Fine'" "${REPORT}"; then
+    echo "  PASS: Density bin toggle controls present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Density bin toggle controls missing"
+    (( FAIL++ )) || true
+fi
+
 if grep -q "size:5" "${REPORT}"; then
     echo "  PASS: PCA default point size updated"
     (( PASS++ )) || true

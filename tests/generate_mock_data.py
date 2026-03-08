@@ -284,6 +284,31 @@ def generate_pca_data(output_dir, n_samples=30):
     return filepath
 
 
+def generate_sex_check_data(output_dir, n_samples=30):
+    """Write mock sex-check chrX/chrY median LRR table for interactive plotting."""
+    sex_dir = os.path.join(output_dir, 'sex_check')
+    os.makedirs(sex_dir, exist_ok=True)
+    rng = _rng()
+
+    filepath = os.path.join(sex_dir, 'sex_check_chrXY_lrr.tsv')
+    with open(filepath, 'w') as f:
+        f.write('sample_id\tchrx_lrr_median\tchry_lrr_median\tcomputed_gender\n')
+        for i in range(n_samples):
+            sid = f"SAMPLE_{i + 1:03d}"
+            male = (i % 2 == 0)
+            if male:
+                chrx = -0.11 + rng.gauss(0, 0.012)
+                chry = 0.08 + rng.gauss(0, 0.012)
+                sex = 'M'
+            else:
+                chrx = 0.03 + rng.gauss(0, 0.012)
+                chry = -0.07 + rng.gauss(0, 0.012)
+                sex = 'F'
+            f.write(f'{sid}\t{chrx:.4f}\t{chry:.4f}\t{sex}\n')
+
+    return filepath
+
+
 def generate_mock_notice(output_dir):
     """Write a marker text indicating this output is synthetic example data."""
     filepath = os.path.join(output_dir, 'mock_data_notice.txt')
@@ -335,6 +360,9 @@ def main():
     # PCA data
     pca = generate_pca_data(args.output_dir, n)
     print(f"  PCA projections:   {pca}")
+
+    sex_check = generate_sex_check_data(args.output_dir, n)
+    print(f"  Sex check table:   {sex_check}")
 
     note = generate_mock_notice(args.output_dir)
     print(f"  Mock notice:      {note}")
