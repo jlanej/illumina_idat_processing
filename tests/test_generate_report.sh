@@ -528,14 +528,14 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 18d: Peddy overlay toggle button ---
-echo "--- Test 18d: Peddy ancestry overlay toggle ---"
+# --- Test 18d: Peddy ancestry color toggle button ---
+echo "--- Test 18d: Peddy ancestry color toggle ---"
 if grep -q 'peddy-overlay-toggle' "${TMP_DIR}/pipeline_report.html" && \
-   grep -q 'Overlay peddy ancestry' "${TMP_DIR}/pipeline_report.html"; then
-    echo "  PASS: Peddy ancestry overlay toggle present"
+   grep -q 'Color by peddy ancestry' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy ancestry color toggle present"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Peddy ancestry overlay toggle missing"
+    echo "  FAIL: Peddy ancestry color toggle missing"
     (( FAIL++ )) || true
 fi
 
@@ -571,6 +571,17 @@ for artifact in peddy.het_check.csv peddy.sex_check.csv peddy.ped_check.csv pedd
         (( FAIL++ )) || true
     fi
 done
+
+# --- Test 18h: Peddy PCs section toggle ---
+echo "--- Test 18h: Peddy PCs section toggle ---"
+if grep -q 'peddy-pcs-toggle' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'Show peddy PCs' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peddy PCs toggle button present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peddy PCs toggle button missing"
+    (( FAIL++ )) || true
+fi
 
 echo ""
 echo "============================================"
