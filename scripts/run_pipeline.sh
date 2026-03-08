@@ -26,6 +26,7 @@ MAX_LRR_SD=0.35
 SKIP_STAGE2="false"
 SKIP_DOWNLOAD="false"
 SKIP_FAILURES="false"
+SKIP_PEDDY="false"
 FORCE="false"
 FORCE_RENAME="false"
 
@@ -60,6 +61,11 @@ Processing options:
                          Renames samples in GTC files, VCFs, and QC reports.
   --force-rename         Allow renaming even when fewer than 50% of samples in
                          the name map match the data (default: halt)
+  --ped-file FILE        Pedigree file (.ped/.fam) for peddy relationship
+                         validation. If not provided, a minimal PED is
+                         generated (unrelated singletons) so peddy can still
+                         predict sex, ancestry, and discover relationships.
+  --skip-peddy           Skip peddy pedigree/sex/ancestry QC step
   --skip-stage2          Skip Stage 2 (reclustering)
   --skip-download        Do not auto-download manifests or reference
   --skip-failures        Continue past corrupt/truncated IDAT files instead of
@@ -95,6 +101,7 @@ CSV=""
 REF_DIR=""
 REF_FASTA=""
 SAMPLE_NAME_MAP=""
+PED_FILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -112,10 +119,12 @@ while [[ $# -gt 0 ]]; do
         --min-call-rate)  MIN_CALL_RATE="$2"; shift 2 ;;
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
         --sample-name-map) SAMPLE_NAME_MAP="$2"; shift 2 ;;
+        --ped-file)       PED_FILE="$2"; shift 2 ;;
         --force-rename)   FORCE_RENAME="true"; shift ;;
         --skip-stage2)    SKIP_STAGE2="true"; shift ;;
         --skip-download)  SKIP_DOWNLOAD="true"; shift ;;
         --skip-failures)  SKIP_FAILURES="true"; shift ;;
+        --skip-peddy)     SKIP_PEDDY="true"; shift ;;
         --force)          FORCE="true"; shift ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
@@ -242,6 +251,9 @@ echo "  Min call rate:  ${MIN_CALL_RATE}"
 echo "  Max LRR SD:     ${MAX_LRR_SD}"
 if [[ -n "${SAMPLE_NAME_MAP}" ]]; then
     echo "  Name map:       ${SAMPLE_NAME_MAP}"
+fi
+if [[ -n "${PED_FILE}" ]]; then
+    echo "  Pedigree file:  ${PED_FILE}"
 fi
 echo ""
 
@@ -454,6 +466,42 @@ fi
 echo ""
 
 # ---------------------------------------------------------------
+# Peddy: pedigree/sex/ancestry QC
+# ---------------------------------------------------------------
+PEDDY_DIR="${OUTPUT_DIR}/peddy"
+
+if [[ "${SKIP_PEDDY}" == "true" ]]; then
+    echo "Skipping peddy QC (--skip-peddy specified)"
+else
+    echo "======================================================"
+    echo "  Running Peddy (Pedigree/Sex/Ancestry QC)"
+    echo "======================================================"
+    echo ""
+
+    if [[ -f "${FINAL_VCF}" ]]; then
+        PEDDY_ARGS=(
+            --vcf "${FINAL_VCF}"
+            --output-dir "${PEDDY_DIR}"
+            --threads "${THREADS}"
+        )
+        if [[ -n "${PED_FILE}" && -f "${PED_FILE}" ]]; then
+            PEDDY_ARGS+=(--ped-file "${PED_FILE}")
+        fi
+        if [[ -f "${FINAL_QC}" ]]; then
+            PEDDY_ARGS+=(--sample-qc "${FINAL_QC}")
+        fi
+        if [[ "${FORCE}" == "true" ]]; then
+            PEDDY_ARGS+=(--force)
+        fi
+
+        bash "${SCRIPT_DIR}/run_peddy.sh" "${PEDDY_ARGS[@]}" 2>&1 || true
+    else
+        echo "Note: Skipping peddy (final VCF not available)."
+    fi
+fi
+echo ""
+
+# ---------------------------------------------------------------
 # Compile unified sample sheet
 # ---------------------------------------------------------------
 echo "======================================================"
@@ -479,6 +527,14 @@ if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
             break
         fi
     done
+
+    # Include peddy sample-level metrics if available
+    if [[ -f "${PEDDY_DIR}/peddy.het_check.csv" ]]; then
+        COMPILE_ARGS+=(--peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv")
+    fi
+    if [[ -f "${PEDDY_DIR}/peddy.sex_check.csv" ]]; then
+        COMPILE_ARGS+=(--peddy-sex-check "${PEDDY_DIR}/peddy.sex_check.csv")
+    fi
 
     python3 "${SCRIPT_DIR}/compile_sample_sheet.py" "${COMPILE_ARGS[@]}" 2>&1 || true
 else
@@ -555,6 +611,12 @@ fi
 if [[ -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.tsv" ]]; then
     cp -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.tsv" "${OUTPUT_DIR}/summary/sex_check_chrXY_lrr.tsv"
 fi
+# Copy peddy outputs to summary
+for pf in peddy.het_check.csv peddy.sex_check.csv peddy.ped_check.csv peddy.peddy.ped peddy_final.ped; do
+    if [[ -f "${OUTPUT_DIR}/peddy/${pf}" ]]; then
+        cp -f "${OUTPUT_DIR}/peddy/${pf}" "${OUTPUT_DIR}/summary/${pf}"
+    fi
+done
 
 echo ""
 echo "======================================================"
@@ -572,6 +634,9 @@ if [[ -d "${PCA_DIR}" ]]; then
 fi
 if [[ -d "${SEX_CHECK_DIR}" ]]; then
     echo "  Sex check:        ${SEX_CHECK_DIR}/"
+fi
+if [[ -d "${PEDDY_DIR}" ]]; then
+    echo "  Peddy QC:         ${PEDDY_DIR}/"
 fi
 if [[ -f "${REPORT_PATH}" ]]; then
     echo "  Pipeline report:  ${REPORT_PATH}"

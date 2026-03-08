@@ -92,6 +92,26 @@ def read_pca_projections(filepath):
     return pc_cols, pc_data
 
 
+def read_peddy_csv(filepath):
+    """Read a peddy output CSV file.
+
+    Returns (columns, dict of sample_id -> row_dict).
+    """
+    import csv
+    data = {}
+    columns = []
+    if not filepath or not os.path.exists(filepath):
+        return columns, data
+    with open(filepath) as f:
+        reader = csv.DictReader(f)
+        columns = reader.fieldnames or []
+        for row in reader:
+            sid = row.get('sample_id', '')
+            if sid:
+                data[sid] = row
+    return columns, data
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Compile unified sample sheet with QC metrics and PCs"
@@ -102,6 +122,10 @@ def main():
                         help="PCA projections TSV (from ancestry_pca.sh)")
     parser.add_argument("--het-file", default=None,
                         help="Plink2 .het file with per-sample inbreeding coefficient")
+    parser.add_argument("--peddy-het-check", default=None,
+                        help="Peddy het_check.csv with ancestry/het QC metrics")
+    parser.add_argument("--peddy-sex-check", default=None,
+                        help="Peddy sex_check.csv with sex prediction metrics")
     parser.add_argument("--output", required=True,
                         help="Output compiled sample sheet TSV")
     parser.add_argument("--n-pcs", type=int, default=20,
@@ -139,14 +163,54 @@ def main():
                 if len(fields) > f_idx:
                     het_data[fields[iid_idx]] = fields[f_idx]
 
+    # Read peddy sample-level metrics if available
+    # Columns are prefixed with 'peddy_' to denote their source.
+    peddy_het_cols = []
+    peddy_het_data = {}
+    PEDDY_HET_FIELDS = [
+        'het_ratio', 'mean_depth', 'ancestry-prediction',
+        'ancestry-prob', 'PC1', 'PC2', 'PC3', 'PC4',
+    ]
+    if args.peddy_het_check and os.path.exists(args.peddy_het_check):
+        _cols, peddy_het_raw = read_peddy_csv(args.peddy_het_check)
+        for field in PEDDY_HET_FIELDS:
+            if field in _cols:
+                peddy_het_cols.append(f'peddy_{field}')
+        for sid, row in peddy_het_raw.items():
+            peddy_het_data[sid] = {}
+            for field in PEDDY_HET_FIELDS:
+                if field in row:
+                    peddy_het_data[sid][f'peddy_{field}'] = row[field]
+
+    peddy_sex_cols = []
+    peddy_sex_data = {}
+    PEDDY_SEX_FIELDS = [
+        'predicted_sex', 'het_ratio', 'error',
+    ]
+    if args.peddy_sex_check and os.path.exists(args.peddy_sex_check):
+        _cols, peddy_sex_raw = read_peddy_csv(args.peddy_sex_check)
+        for field in PEDDY_SEX_FIELDS:
+            if field in _cols:
+                peddy_sex_cols.append(f'peddy_sex_{field}')
+        for sid, row in peddy_sex_raw.items():
+            peddy_sex_data[sid] = {}
+            for field in PEDDY_SEX_FIELDS:
+                if field in row:
+                    peddy_sex_data[sid][f'peddy_sex_{field}'] = row[field]
+
     # Build unified header
     output_cols = list(qc_header)
     if het_data:
         output_cols.append('inbreeding_F')
     output_cols.extend(pc_cols)
+    output_cols.extend(peddy_het_cols)
+    output_cols.extend(peddy_sex_cols)
 
     # Collect all sample IDs
-    all_samples = sorted(set(list(qc_data.keys()) + list(pc_data.keys())))
+    all_samples = sorted(set(
+        list(qc_data.keys()) + list(pc_data.keys())
+        + list(peddy_het_data.keys()) + list(peddy_sex_data.keys())
+    ))
 
     # Write output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -168,15 +232,27 @@ def main():
             pc_row = pc_data.get(sample_id, {})
             for col in pc_cols:
                 row.append(pc_row.get(col, 'NA'))
+            # Peddy het_check columns
+            peddy_het_row = peddy_het_data.get(sample_id, {})
+            for col in peddy_het_cols:
+                row.append(peddy_het_row.get(col, 'NA'))
+            # Peddy sex_check columns
+            peddy_sex_row = peddy_sex_data.get(sample_id, {})
+            for col in peddy_sex_cols:
+                row.append(peddy_sex_row.get(col, 'NA'))
             f.write('\t'.join(row) + '\n')
 
     n_samples = len(all_samples)
     n_with_pcs = sum(1 for s in all_samples if s in pc_data)
+    n_with_peddy = sum(1 for s in all_samples if s in peddy_het_data)
     print(f"Compiled sample sheet: {args.output}")
     print(f"  Total samples:     {n_samples}")
     print(f"  QC columns:        {len(qc_header)}")
     print(f"  PC columns:        {len(pc_cols)}")
     print(f"  Samples with PCs:  {n_with_pcs}")
+    if peddy_het_cols or peddy_sex_cols:
+        print(f"  Peddy columns:     {len(peddy_het_cols) + len(peddy_sex_cols)}")
+        print(f"  Samples w/ peddy:  {n_with_peddy}")
 
 
 if __name__ == "__main__":

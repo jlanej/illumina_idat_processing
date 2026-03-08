@@ -26,11 +26,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-matplotlib \
         python3-numpy \
+        python3-pip \
         samtools \
         unzip \
         wget \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install peddy for pedigree/sex/ancestry QC
+RUN pip3 install --break-system-packages peddy
 
 # Build bcftools with gtc2vcf and mocha plugins
 WORKDIR /tmp/build
