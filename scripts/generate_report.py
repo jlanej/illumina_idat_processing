@@ -818,6 +818,8 @@ def _prepare_pca_json(pca_file, qc_rows):
             'pc2': _clean(pcs[1]),
             'pc3': _clean(pcs[2]) if len(pcs) > 2 else None,
             'pc4': _clean(pcs[3]) if len(pcs) > 3 else None,
+            # Preserve the full PC vector for interactive, user-configurable clustering in the HTML report.
+            'all_pcs': [_clean(v) for v in pcs],
         })
     return json.dumps(points)
 
@@ -1052,6 +1054,26 @@ section h2 {
 .plot-controls-note {
     font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem;
 }
+.plot-controls {
+    display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center;
+    margin-bottom: 0.75rem;
+}
+.plot-controls label {
+    font-size: 0.78rem; color: var(--text-muted);
+}
+.plot-slider {
+    width: 180px;
+}
+.plot-input {
+    padding: 0.3rem 0.45rem; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.78rem; background: var(--card-bg);
+}
+.plot-btn {
+    border: 1px solid var(--border); border-radius: 6px; background: #f8fafc;
+    padding: 0.32rem 0.55rem; font-size: 0.76rem; cursor: pointer;
+}
+.plot-btn:hover { border-color: var(--primary); color: var(--primary); }
+.plot-status { font-size: 0.75rem; color: var(--text-muted); }
 """
 
 
@@ -1171,36 +1193,168 @@ document.addEventListener('DOMContentLoaded', function() {
         var hc=document.getElementById('het-container'); if(hc) hc.style.display='';
     }
 
+    function normSex(g) {
+        var sx = (g || 'NA').toString();
+        if (sx === 'M' || sx === '1') return 'M';
+        if (sx === 'F' || sx === '2') return 'F';
+        return 'NA';
+    }
+
+    function renderDensityToggleButtons(traceCount, densityIdx) {
+        return [{
+            type:'buttons', direction:'right', x:1, y:1.18,
+            xanchor:'right', yanchor:'top', showactive:true,
+            buttons:[
+                {label:'Scatter', method:'restyle',
+                 args:[{'visible': Array.from({length: traceCount}, function(_, i){ return i !== densityIdx; })}]},
+                {label:'Density', method:'restyle',
+                 args:[{'visible': Array.from({length: traceCount}, function(_, i){ return i === densityIdx; })}]}
+            ]
+        }];
+    }
+
+    function kmeans(points, k, maxIter) {
+        if (!points.length || k < 1) return null;
+        var dim = points[0].length;
+        var n = points.length;
+        k = Math.max(1, Math.min(k, n));
+
+        var centroids = [];
+        // k-means++ seeding: choose one random observed point, then sample subsequent
+        // centroids with probability proportional to squared distance from nearest centroid.
+        var first = Math.floor(Math.random() * n);
+        centroids.push(points[first].slice());
+        while (centroids.length < k) {
+            var distSq = new Array(n).fill(0);
+            var total = 0;
+            for (var i = 0; i < n; i++) {
+                var minD = Infinity;
+                for (var c = 0; c < centroids.length; c++) {
+                    var d = 0;
+                    for (var j = 0; j < dim; j++) {
+                        var delta = points[i][j] - centroids[c][j];
+                        d += delta * delta;
+                    }
+                    if (d < minD) minD = d;
+                }
+                distSq[i] = minD;
+                total += minD;
+            }
+            if (total <= 0) {
+                centroids.push(points[Math.floor(Math.random() * n)].slice());
+                continue;
+            }
+            var target = Math.random() * total;
+            var acc = 0;
+            var chosen = n - 1;
+            for (var idx = 0; idx < n; idx++) {
+                acc += distSq[idx];
+                if (acc >= target) {
+                    chosen = idx;
+                    break;
+                }
+            }
+            centroids.push(points[chosen].slice());
+        }
+
+        var labels = new Array(n).fill(0);
+        for (var iter = 0; iter < maxIter; iter++) {
+            var changed = false;
+            for (var p = 0; p < n; p++) {
+                var best = 0;
+                var bestDist = Infinity;
+                for (var cc = 0; cc < k; cc++) {
+                    var dist = 0;
+                    for (var dd = 0; dd < dim; dd++) {
+                        var diff = points[p][dd] - centroids[cc][dd];
+                        dist += diff * diff;
+                    }
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = cc;
+                    }
+                }
+                if (labels[p] !== best) {
+                    labels[p] = best;
+                    changed = true;
+                }
+            }
+
+            var sums = Array.from({length: k}, function() { return new Array(dim).fill(0); });
+            var counts = new Array(k).fill(0);
+            for (var pp = 0; pp < n; pp++) {
+                var lab = labels[pp];
+                counts[lab] += 1;
+                for (var d2 = 0; d2 < dim; d2++) {
+                    sums[lab][d2] += points[pp][d2];
+                }
+            }
+            for (var c2 = 0; c2 < k; c2++) {
+                if (!counts[c2]) {
+                    centroids[c2] = points[Math.floor(Math.random() * n)].slice();
+                    continue;
+                }
+                for (var d3 = 0; d3 < dim; d3++) {
+                    centroids[c2][d3] = sums[c2][d3] / counts[c2];
+                }
+            }
+            if (!changed) break;
+        }
+        return {labels: labels, k: k};
+    }
+
     /* ---- Interactive PCA ---- */
     var pcaEl = document.getElementById('pca-data');
     if (pcaEl) {
         var pcaData = JSON.parse(pcaEl.textContent || '[]');
         if (pcaData && pcaData.length) {
-            var sexStyle = {
-                'M': {label:'Male', color:'#4393C3'},
-                '1': {label:'Male', color:'#4393C3'},
-                'F': {label:'Female', color:'#D6604D'},
-                '2': {label:'Female', color:'#D6604D'},
-                'NA': {label:'Unknown', color:'#6b7280'},
-                '': {label:'Unknown', color:'#6b7280'}
+            // Color palette for cluster labels in interactive ancestry views.
+            var CLUSTER_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#0f766e', '#be123c', '#4d7c0f', '#334155', '#c2410c'];
+            var KMEANS_MAX_ITER = 60;
+            var pcaState = {
+                mode: 'sex',
+                assignments: null,
+                k: null,
+                pcsUsed: null,
+                binSize: 35,
+                plots2d: [],
+                hasPc3: pcaData.some(function(p){ return p.pc3 !== null && p.pc3 !== undefined; }),
+                hasPc4: pcaData.some(function(p){ return p.pc4 !== null && p.pc4 !== undefined; })
             };
+
+            function pointLabel(point, idx) {
+                if (pcaState.mode === 'cluster' && pcaState.assignments && pcaState.assignments[idx] !== undefined) {
+                    return 'Cluster ' + (pcaState.assignments[idx] + 1);
+                }
+                var sx = normSex(point.gender);
+                if (sx === 'M') return 'Male';
+                if (sx === 'F') return 'Female';
+                return 'Unknown';
+            }
+
+            function pointColor(point, idx) {
+                if (pcaState.mode === 'cluster' && pcaState.assignments && pcaState.assignments[idx] !== undefined) {
+                    return CLUSTER_COLORS[pcaState.assignments[idx] % CLUSTER_COLORS.length];
+                }
+                var sx = normSex(point.gender);
+                if (sx === 'M') return '#4393C3';
+                if (sx === 'F') return '#D6604D';
+                return '#6b7280';
+            }
 
             function pcaPlot(divId, xKey, yKey, title) {
                 var d = document.getElementById(divId);
-                if (!d) return 0;
+                if (!d) return null;
                 var grouped = {};
                 var allX = [];
                 var allY = [];
-                pcaData.forEach(function(p) {
-                    if (p[xKey] === null || p[yKey] === null) return;
-                    var sx = (p.gender || 'NA').toString();
-                    var style = sexStyle[sx] || sexStyle['NA'];
-                    if (!grouped[style.label]) {
-                        grouped[style.label] = {x:[], y:[], text:[], color:style.color};
-                    }
-                    grouped[style.label].x.push(p[xKey]);
-                    grouped[style.label].y.push(p[yKey]);
-                    grouped[style.label].text.push(p.id);
+                pcaData.forEach(function(p, idx) {
+                    if (p[xKey] === null || p[yKey] === null || p[xKey] === undefined || p[yKey] === undefined) return;
+                    var label = pointLabel(p, idx);
+                    if (!grouped[label]) grouped[label] = {x:[], y:[], text:[], color:pointColor(p, idx)};
+                    grouped[label].x.push(p[xKey]);
+                    grouped[label].y.push(p[yKey]);
+                    grouped[label].text.push(p.id);
                     allX.push(p[xKey]);
                     allY.push(p[yKey]);
                 });
@@ -1213,10 +1367,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         hovertemplate:'<b>%{text}</b><br>'+xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<extra>'+label+'</extra>'
                     };
                 });
-                if (!traces.length) return 0;
+                if (!traces.length) return null;
+                var densityIdx = traces.length;
                 traces.push({
                     x:allX, y:allY, type:'histogram2d', name:'Density',
-                    nbinsx:35, nbinsy:35,
+                    nbinsx:pcaState.binSize, nbinsy:pcaState.binSize,
                     colorscale:[
                         [0.0, 'rgba(37,99,235,0)'],
                         [0.05, 'rgba(37,99,235,0.2)'],
@@ -1231,34 +1386,182 @@ document.addEventListener('DOMContentLoaded', function() {
                     title:{text:title,font:{size:14}},
                     xaxis:{title:xKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
                     yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
-                    updatemenus:[{
-                        type:'buttons', direction:'right', x:1, y:1.18,
-                        xanchor:'right', yanchor:'top', showactive:true,
-                        buttons:[
-                            {label:'Scatter', method:'restyle',
-                             args:[{'visible': traces.map(function(_, i){return i < traces.length - 1;})}]},
-                            {label:'Density', method:'restyle',
-                             args:[{'visible': traces.map(function(_, i){return i === traces.length - 1;})}]}
-                        ]
-                    },{
-                        type:'buttons', direction:'right', x:0, y:1.18,
-                        xanchor:'left', yanchor:'top', showactive:true,
-                        buttons:[
-                            {label:'Bins: Coarse', method:'restyle', args:[{'nbinsx':20,'nbinsy':20}, [traces.length - 1]]},
-                            {label:'Bins: Medium', method:'restyle', args:[{'nbinsx':35,'nbinsy':35}, [traces.length - 1]]},
-                            {label:'Bins: Fine', method:'restyle', args:[{'nbinsx':55,'nbinsy':55}, [traces.length - 1]]}
-                        ]
-                    }]
+                    updatemenus: renderDensityToggleButtons(traces.length, densityIdx)
                 }), cfg);
-                return allX.length;
+                return {div:d, densityIndex:densityIdx, n:allX.length};
             }
 
-            pcaPlot('plot-pca12', 'pc1', 'pc2', 'PC1 vs PC2');
-            var n34 = pcaPlot('plot-pca34', 'pc3', 'pc4', 'PC3 vs PC4');
-            if (n34 > 0) {
+            function pcaPlot3d() {
+                var d3 = document.getElementById('plot-pca3d');
+                if (!d3 || !pcaState.hasPc3) return;
+                var grouped = {};
+                pcaData.forEach(function(p, idx) {
+                    if (p.pc1 === null || p.pc2 === null || p.pc3 === null) return;
+                    var label = pointLabel(p, idx);
+                    if (!grouped[label]) grouped[label] = {x:[], y:[], z:[], text:[], color:pointColor(p, idx)};
+                    grouped[label].x.push(p.pc1);
+                    grouped[label].y.push(p.pc2);
+                    grouped[label].z.push(p.pc3);
+                    grouped[label].text.push(p.id);
+                });
+                var traces = Object.keys(grouped).sort().map(function(label) {
+                    var g = grouped[label];
+                    return {
+                        type:'scatter3d', mode:'markers', name:label+' (n='+g.x.length+')',
+                        x:g.x, y:g.y, z:g.z, text:g.text,
+                        marker:{size:4, opacity:0.75, color:g.color},
+                        hovertemplate:'<b>%{text}</b><br>PC1: %{x:.4f}<br>PC2: %{y:.4f}<br>PC3: %{z:.4f}<extra>'+label+'</extra>'
+                    };
+                });
+                Plotly.newPlot(d3, traces, Object.assign({}, baseLayout, {
+                    title:{text:'PC1 vs PC2 vs PC3 (3D)',font:{size:14}},
+                    scene: {
+                        xaxis:{title:'PC1',gridcolor:'#f1f5f9'},
+                        yaxis:{title:'PC2',gridcolor:'#f1f5f9'},
+                        zaxis:{title:'PC3',gridcolor:'#f1f5f9'}
+                    },
+                    margin:{t:45, r:5, b:10, l:5}
+                }), cfg);
+            }
+
+            function refreshPcaPlots() {
+                pcaState.plots2d = [];
+                var p12 = pcaPlot('plot-pca12', 'pc1', 'pc2', 'PC1 vs PC2');
+                if (p12) pcaState.plots2d.push(p12);
                 var c34 = document.getElementById('pca34-container');
                 if (c34) c34.style.display = '';
+                if (pcaState.hasPc3 && pcaState.hasPc4) {
+                    var p34 = pcaPlot('plot-pca34', 'pc3', 'pc4', 'PC3 vs PC4');
+                    if (p34) pcaState.plots2d.push(p34);
+                } else if (c34) {
+                    c34.style.display = 'none';
+                }
+                pcaPlot3d();
             }
+
+            function applyPcaDensityBins(value) {
+                pcaState.binSize = value;
+                pcaState.plots2d.forEach(function(meta) {
+                    Plotly.restyle(meta.div, {'nbinsx': value, 'nbinsy': value}, [meta.densityIndex]);
+                });
+            }
+
+            function exportClusters() {
+                if (!pcaState.assignments) return;
+                var lines = ['sample_id\tcluster\tk\tpcs_used'];
+                pcaData.forEach(function(p, idx) {
+                    var label = pcaState.assignments[idx];
+                    if (label === undefined) return;
+                    lines.push([p.id, String(label + 1), String(pcaState.k), String(pcaState.pcsUsed)].join('\t'));
+                });
+                var blob = new Blob([lines.join('\n') + '\n'], {type:'text/tab-separated-values;charset=utf-8;'});
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'ancestry_cluster_assignments.tsv';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            function runClustering() {
+                var kInput = document.getElementById('pca-cluster-k');
+                var pcsInput = document.getElementById('pca-cluster-pcs');
+                var statusEl = document.getElementById('pca-cluster-status');
+                var exportBtn = document.getElementById('pca-cluster-export');
+                if (!kInput || !pcsInput || !statusEl || !exportBtn) return;
+
+                var k = parseInt(kInput.value, 10);
+                var pcsUsed = parseInt(pcsInput.value, 10);
+                if (!isFinite(k) || !isFinite(pcsUsed)) {
+                    statusEl.textContent = 'Invalid clustering settings.';
+                    return;
+                }
+                pcsUsed = Math.max(2, pcsUsed);
+                var vectors = [];
+                var idxMap = [];
+                var availablePcCount = pcaData.reduce(function(acc, p) {
+                    return Math.max(acc, (p.all_pcs || []).length);
+                }, 0);
+                if (availablePcCount && pcsUsed > availablePcCount) {
+                    pcsUsed = availablePcCount;
+                    pcsInput.value = String(pcsUsed);
+                }
+                pcaData.forEach(function(p, idx) {
+                    var pcs = p.all_pcs || [];
+                    if (!pcs || pcs.length < pcsUsed) return;
+                    var vec = pcs.slice(0, pcsUsed);
+                    if (vec.some(function(v){ return v === null || v === undefined; })) return;
+                    vectors.push(vec);
+                    idxMap.push(idx);
+                });
+                if (vectors.length < 2) {
+                    statusEl.textContent = 'Not enough PCA points for clustering.';
+                    return;
+                }
+                var result = kmeans(vectors, k, KMEANS_MAX_ITER);
+                if (!result) {
+                    statusEl.textContent = 'Clustering failed.';
+                    return;
+                }
+                pcaState.assignments = new Array(pcaData.length);
+                for (var i = 0; i < idxMap.length; i++) {
+                    pcaState.assignments[idxMap[i]] = result.labels[i];
+                }
+                pcaState.mode = 'cluster';
+                pcaState.k = result.k;
+                pcaState.pcsUsed = pcsUsed;
+                statusEl.textContent = 'Computed ' + result.k + ' clusters using first ' + pcsUsed + ' PCs.';
+                exportBtn.disabled = false;
+                var modeSel = document.getElementById('pca-color-mode');
+                if (modeSel) modeSel.value = 'cluster';
+                refreshPcaPlots();
+            }
+
+            refreshPcaPlots();
+
+            var pcaSlider = document.getElementById('pca-density-bins');
+            var pcaSliderVal = document.getElementById('pca-density-bins-value');
+            if (pcaSlider) {
+                pcaSlider.value = String(pcaState.binSize);
+                if (pcaSliderVal) pcaSliderVal.textContent = String(pcaState.binSize);
+                pcaSlider.addEventListener('input', function() {
+                    var v = parseInt(this.value, 10);
+                    if (!isFinite(v)) return;
+                    if (pcaSliderVal) pcaSliderVal.textContent = String(v);
+                    applyPcaDensityBins(v);
+                });
+            }
+
+            var toggleBtn = document.getElementById('pca-view-toggle');
+            var grid2d = document.getElementById('pca-2d-grid');
+            var view3d = document.getElementById('pca-3d-container');
+            if (toggleBtn && grid2d && view3d) {
+                if (!pcaState.hasPc3) {
+                    toggleBtn.disabled = true;
+                    toggleBtn.textContent = '3D view unavailable';
+                } else {
+                    toggleBtn.addEventListener('click', function() {
+                        var show3d = view3d.style.display === 'none';
+                        view3d.style.display = show3d ? '' : 'none';
+                        grid2d.style.display = show3d ? 'none' : '';
+                        this.textContent = show3d ? 'Show 2D view' : 'Show 3D view';
+                    });
+                }
+            }
+
+            var colorSel = document.getElementById('pca-color-mode');
+            if (colorSel) {
+                colorSel.addEventListener('change', function() {
+                    pcaState.mode = this.value === 'cluster' ? 'cluster' : 'sex';
+                    refreshPcaPlots();
+                });
+            }
+            var clusterBtn = document.getElementById('pca-cluster-run');
+            if (clusterBtn) clusterBtn.addEventListener('click', runClustering);
+            var exportBtn2 = document.getElementById('pca-cluster-export');
+            if (exportBtn2) exportBtn2.addEventListener('click', exportClusters);
         }
     }
 
@@ -1267,27 +1570,20 @@ document.addEventListener('DOMContentLoaded', function() {
     if (sexEl) {
         var sexData = JSON.parse(sexEl.textContent || '[]');
         if (sexData && sexData.length) {
-            var sexStyle2 = {
-                'M': {label:'Male', color:'#4393C3'},
-                '1': {label:'Male', color:'#4393C3'},
-                'F': {label:'Female', color:'#D6604D'},
-                '2': {label:'Female', color:'#D6604D'},
-                'NA': {label:'Unknown', color:'#6b7280'},
-                '': {label:'Unknown', color:'#6b7280'}
-            };
             var grouped2 = {};
             var allX2 = [];
             var allY2 = [];
             sexData.forEach(function(p) {
                 if (p.chrx_lrr_median === null || p.chry_lrr_median === null) return;
-                var sx = (p.gender || 'NA').toString();
-                var style = sexStyle2[sx] || sexStyle2['NA'];
-                if (!grouped2[style.label]) {
-                    grouped2[style.label] = {x:[], y:[], text:[], color:style.color};
+                var sx = normSex(p.gender);
+                var label = sx === 'M' ? 'Male' : (sx === 'F' ? 'Female' : 'Unknown');
+                var color = sx === 'M' ? '#4393C3' : (sx === 'F' ? '#D6604D' : '#6b7280');
+                if (!grouped2[label]) {
+                    grouped2[label] = {x:[], y:[], text:[], color:color};
                 }
-                grouped2[style.label].x.push(p.chrx_lrr_median);
-                grouped2[style.label].y.push(p.chry_lrr_median);
-                grouped2[style.label].text.push(p.id);
+                grouped2[label].x.push(p.chrx_lrr_median);
+                grouped2[label].y.push(p.chry_lrr_median);
+                grouped2[label].text.push(p.id);
                 allX2.push(p.chrx_lrr_median);
                 allY2.push(p.chry_lrr_median);
             });
@@ -1302,6 +1598,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
             });
             if (traces2.length) {
+                var densityIdx2 = traces2.length;
                 traces2.push({
                     x:allX2, y:allY2, type:'histogram2d', name:'Density',
                     nbinsx:35, nbinsy:35,
@@ -1321,25 +1618,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         title:{text:'Sex Check: Median chrX vs chrY LRR',font:{size:14}},
                         xaxis:{title:'Median chrX LRR',gridcolor:'#f1f5f9',zeroline:false},
                         yaxis:{title:'Median chrY LRR',gridcolor:'#f1f5f9',zeroline:false},
-                        updatemenus:[{
-                            type:'buttons', direction:'right', x:1, y:1.18,
-                            xanchor:'right', yanchor:'top', showactive:true,
-                            buttons:[
-                                {label:'Scatter', method:'restyle',
-                                 args:[{'visible': traces2.map(function(_, i){return i < traces2.length - 1;})}]},
-                                {label:'Density', method:'restyle',
-                                 args:[{'visible': traces2.map(function(_, i){return i === traces2.length - 1;})}]}
-                            ]
-                        },{
-                            type:'buttons', direction:'right', x:0, y:1.18,
-                            xanchor:'left', yanchor:'top', showactive:true,
-                            buttons:[
-                                {label:'Bins: Coarse', method:'restyle', args:[{'nbinsx':20,'nbinsy':20}, [traces2.length - 1]]},
-                                {label:'Bins: Medium', method:'restyle', args:[{'nbinsx':35,'nbinsy':35}, [traces2.length - 1]]},
-                                {label:'Bins: Fine', method:'restyle', args:[{'nbinsx':55,'nbinsy':55}, [traces2.length - 1]]}
-                            ]
-                        }]
+                        updatemenus: renderDensityToggleButtons(traces2.length, densityIdx2)
                     }), cfg);
+
+                    var sexSlider = document.getElementById('sex-density-bins');
+                    var sexSliderVal = document.getElementById('sex-density-bins-value');
+                    if (sexSlider) {
+                        sexSlider.value = '35';
+                        if (sexSliderVal) sexSliderVal.textContent = '35';
+                        sexSlider.addEventListener('input', function() {
+                            var bins = parseInt(this.value, 10);
+                            if (!isFinite(bins)) return;
+                            if (sexSliderVal) sexSliderVal.textContent = String(bins);
+                            Plotly.restyle(sexDiv, {'nbinsx': bins, 'nbinsy': bins}, [densityIdx2]);
+                        });
+                    }
                 }
             }
         }
@@ -1714,8 +2007,12 @@ def _build_html(stats, stage1_stats, figures, realign_text,
 
     <section id="sex-check">
         <h2>⚥ Sex Check</h2>
+        <div class="plot-controls">
+            <label for="sex-density-bins">Density bins: <span id="sex-density-bins-value">35</span></label>
+            <input id="sex-density-bins" class="plot-slider" type="range" min="10" max="80" value="35" step="1">
+        </div>
         <div class="card"><div id="plot-sex-check" class="plot-box"></div>
-            <div class="plot-controls-note">Use the plot controls to toggle scatter/density and adjust density binning.</div>
+            <div class="plot-controls-note">Use Scatter/Density buttons on the plot, and the slider to control density bin size.</div>
         </div>
         <noscript>
         {_fig_block('sex_check', 'Median chrX vs chrY LRR by Predicted Sex')}
@@ -1724,11 +2021,29 @@ def _build_html(stats, stage1_stats, figures, realign_text,
 
     <section id="pca">
         <h2>🌍 Ancestry PCA</h2>
-        <div class="plot-grid">
+        <div class="plot-controls">
+            <button id="pca-view-toggle" class="plot-btn" type="button">Show 3D view</button>
+            <label for="pca-density-bins">Density bins: <span id="pca-density-bins-value">35</span></label>
+            <input id="pca-density-bins" class="plot-slider" type="range" min="10" max="80" value="35" step="1">
+            <label for="pca-color-mode">Color by</label>
+            <select id="pca-color-mode" class="plot-input">
+                <option value="sex">Sex</option>
+                <option value="cluster">Cluster</option>
+            </select>
+            <label for="pca-cluster-k">k</label>
+            <input id="pca-cluster-k" class="plot-input" type="number" min="2" max="12" value="3">
+            <label for="pca-cluster-pcs">PCs</label>
+            <input id="pca-cluster-pcs" class="plot-input" type="number" min="2" max="20" value="4">
+            <button id="pca-cluster-run" class="plot-btn" type="button">Run k-means</button>
+            <button id="pca-cluster-export" class="plot-btn" type="button" disabled>Export clusters</button>
+            <span id="pca-cluster-status" class="plot-status">No clusters computed.</span>
+        </div>
+        <div class="plot-grid" id="pca-2d-grid">
             <div class="card"><div id="plot-pca12" class="plot-box"></div></div>
             <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
         </div>
-        <div class="plot-controls-note">Use the plot controls to toggle scatter/density and adjust density binning.</div>
+        <div class="card" id="pca-3d-container" style="display:none"><div id="plot-pca3d" class="plot-box"></div></div>
+        <div class="plot-controls-note">Toggle 2D/3D PCA views and run customizable k-means clustering for on-the-fly ancestry grouping.</div>
         <noscript>
             {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
         </noscript>
