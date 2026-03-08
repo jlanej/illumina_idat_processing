@@ -126,6 +126,15 @@ GWAS_METHODS_CITATIONS = [
             'validation from VCF genotypes via the peddy tool.'
         ),
     },
+    {
+        'citation': 'Genovese et al. 2024, Bioinformatics 40(2):btae038',
+        'doi': '10.1093/bioinformatics/btae038',
+        'cited_for': 'bcftools/liftover assembly-coordinate conversion',
+        'pipeline_application': (
+            'Supports coordinate conversion from non-GRCh38 builds to GRCh38 '
+            'for peddy site matching via bcftools +liftover.'
+        ),
+    },
 ]
 
 

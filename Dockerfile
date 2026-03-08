@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install peddy for pedigree/sex/ancestry QC
-RUN pip3 install --break-system-packages peddy
+RUN pip3 install peddy
 
 # Build bcftools with gtc2vcf, mocha, and liftover plugins
 WORKDIR /tmp/build
