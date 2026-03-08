@@ -161,11 +161,12 @@ fi
 
 # --- Test 4b: Scatter/density controls ---
 echo "--- Test 4b: Scatter/density controls ---"
-if grep -q "label:'Scatter'" "${REPORT}" && grep -q "label:'Density'" "${REPORT}"; then
-    echo "  PASS: Scatter/density mode toggle controls present"
+if grep -q 'id="pca-scatter-btn"' "${REPORT}" && grep -q 'id="pca-density-btn"' "${REPORT}" && \
+   grep -q 'id="sex-scatter-btn"' "${REPORT}" && grep -q 'id="sex-density-btn"' "${REPORT}"; then
+    echo "  PASS: Scatter/density external button controls present for both PCA and sex-check"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Scatter/density mode toggle controls missing"
+    echo "  FAIL: Scatter/density external button controls missing"
     (( FAIL++ )) || true
 fi
 
