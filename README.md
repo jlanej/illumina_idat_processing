@@ -264,7 +264,8 @@ output/
 │   └── clusters/
 │       └── reclustered.egt          # Study-specific EGT cluster file
 ├── sex_check/
-│   └── sex_check_chrXY_lrr.png     # Median chrX vs chrY LRR by predicted sex
+│   ├── sex_check_chrXY_lrr.png     # Median chrX vs chrY LRR by predicted sex
+│   └── sex_check_chrXY_lrr.tsv     # Per-sample median chrX/chrY LRR values used in report
 ├── ancestry_pca/
 │   ├── pca_projections.tsv          # All-sample PC projections (20 PCs)
 │   ├── pca_eigenvalues.txt          # PCA eigenvalues

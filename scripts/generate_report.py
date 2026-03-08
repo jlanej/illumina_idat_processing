@@ -582,6 +582,7 @@ def generate_html_report(output_dir):
 
     # PCA file
     pca_file = os.path.join(output_dir, 'ancestry_pca', 'pca_projections.tsv')
+    sex_check_table = os.path.join(output_dir, 'sex_check', 'sex_check_chrXY_lrr.tsv')
     pca_summary = read_text(os.path.join(output_dir, 'ancestry_pca', 'qc_summary.txt'))
     mock_notice = read_text(os.path.join(output_dir, 'mock_data_notice.txt'))
 
@@ -640,11 +641,13 @@ def generate_html_report(output_dir):
 
     # ---- Build HTML ----
     pca_json = _prepare_pca_json(pca_file, qc_rows) if os.path.exists(pca_file) else '[]'
+    sex_check_json = _prepare_sex_check_json(sex_check_table)
     html = _build_html(stats, stage1_stats,
                        figures, realign_text, comparison_text,
                        variant_qc_text, diag_text, methods_text,
                        pca_summary, tool_versions, stage_label,
                        qc_rows=qc_rows, pca_json=pca_json,
+                       sex_check_json=sex_check_json,
                        mock_notice=mock_notice or '')
 
     report_path = os.path.join(output_dir, 'pipeline_report.html')
@@ -695,6 +698,7 @@ def _consolidate_summary_outputs(output_dir):
         (os.path.join('ancestry_pca', 'qc_summary.txt'), 'ancestry_pca_qc_summary.txt'),
         (os.path.join('ancestry_pca', 'pca_qc_samples.txt'), 'ancestry_pca_qc_samples.txt'),
         (os.path.join('sex_check', 'sex_check_chrXY_lrr.png'), 'sex_check_chrXY_lrr.png'),
+        (os.path.join('sex_check', 'sex_check_chrXY_lrr.tsv'), 'sex_check_chrXY_lrr.tsv'),
         (os.path.join('realigned_manifests', 'realign_summary.txt'), 'realign_summary.txt'),
         (os.path.join('stage2', 'qc', 'comparison', 'qc_comparison_report.txt'), 'qc_comparison_report.txt'),
         (os.path.join('stage2', 'qc', 'comparison', 'qc_comparison_samples.png'), 'qc_comparison_samples.png'),
@@ -814,6 +818,27 @@ def _prepare_pca_json(pca_file, qc_rows):
             'pc2': _clean(pcs[1]),
             'pc3': _clean(pcs[2]) if len(pcs) > 2 else None,
             'pc4': _clean(pcs[3]) if len(pcs) > 3 else None,
+        })
+    return json.dumps(points)
+
+
+def _prepare_sex_check_json(sex_check_file):
+    """Serialize sex check chrX/chrY median LRR data for interactive plotting."""
+    if not os.path.exists(sex_check_file):
+        return '[]'
+
+    _, rows = read_tsv(sex_check_file)
+    points = []
+    for row in rows:
+        x = safe_float(row.get('chrx_lrr_median'))
+        y = safe_float(row.get('chry_lrr_median'))
+        if x is None or y is None:
+            continue
+        points.append({
+            'id': row.get('sample_id', ''),
+            'gender': row.get('computed_gender', 'NA'),
+            'chrx_lrr_median': round(x, 6),
+            'chry_lrr_median': round(y, 6),
         })
     return json.dumps(points)
 
@@ -1024,6 +1049,9 @@ section h2 {
     background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px;
     font-size: 0.82rem;
 }
+.plot-controls-note {
+    font-size: 0.78rem; color: var(--text-muted); margin-top: 0.5rem;
+}
 """
 
 
@@ -1161,6 +1189,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 var d = document.getElementById(divId);
                 if (!d) return 0;
                 var grouped = {};
+                var allX = [];
+                var allY = [];
                 pcaData.forEach(function(p) {
                     if (p[xKey] === null || p[yKey] === null) return;
                     var sx = (p.gender || 'NA').toString();
@@ -1171,23 +1201,47 @@ document.addEventListener('DOMContentLoaded', function() {
                     grouped[style.label].x.push(p[xKey]);
                     grouped[style.label].y.push(p[yKey]);
                     grouped[style.label].text.push(p.id);
+                    allX.push(p[xKey]);
+                    allY.push(p[yKey]);
                 });
                 var traces = Object.keys(grouped).sort().map(function(label) {
                     var g = grouped[label];
                     return {
                         x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
                         name:label+' (n='+g.x.length+')',
-                        marker:{color:g.color, size:7, opacity:0.65},
+                        marker:{color:g.color, size:5, opacity:0.65},
                         hovertemplate:'<b>%{text}</b><br>'+xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<extra>'+label+'</extra>'
                     };
                 });
                 if (!traces.length) return 0;
+                traces.push({
+                    x:allX, y:allY, type:'histogram2d', name:'Density',
+                    colorscale:[
+                        [0.0, 'rgba(37,99,235,0)'],
+                        [0.05, 'rgba(37,99,235,0.2)'],
+                        [0.4, 'rgba(37,99,235,0.5)'],
+                        [1.0, 'rgba(30,64,175,0.85)']
+                    ],
+                    zmin:0, showscale:true, colorbar:{title:'Count'},
+                    hovertemplate:xKey.toUpperCase()+': %{x:.4f}<br>'+yKey.toUpperCase()+': %{y:.4f}<br>Count: %{z}<extra>Density</extra>',
+                    visible:false
+                });
                 Plotly.newPlot(d, traces, Object.assign({}, baseLayout, {
                     title:{text:title,font:{size:14}},
                     xaxis:{title:xKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
-                    yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false}
+                    yaxis:{title:yKey.toUpperCase(),gridcolor:'#f1f5f9',zeroline:false},
+                    updatemenus:[{
+                        type:'buttons', direction:'right', x:1, y:1.18,
+                        xanchor:'right', yanchor:'top', showactive:true,
+                        buttons:[
+                            {label:'Scatter', method:'restyle',
+                             args:[{'visible': traces.map(function(_, i){return i < traces.length - 1;})}]},
+                            {label:'Density', method:'restyle',
+                             args:[{'visible': traces.map(function(_, i){return i === traces.length - 1;})}]}
+                        ]
+                    }]
                 }), cfg);
-                return traces.reduce(function(n, t){return n + t.x.length;}, 0);
+                return allX.length;
             }
 
             pcaPlot('plot-pca12', 'pc1', 'pc2', 'PC1 vs PC2');
@@ -1195,6 +1249,80 @@ document.addEventListener('DOMContentLoaded', function() {
             if (n34 > 0) {
                 var c34 = document.getElementById('pca34-container');
                 if (c34) c34.style.display = '';
+            }
+        }
+    }
+
+    /* ---- Interactive sex check ---- */
+    var sexEl = document.getElementById('sex-data');
+    if (sexEl) {
+        var sexData = JSON.parse(sexEl.textContent || '[]');
+        if (sexData && sexData.length) {
+            var sexStyle2 = {
+                'M': {label:'Male', color:'#4393C3'},
+                '1': {label:'Male', color:'#4393C3'},
+                'F': {label:'Female', color:'#D6604D'},
+                '2': {label:'Female', color:'#D6604D'},
+                'NA': {label:'Unknown', color:'#6b7280'},
+                '': {label:'Unknown', color:'#6b7280'}
+            };
+            var grouped2 = {};
+            var allX2 = [];
+            var allY2 = [];
+            sexData.forEach(function(p) {
+                if (p.chrx_lrr_median === null || p.chry_lrr_median === null) return;
+                var sx = (p.gender || 'NA').toString();
+                var style = sexStyle2[sx] || sexStyle2['NA'];
+                if (!grouped2[style.label]) {
+                    grouped2[style.label] = {x:[], y:[], text:[], color:style.color};
+                }
+                grouped2[style.label].x.push(p.chrx_lrr_median);
+                grouped2[style.label].y.push(p.chry_lrr_median);
+                grouped2[style.label].text.push(p.id);
+                allX2.push(p.chrx_lrr_median);
+                allY2.push(p.chry_lrr_median);
+            });
+
+            var traces2 = Object.keys(grouped2).sort().map(function(label) {
+                var g = grouped2[label];
+                return {
+                    x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
+                    name:label+' (n='+g.x.length+')',
+                    marker:{color:g.color, size:5, opacity:0.65},
+                    hovertemplate:'<b>%{text}</b><br>Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<extra>'+label+'</extra>'
+                };
+            });
+            if (traces2.length) {
+                traces2.push({
+                    x:allX2, y:allY2, type:'histogram2d', name:'Density',
+                    colorscale:[
+                        [0.0, 'rgba(37,99,235,0)'],
+                        [0.05, 'rgba(37,99,235,0.2)'],
+                        [0.4, 'rgba(37,99,235,0.5)'],
+                        [1.0, 'rgba(30,64,175,0.85)']
+                    ],
+                    zmin:0, showscale:true, colorbar:{title:'Count'},
+                    hovertemplate:'Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<br>Count: %{z}<extra>Density</extra>',
+                    visible:false
+                });
+                var sexDiv = document.getElementById('plot-sex-check');
+                if (sexDiv) {
+                    Plotly.newPlot(sexDiv, traces2, Object.assign({}, baseLayout, {
+                        title:{text:'Sex Check: Median chrX vs chrY LRR',font:{size:14}},
+                        xaxis:{title:'Median chrX LRR',gridcolor:'#f1f5f9',zeroline:false},
+                        yaxis:{title:'Median chrY LRR',gridcolor:'#f1f5f9',zeroline:false},
+                        updatemenus:[{
+                            type:'buttons', direction:'right', x:1, y:1.18,
+                            xanchor:'right', yanchor:'top', showactive:true,
+                            buttons:[
+                                {label:'Scatter', method:'restyle',
+                                 args:[{'visible': traces2.map(function(_, i){return i < traces2.length - 1;})}]},
+                                {label:'Density', method:'restyle',
+                                 args:[{'visible': traces2.map(function(_, i){return i === traces2.length - 1;})}]}
+                            ]
+                        }]
+                    }), cfg);
+                }
             }
         }
     }
@@ -1266,7 +1394,7 @@ document.addEventListener('DOMContentLoaded', function() {
 def _build_html(stats, stage1_stats, figures, realign_text,
                 comparison_text, variant_qc_text, diag_text,
                 methods_text, pca_summary, tool_versions, stage_label,
-                qc_rows=None, pca_json='[]', mock_notice=''):
+                qc_rows=None, pca_json='[]', sex_check_json='[]', mock_notice=''):
     """Build the HTML report string with interactive Plotly charts."""
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1568,7 +1696,12 @@ def _build_html(stats, stage1_stats, figures, realign_text,
 
     <section id="sex-check">
         <h2>⚥ Sex Check</h2>
+        <div class="card"><div id="plot-sex-check" class="plot-box"></div>
+            <div class="plot-controls-note">Use the plot controls to toggle between scatter and density views.</div>
+        </div>
+        <noscript>
         {_fig_block('sex_check', 'Median chrX vs chrY LRR by Predicted Sex')}
+        </noscript>
     </section>
 
     <section id="pca">
@@ -1577,6 +1710,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             <div class="card"><div id="plot-pca12" class="plot-box"></div></div>
             <div class="card" id="pca34-container" style="display:none"><div id="plot-pca34" class="plot-box"></div></div>
         </div>
+        <div class="plot-controls-note">Use the plot controls to toggle between scatter and density views.</div>
         <noscript>
             {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
         </noscript>
@@ -1639,6 +1773,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     html += html_body
     html += f'\n<script type="application/json" id="qc-data">{sample_json}</script>\n'
     html += f'<script type="application/json" id="pca-data">{pca_json}</script>\n'
+    html += f'<script type="application/json" id="sex-data">{sex_check_json}</script>\n'
     html += f'<script>{js}</script>\n'
     html += '</body>\n</html>'
 
