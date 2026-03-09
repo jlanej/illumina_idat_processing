@@ -159,6 +159,7 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
        grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}" && \
        grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
+       grep -q 'peddy_input.vcf.gz' "${RUN_PEDDY}" && \
        ! grep -q 'lifted_grch38.vcf.gz' "${RUN_PEDDY}"; then
         echo "  PASS: run_peddy.sh reports overlap and keeps liftover filtering inline"
         (( PASS++ )) || true

@@ -34,6 +34,7 @@ PEDDY_MIN_OVERLAP_WARN_COUNT=500
 PEDDY_MIN_OVERLAP_WARN_SITE_FRACTION=0.005
 PEDDY_MIN_LIFTOVER_RETAIN_FRACTION=0.10
 PEDDY_COORD_BUFFER_BP=100
+PEDDY_COUNT_WAIT_ATTEMPTS=50
 
 usage() {
     cat <<EOF
@@ -387,6 +388,7 @@ _prepare_liftover_subset() {
     echo "  Running bcftools +liftover pipeline..."
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
     local lifted_count_file="${TMP_DIR}/lifted_variants.count"
+    rm -f "${lifted_count_file}"
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
@@ -399,6 +401,15 @@ _prepare_liftover_subset() {
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
     bcftools sort -Oz -o "${peddy_vcf}"
 
+    local wait_attempts=0
+    while (( wait_attempts < PEDDY_COUNT_WAIT_ATTEMPTS )); do
+        if [[ -f "${lifted_count_file}" ]]; then
+            break
+        fi
+        ((wait_attempts += 1))
+        sleep 0.1
+    done
+
     bcftools index -t "${peddy_vcf}"
     INPUT_VCF="${peddy_vcf}"
 
@@ -406,8 +417,11 @@ _prepare_liftover_subset() {
     lifted_variants="0"
     if [[ -f "${lifted_count_file}" ]]; then
         lifted_variants=$(tr -d '[:space:]' < "${lifted_count_file}")
+    else
+        echo "Warning: Streamed liftover variant count file was not produced (liftover stream failed early or async count write did not complete)."
     fi
     if [[ ! "${lifted_variants}" =~ ^[0-9]+$ ]]; then
+        echo "Warning: Failed to read streamed liftover variant count; defaulting to 0."
         lifted_variants="0"
     fi
     local lifted_pct
