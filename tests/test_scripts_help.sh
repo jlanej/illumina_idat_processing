@@ -202,6 +202,20 @@ else
     (( FAIL++ )) || true
 fi
 
+echo "--- Pipeline post-step idempotency guard validation ---"
+if [[ -f "${RUN_PIPELINE}" ]]; then
+    if grep -q 'Sex check outputs already exist. Skipping' "${RUN_PIPELINE}" && \
+       grep -q 'Compiled sample sheet already exists. Skipping' "${RUN_PIPELINE}" && \
+       grep -q 'QC diagnostic report already exists. Skipping' "${RUN_PIPELINE}" && \
+       grep -q 'Pipeline report outputs already exist. Skipping' "${RUN_PIPELINE}"; then
+        echo "  PASS: run_pipeline.sh includes post-step idempotency guards"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: run_pipeline.sh missing expected post-step idempotency guards"
+        (( FAIL++ )) || true
+    fi
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"

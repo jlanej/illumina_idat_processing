@@ -431,12 +431,18 @@ echo "======================================================"
 echo ""
 
 SEX_CHECK_DIR="${OUTPUT_DIR}/sex_check"
+SEX_CHECK_PNG="${SEX_CHECK_DIR}/sex_check_chrXY_lrr.png"
+SEX_CHECK_TSV="${SEX_CHECK_DIR}/sex_check_chrXY_lrr.tsv"
 if command -v python3 &>/dev/null && [[ -f "${FINAL_VCF}" && -f "${FINAL_QC}" ]]; then
-    python3 "${SCRIPT_DIR}/plot_sex_check.py" \
-        --vcf "${FINAL_VCF}" \
-        --sample-qc "${FINAL_QC}" \
-        --output-dir "${SEX_CHECK_DIR}" \
-        --threads "${THREADS}" 2>&1 || true
+    if [[ "${FORCE}" != "true" && -s "${SEX_CHECK_PNG}" && -s "${SEX_CHECK_TSV}" ]]; then
+        echo "Sex check outputs already exist. Skipping (use --force to regenerate)."
+    else
+        python3 "${SCRIPT_DIR}/plot_sex_check.py" \
+            --vcf "${FINAL_VCF}" \
+            --sample-qc "${FINAL_QC}" \
+            --output-dir "${SEX_CHECK_DIR}" \
+            --threads "${THREADS}" 2>&1 || true
+    fi
 else
     echo "Note: Skipping sex check plot (python3, VCF, or QC file not available)."
 fi
@@ -522,32 +528,36 @@ echo ""
 
 COMPILED_SHEET="${OUTPUT_DIR}/compiled_sample_sheet.tsv"
 if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
-    COMPILE_ARGS=(
-        --sample-qc "${FINAL_QC}"
-        --output "${COMPILED_SHEET}"
-    )
-    if [[ -f "${PCA_DIR}/pca_projections.tsv" ]]; then
-        COMPILE_ARGS+=(--pca-projections "${PCA_DIR}/pca_projections.tsv")
-    fi
-
-    # Include inbreeding coefficient from variant QC if available
-    for het_file in "${OUTPUT_DIR}/stage2/qc/variant_qc/variant_qc.het" \
-                    "${OUTPUT_DIR}/stage1/qc/variant_qc/variant_qc.het"; do
-        if [[ -f "${het_file}" ]]; then
-            COMPILE_ARGS+=(--het-file "${het_file}")
-            break
+    if [[ "${FORCE}" != "true" && -s "${COMPILED_SHEET}" ]]; then
+        echo "Compiled sample sheet already exists. Skipping (use --force to regenerate)."
+    else
+        COMPILE_ARGS=(
+            --sample-qc "${FINAL_QC}"
+            --output "${COMPILED_SHEET}"
+        )
+        if [[ -f "${PCA_DIR}/pca_projections.tsv" ]]; then
+            COMPILE_ARGS+=(--pca-projections "${PCA_DIR}/pca_projections.tsv")
         fi
-    done
 
-    # Include peddy sample-level metrics if available
-    if [[ -f "${PEDDY_DIR}/peddy.het_check.csv" ]]; then
-        COMPILE_ARGS+=(--peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv")
-    fi
-    if [[ -f "${PEDDY_DIR}/peddy.sex_check.csv" ]]; then
-        COMPILE_ARGS+=(--peddy-sex-check "${PEDDY_DIR}/peddy.sex_check.csv")
-    fi
+        # Include inbreeding coefficient from variant QC if available
+        for het_file in "${OUTPUT_DIR}/stage2/qc/variant_qc/variant_qc.het" \
+                        "${OUTPUT_DIR}/stage1/qc/variant_qc/variant_qc.het"; do
+            if [[ -f "${het_file}" ]]; then
+                COMPILE_ARGS+=(--het-file "${het_file}")
+                break
+            fi
+        done
 
-    python3 "${SCRIPT_DIR}/compile_sample_sheet.py" "${COMPILE_ARGS[@]}" 2>&1 || true
+        # Include peddy sample-level metrics if available
+        if [[ -f "${PEDDY_DIR}/peddy.het_check.csv" ]]; then
+            COMPILE_ARGS+=(--peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv")
+        fi
+        if [[ -f "${PEDDY_DIR}/peddy.sex_check.csv" ]]; then
+            COMPILE_ARGS+=(--peddy-sex-check "${PEDDY_DIR}/peddy.sex_check.csv")
+        fi
+
+        python3 "${SCRIPT_DIR}/compile_sample_sheet.py" "${COMPILE_ARGS[@]}" 2>&1 || true
+    fi
 else
     echo "Note: Skipping sample sheet compilation (python3 or QC file not available)."
 fi
@@ -567,11 +577,15 @@ echo ""
 
 DIAG_REPORT="${OUTPUT_DIR}/qc_diagnostic_report.txt"
 if command -v python3 &>/dev/null; then
-    python3 "${SCRIPT_DIR}/diagnose_qc.py" \
-        --output-dir "${OUTPUT_DIR}" \
-        --report "${DIAG_REPORT}" 2>&1 || true
-    echo ""
-    echo "Diagnostic report: ${DIAG_REPORT}"
+    if [[ "${FORCE}" != "true" && -s "${DIAG_REPORT}" ]]; then
+        echo "QC diagnostic report already exists. Skipping (use --force to regenerate)."
+    else
+        python3 "${SCRIPT_DIR}/diagnose_qc.py" \
+            --output-dir "${OUTPUT_DIR}" \
+            --report "${DIAG_REPORT}" 2>&1 || true
+        echo ""
+        echo "Diagnostic report: ${DIAG_REPORT}"
+    fi
 else
     echo "Note: python3 not found; skipping automated QC diagnostics."
     echo "Run manually: python3 scripts/diagnose_qc.py --output-dir ${OUTPUT_DIR}"
@@ -585,20 +599,24 @@ echo ""
 
 REPORT_PATH="${OUTPUT_DIR}/pipeline_report.html"
 if command -v python3 &>/dev/null; then
-    python3 "${SCRIPT_DIR}/generate_report.py" \
-        --output-dir "${OUTPUT_DIR}" 2>&1 || true
-    echo ""
-    if [[ -f "${REPORT_PATH}" ]]; then
-        echo "Pipeline report:     ${REPORT_PATH}"
-    fi
-    if [[ -f "${OUTPUT_DIR}/summary_statistics.tsv" ]]; then
-        echo "Summary statistics:  ${OUTPUT_DIR}/summary_statistics.tsv"
-    fi
-    if [[ -f "${OUTPUT_DIR}/methods_text.txt" ]]; then
-        echo "Methods text:        ${OUTPUT_DIR}/methods_text.txt"
-    fi
-    if [[ -d "${OUTPUT_DIR}/summary" ]]; then
-        echo "Consolidated summary: ${OUTPUT_DIR}/summary/"
+    if [[ "${FORCE}" != "true" && -s "${REPORT_PATH}" && -s "${OUTPUT_DIR}/summary_statistics.tsv" && -s "${OUTPUT_DIR}/methods_text.txt" ]]; then
+        echo "Pipeline report outputs already exist. Skipping (use --force to regenerate)."
+    else
+        python3 "${SCRIPT_DIR}/generate_report.py" \
+            --output-dir "${OUTPUT_DIR}" 2>&1 || true
+        echo ""
+        if [[ -f "${REPORT_PATH}" ]]; then
+            echo "Pipeline report:     ${REPORT_PATH}"
+        fi
+        if [[ -f "${OUTPUT_DIR}/summary_statistics.tsv" ]]; then
+            echo "Summary statistics:  ${OUTPUT_DIR}/summary_statistics.tsv"
+        fi
+        if [[ -f "${OUTPUT_DIR}/methods_text.txt" ]]; then
+            echo "Methods text:        ${OUTPUT_DIR}/methods_text.txt"
+        fi
+        if [[ -d "${OUTPUT_DIR}/summary" ]]; then
+            echo "Consolidated summary: ${OUTPUT_DIR}/summary/"
+        fi
     fi
 else
     echo "Note: python3 not found; skipping report generation."
