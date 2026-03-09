@@ -307,17 +307,17 @@ _prepare_peddy_input() {
 }
 
 # ------------------------------------------------------------------
-# GRCh38: already correct positions, coordinate-filter and sort
+# GRCh38: already correct positions, coordinate-filter only
 # ------------------------------------------------------------------
 _prepare_grch38_subset() {
     local src_vcf="$1"
     local source_variant_count="$2"
     local sites_count="$3"
 
-    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.\" -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
-    bcftools view "${src_vcf}" --threads "${THREADS}" -Ou | \
-    bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
-    bcftools sort -T "${TMP_DIR}/bcftools." -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
+    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
+    bcftools view "${src_vcf}" --threads "${THREADS}" \
+        -T "${RESOURCE_DIR}/GRCH38.sites.windows" \
+        -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
     bcftools index -t "${TMP_DIR}/peddy_input.vcf.gz"
     INPUT_VCF="${TMP_DIR}/peddy_input.vcf.gz"
 
