@@ -153,8 +153,10 @@ RUN_PEDDY="${REPO_DIR}/scripts/run_peddy.sh"
 if [[ -f "${RUN_PEDDY}" ]]; then
     if grep -q 'PEDDY_MIN_OVERLAP_WARN_COUNT=' "${RUN_PEDDY}" && \
        grep -q '_report_peddy_overlap()' "${RUN_PEDDY}" && \
-       grep -q 'Liftover output (pre-site-filter):' "${RUN_PEDDY}" && \
-       grep -q 'Warning: Very low overlap with peddy GRCh38 sites' "${RUN_PEDDY}"; then
+       grep -q '_select_peddy_site_subset()' "${RUN_PEDDY}" && \
+       grep -q 'coordinate overlap' "${RUN_PEDDY}" && \
+       grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
+       grep -q 'Warning: Exact allele overlap is much lower than coordinate overlap' "${RUN_PEDDY}"; then
         echo "  PASS: run_peddy.sh reports liftover/site overlap and low-overlap warnings"
         (( PASS++ )) || true
     else
