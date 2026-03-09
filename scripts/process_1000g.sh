@@ -6,17 +6,16 @@
 #
 # Downloads a configurable number of samples (default: 200) from the 1000G
 # HD genotype chip data, along with the required array manifests (BPM, EGT,
-# CSV: HumanOmni2.5-4v1). Processes the data using the pipeline with GRCh38
-# coordinates.
+# CSV: HumanOmni2.5-4v1). Processes the data using the pipeline on a selected
+# genome build (default: GRCh38).
 #
 # The 1000G Omni2.5 data is available from:
 #   https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/supporting/hd_genotype_chip/broad_intensities/
 #
 # Note: The original manifests are on GRCh37. The pipeline's built-in
-# manifest realignment step (realign_manifest.sh) handles GRCh37→GRCh38
-# coordinate remapping by aligning probe flank sequences against the
-# GRCh38 reference using bwa mem, following the MoChA/gtc2vcf recommended
-# approach.
+# manifest realignment step (realign_manifest.sh) handles remapping probe
+# coordinates onto the selected reference build using bwa mem, following the
+# MoChA/gtc2vcf recommended approach.
 #
 # Usage:
 #   ./process_1000g.sh --output-dir ./1000g_output --num-samples 200
@@ -34,6 +33,7 @@ IDAT_TGZ="Omni25_idats_gtcs_2141_samples.tgz"
 NUM_SAMPLES=200
 OUTPUT_DIR=""
 THREADS=1
+GENOME="GRCh38"
 SKIP_DOWNLOAD="false"
 SKIP_STAGE2="false"
 SKIP_FAILURES="true"   # default on for 1000G: some samples may have incomplete downloads
@@ -58,7 +58,7 @@ usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Download and process 1000 Genomes Omni2.5 IDAT data on GRCh38.
+Download and process 1000 Genomes Omni2.5 IDAT data.
 
 Required:
   --output-dir DIR       Output directory (needs ~50 GB for all samples)
@@ -83,6 +83,8 @@ Options:
   --force-rename         Allow renaming even when fewer than 50% of samples in
                          the name map match the data
   --threads INT          Number of threads (default: ${THREADS})
+  --genome NAME          Genome build to use for processing
+                         (CHM13, GRCh37, or GRCh38; default: ${GENOME})
   --skip-download        Skip downloading data (use existing files)
   --skip-stage2          Skip Stage 2 reclustering
   --skip-failures        Continue past corrupt/truncated IDAT files (default for
@@ -129,6 +131,7 @@ while [[ $# -gt 0 ]]; do
         --sample-name-map) USER_SAMPLE_NAME_MAP="$2"; shift 2 ;;
         --force-rename)  FORCE_RENAME="true"; shift ;;
         --threads)       THREADS="$2"; shift 2 ;;
+        --genome)        GENOME="$2"; shift 2 ;;
         --bpm)           USER_BPM="$2"; shift 2 ;;
         --egt)           USER_EGT="$2"; shift 2 ;;
         --csv)           USER_CSV="$2"; shift 2 ;;
@@ -210,6 +213,7 @@ echo ""
 echo "Output dir:     ${OUTPUT_DIR}"
 echo "Num samples:    ${NUM_SAMPLES}"
 echo "Threads:        ${THREADS}"
+echo "Genome:         ${GENOME}"
 if [[ "${USE_PIGZ}" == "true" ]]; then
     echo "Gzip backend:   pigz (parallel)"
 else
@@ -578,7 +582,7 @@ echo ""
 # ---------------------------------------------------------------
 # Step 3: Run the pipeline
 # ---------------------------------------------------------------
-echo "--- Step 3: Running processing pipeline on GRCh38 ---"
+echo "--- Step 3: Running processing pipeline on ${GENOME} ---"
 echo ""
 
 # Resolve sample name map: use user-provided, or default 1000G map
@@ -603,7 +607,7 @@ PIPELINE_ARGS=(
     --bpm "${BPM}"
     --egt "${EGT}"
     --csv "${CSV}"
-    --genome GRCh38
+    --genome "${GENOME}"
     --threads "${THREADS}"
 )
 
