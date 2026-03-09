@@ -186,7 +186,14 @@ _create_add_chr_map() {
 _has_chr_prefix() {
     local vcf="$1"
     local first_chr
-    first_chr=$(bcftools view -H "${vcf}" 2>/dev/null | head -1 | cut -f1)
+
+    # Prefer contig lookup from index metadata (fast, no record decode).
+    first_chr=$(bcftools index -s "${vcf}" 2>/dev/null | awk 'NR==1 {print $1; exit}')
+    if [[ -z "${first_chr}" ]]; then
+        # Fallback for unindexed/non-standard inputs.
+        first_chr=$(bcftools view -H "${vcf}" 2>/dev/null | head -1 | cut -f1)
+    fi
+
     [[ "${first_chr}" == chr* ]]
 }
 
