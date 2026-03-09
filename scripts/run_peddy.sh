@@ -381,12 +381,12 @@ _prepare_liftover_subset() {
     fi
 
     # Run the pipe: liftover | strip-chr | normalize to GRCh38 REF
-    #              -> tee pre-site-filter VCF and coordinate-window subset
+    #              -> inline pre-site-filter variant count + coordinate-window subset.
+    # We intentionally avoid writing the full lifted VCF and only persist the
+    # peddy marker-window subset.
     echo "  Running bcftools +liftover pipeline..."
-    local lifted_vcf="${TMP_DIR}/lifted_grch38.vcf.gz"
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
-    # liftover output is not guaranteed to be coordinate-sorted, so each branch
-    # is sorted independently to produce indexable VCF.gz outputs.
+    local lifted_count_file="${TMP_DIR}/lifted_variants.count"
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
@@ -395,16 +395,21 @@ _prepare_liftover_subset() {
     bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
     # -c s: fix REF mismatches against GRCh38 target FASTA after coordinate liftover.
     bcftools norm -f "${target_fasta}" -c s -Ou 2>"${TMP_DIR}/liftover.norm.log" | \
-    tee >(bcftools sort -Oz -o "${lifted_vcf}") | \
+    tee >(bcftools view -H | wc -l > "${lifted_count_file}") | \
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
     bcftools sort -Oz -o "${peddy_vcf}"
 
-    bcftools index -t "${lifted_vcf}"
     bcftools index -t "${peddy_vcf}"
     INPUT_VCF="${peddy_vcf}"
 
     local lifted_variants
-    lifted_variants=$(_count_variants "${lifted_vcf}")
+    lifted_variants="0"
+    if [[ -f "${lifted_count_file}" ]]; then
+        lifted_variants=$(tr -d '[:space:]' < "${lifted_count_file}")
+    fi
+    if [[ ! "${lifted_variants}" =~ ^[0-9]+$ ]]; then
+        lifted_variants="0"
+    fi
     local lifted_pct
     lifted_pct=$(_percent "${lifted_variants}" "${source_variant_count}")
     echo "  Liftover output (pre-site-filter): ${lifted_variants} variants (${lifted_pct}% of source variants)"

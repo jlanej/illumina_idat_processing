@@ -157,15 +157,34 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -q '_prepare_peddy_site_windows()' "${RUN_PEDDY}" && \
        grep -q 'GRCH38.sites.windows' "${RUN_PEDDY}" && \
        grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
-       grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}"; then
-        echo "  PASS: run_peddy.sh reports liftover/site overlap and low-overlap warnings"
+       grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}" && \
+       grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
+       ! grep -q 'lifted_grch38.vcf.gz' "${RUN_PEDDY}"; then
+        echo "  PASS: run_peddy.sh reports overlap and keeps liftover filtering inline"
         (( PASS++ )) || true
     else
-        echo "  FAIL: run_peddy.sh missing overlap reporting or warning checks"
+        echo "  FAIL: run_peddy.sh missing overlap checks or inline liftover subset behavior"
         (( FAIL++ )) || true
     fi
 else
     echo "  FAIL: scripts/run_peddy.sh not found"
+    (( FAIL++ )) || true
+fi
+
+echo "--- Peddy base input source validation ---"
+RUN_PIPELINE="${REPO_DIR}/scripts/run_pipeline.sh"
+if [[ -f "${RUN_PIPELINE}" ]]; then
+    if grep -q 'Using pipeline final stage VCF as peddy base input' "${RUN_PIPELINE}" && \
+       grep -q -- '--vcf "${FINAL_VCF}"' "${RUN_PIPELINE}" && \
+       ! grep -q -- '--vcf "${PCA_DIR}' "${RUN_PIPELINE}"; then
+        echo "  PASS: run_pipeline.sh passes final stage VCF (not ancestry PCA VCF) to peddy"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: run_pipeline.sh peddy input source check failed"
+        (( FAIL++ )) || true
+    fi
+else
+    echo "  FAIL: scripts/run_pipeline.sh not found"
     (( FAIL++ )) || true
 fi
 

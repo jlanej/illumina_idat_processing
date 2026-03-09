@@ -479,6 +479,7 @@ else
     echo ""
 
     if [[ -f "${FINAL_VCF}" ]]; then
+        echo "Using pipeline final stage VCF as peddy base input: ${FINAL_VCF}"
         PEDDY_ARGS=(
             --vcf "${FINAL_VCF}"
             --output-dir "${PEDDY_DIR}"
