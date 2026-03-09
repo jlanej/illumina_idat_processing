@@ -38,6 +38,7 @@ Options:
   --ld-step INT       LD pruning step size (must be 1 for kb windows; default: 1)
   --ld-r2 FLOAT       LD pruning r-squared threshold (default: 0.1)
   --threads INT       Number of threads (default: all available)
+  --force             Re-run even if expected outputs already exist
   --help              Show this help message
 
 Output files:
@@ -60,6 +61,7 @@ LD_WINDOW=1000
 LD_STEP=1
 LD_R2=0.1
 THREADS=$(nproc 2>/dev/null || echo 1)
+FORCE="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -74,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         --ld-step)        LD_STEP="$2"; shift 2 ;;
         --ld-r2)          LD_R2="$2"; shift 2 ;;
         --threads)        THREADS="$2"; shift 2 ;;
+        --force)          FORCE="true"; shift ;;
         --help)           usage ;;
         *)                echo "Error: Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -111,6 +114,25 @@ mkdir -p "${TMP_DIR}"
 
 PREFIX="${OUTPUT_DIR}/ancestry_pca"
 SUMMARY="${OUTPUT_DIR}/qc_summary.txt"
+EXPECTED_OUTPUTS=(
+    "${OUTPUT_DIR}/pca_projections.tsv"
+    "${OUTPUT_DIR}/pca_qc_samples.txt"
+    "${SUMMARY}"
+)
+
+if [[ "${FORCE}" != "true" ]]; then
+    all_exist=true
+    for f in "${EXPECTED_OUTPUTS[@]}"; do
+        if [[ ! -f "${f}" ]]; then
+            all_exist=false
+            break
+        fi
+    done
+    if [[ "${all_exist}" == "true" ]]; then
+        echo "Ancestry PCA outputs already exist. Skipping (use --force to re-run)."
+        exit 0
+    fi
+fi
 
 echo "======================================================"
 echo "  Ancestry PCA: Stringent QC and PC Computation"

@@ -59,6 +59,18 @@ done
 
 echo ""
 
+# Explicit check for ancestry_pca --force option used for idempotent reruns.
+ANCESTRY_PCA_SCRIPT="${REPO_DIR}/scripts/ancestry_pca.sh"
+if [[ -f "${ANCESTRY_PCA_SCRIPT}" ]]; then
+    if bash "${ANCESTRY_PCA_SCRIPT}" --help 2>&1 | grep -q -- '--force'; then
+        echo "  PASS: scripts/ancestry_pca.sh (--help mentions --force)"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: scripts/ancestry_pca.sh (--help missing --force)"
+        (( FAIL++ )) || true
+    fi
+fi
+
 # ---------------------------------------------------------------
 # Validate Python script
 # ---------------------------------------------------------------
@@ -160,6 +172,7 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}" && \
        grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
        grep -q 'peddy_input.vcf.gz' "${RUN_PEDDY}" && \
+       grep -q 'verify manifest realignment to GRCh38 completed' "${RUN_PEDDY}" && \
        ! grep -q 'lifted_grch38.vcf.gz' "${RUN_PEDDY}"; then
         echo "  PASS: run_peddy.sh reports overlap and keeps liftover filtering inline"
         (( PASS++ )) || true

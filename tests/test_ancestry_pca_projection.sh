@@ -76,6 +76,10 @@ cat > "${FAKE_BIN}/plink2" << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${PLINK_LOG:-}" ]]; then
+    echo "plink2 $*" >> "${PLINK_LOG}"
+fi
+
 out=""
 is_make_bed="false"
 is_ld="false"
@@ -199,8 +203,10 @@ chmod +x "${FAKE_BIN}/bcftools" "${FAKE_BIN}/plink2" "${FAKE_BIN}/flashpca"
 
 echo "--- Test 1: ancestry_pca.sh deterministic projection ---"
 : > "${TMP_DIR}/input.bcf"
+PLINK_LOG_FILE="${TMP_DIR}/plink_calls.log"
+: > "${PLINK_LOG_FILE}"
 
-if PATH="${FAKE_BIN}:${PATH}" bash "${REPO_DIR}/scripts/ancestry_pca.sh" \
+if PLINK_LOG="${PLINK_LOG_FILE}" PATH="${FAKE_BIN}:${PATH}" bash "${REPO_DIR}/scripts/ancestry_pca.sh" \
     --vcf "${TMP_DIR}/input.bcf" \
     --output-dir "${OUT_DIR}" \
     --n-pcs 4 \
@@ -209,6 +215,52 @@ if PATH="${FAKE_BIN}:${PATH}" bash "${REPO_DIR}/scripts/ancestry_pca.sh" \
     (( PASS++ )) || true
 else
     echo "  FAIL: ancestry_pca.sh failed with mocked tools"
+    (( FAIL++ )) || true
+fi
+
+echo "--- Test 1b: ancestry_pca.sh idempotent skip when outputs exist ---"
+plink_calls_before=$(wc -l < "${PLINK_LOG_FILE}" | tr -d ' ')
+second_run_output=$(
+    PLINK_LOG="${PLINK_LOG_FILE}" PATH="${FAKE_BIN}:${PATH}" bash "${REPO_DIR}/scripts/ancestry_pca.sh" \
+        --vcf "${TMP_DIR}/input.bcf" \
+        --output-dir "${OUT_DIR}" \
+        --n-pcs 4 \
+        --threads 1 2>&1
+)
+plink_calls_after=$(wc -l < "${PLINK_LOG_FILE}" | tr -d ' ')
+skip_message_present="false"
+no_new_plink_calls="false"
+if [[ "${second_run_output}" == *"Ancestry PCA outputs already exist. Skipping (use --force to re-run)."* ]]; then
+    skip_message_present="true"
+fi
+if [[ "${plink_calls_before}" == "${plink_calls_after}" ]]; then
+    no_new_plink_calls="true"
+fi
+if [[ "${skip_message_present}" == "true" && "${no_new_plink_calls}" == "true" ]]; then
+    echo "  PASS: second run skipped and did not re-run plink2"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: second run did not skip idempotently"
+    (( FAIL++ )) || true
+fi
+
+echo "--- Test 1c: ancestry_pca.sh --force re-runs pipeline ---"
+if PLINK_LOG="${PLINK_LOG_FILE}" PATH="${FAKE_BIN}:${PATH}" bash "${REPO_DIR}/scripts/ancestry_pca.sh" \
+    --vcf "${TMP_DIR}/input.bcf" \
+    --output-dir "${OUT_DIR}" \
+    --n-pcs 4 \
+    --threads 1 \
+    --force >/dev/null 2>&1; then
+    plink_calls_forced=$(wc -l < "${PLINK_LOG_FILE}" | tr -d ' ')
+    if [[ "${plink_calls_forced}" -gt "${plink_calls_after}" ]]; then
+        echo "  PASS: --force re-ran ancestry PCA commands"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: --force did not trigger rerun"
+        (( FAIL++ )) || true
+    fi
+else
+    echo "  FAIL: --force run failed"
     (( FAIL++ )) || true
 fi
 

@@ -229,6 +229,9 @@ _report_peddy_overlap() {
 
     if [[ "${warn_overlap}" == "true" ]]; then
         echo "Warning: Very low overlap with peddy GRCh38 sites (${matched_count} matched). Check genome build, liftover chain/source FASTA compatibility, and chromosome naming."
+        if [[ "${GENOME}" == "GRCh38" ]]; then
+            echo "Hint: For legacy GRCh37 manifests (e.g., 1000G Omni2.5), verify manifest realignment to GRCh38 completed before genotyping. If coordinates are still GRCh37, run with --genome GRCh37 and provide --src-fasta so peddy can liftover."
+        fi
     fi
 }
 
