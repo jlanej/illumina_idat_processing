@@ -599,7 +599,7 @@ echo ""
 
 REPORT_PATH="${OUTPUT_DIR}/pipeline_report.html"
 if command -v python3 &>/dev/null; then
-    if [[ "${FORCE}" != "true" && -s "${REPORT_PATH}" && -s "${OUTPUT_DIR}/summary_statistics.tsv" && -s "${OUTPUT_DIR}/methods_text.txt" ]]; then
+    if [[ "${FORCE}" != "true" && -s "${REPORT_PATH}" && -s "${OUTPUT_DIR}/summary_statistics.tsv" && -s "${OUTPUT_DIR}/methods_text.txt" && -d "${OUTPUT_DIR}/summary" ]]; then
         echo "Pipeline report outputs already exist. Skipping (use --force to regenerate)."
     else
         python3 "${SCRIPT_DIR}/generate_report.py" \
