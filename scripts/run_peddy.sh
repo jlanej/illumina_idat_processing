@@ -320,10 +320,15 @@ _vcf_has_contig() {
     local contig="$2"
 
     if bcftools index -s "${vcf}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${contig}"; then
+        _debug_log_command "Detected contig ${contig} in ${vcf} via bcftools index -s metadata."
         return 0
     fi
 
-    bcftools view -h "${vcf}" 2>/dev/null | grep -Eq "##contig=<ID=${contig}(,|>)"
+    if bcftools view -h "${vcf}" 2>/dev/null | grep -Eq "##contig=<ID=${contig}(,|>)"; then
+        _debug_log_command "Detected contig ${contig} in ${vcf} via VCF header fallback."
+        return 0
+    fi
+    return 1
 }
 
 _append_source_chrx() {
@@ -356,11 +361,12 @@ _append_source_chrx() {
         return
     fi
 
-    echo "  chrX append: adding ${source_chrx_count} source ${source_chrx_region} variants without liftover."
+    echo "  chrX append: adding ${source_chrx_count} source ${source_chrx_region} variants without liftover (peddy sex_check uses chrX genotypes, not coordinate-specific matching)."
     local merged_vcf="${TMP_DIR}/peddy_input.with_source_chrx.vcf.gz"
-    _debug_log_command "bcftools concat -a \"${base_vcf}\" \"${source_chrx_vcf}\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.merge.\" -Ou | bcftools norm -d exact -Oz -o \"${merged_vcf}\""
+    _debug_log_command "bcftools concat -a \"${base_vcf}\" \"${source_chrx_vcf}\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.concat_sort\" -Ou | bcftools norm -d exact -Oz -o \"${merged_vcf}\""
+    # -a allows overlapping positions/contigs across inputs; exact duplicates are removed with bcftools norm -d exact.
     bcftools concat -a "${base_vcf}" "${source_chrx_vcf}" -Ou | \
-    bcftools sort -T "${TMP_DIR}/bcftools.merge." -Ou | \
+    bcftools sort -T "${TMP_DIR}/bcftools.concat_sort" -Ou | \
     bcftools norm -d exact -Oz -o "${merged_vcf}"
     bcftools index -t "${merged_vcf}"
     INPUT_VCF="${merged_vcf}"
