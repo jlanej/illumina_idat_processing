@@ -22,6 +22,7 @@ STAGE2="${REPO_DIR}/scripts/stage2_recluster.sh"
 COLLECT_QC="${REPO_DIR}/scripts/collect_qc_metrics.sh"
 VARIANT_QC="${REPO_DIR}/scripts/compute_variant_qc.sh"
 ANCESTRY_PCA="${REPO_DIR}/scripts/ancestry_pca.sh"
+RUN_PEDDY="${REPO_DIR}/scripts/run_peddy.sh"
 
 if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/stage1_initial_genotyping"' "${STAGE1}" && \
    grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage1_batch\.' "${STAGE1}" && \
@@ -68,6 +69,14 @@ if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/ancestry_pca"' "${ANCESTRY_PCA}" && \
     (( PASS++ )) || true
 else
     echo "  FAIL: ancestry_pca temp file scoping is missing or incomplete"
+    (( FAIL++ )) || true
+fi
+
+if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/run_peddy"' "${RUN_PEDDY}"; then
+    echo "  PASS: run_peddy temp directory is scoped under \${OUTPUT_DIR}/tmp"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: run_peddy temp directory scoping is missing or incomplete"
     (( FAIL++ )) || true
 fi
 
