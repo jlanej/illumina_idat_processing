@@ -163,6 +163,8 @@ echo ""
 echo "--- Peddy overlap reporting validation ---"
 RUN_PEDDY="${REPO_DIR}/scripts/run_peddy.sh"
 if [[ -f "${RUN_PEDDY}" ]]; then
+    GRCH38_SUBSET_BLOCK="$(awk '/_prepare_grch38_subset\(\)/,/^[[:space:]]*}/' "${RUN_PEDDY}")"
+    HAS_CHR_PREFIX_BLOCK="$(awk '/_has_chr_prefix\(\)/,/^[[:space:]]*}/' "${RUN_PEDDY}")"
     if grep -q 'PEDDY_MIN_OVERLAP_WARN_COUNT=' "${RUN_PEDDY}" && \
        grep -q 'PEDDY_COORD_BUFFER_BP=100' "${RUN_PEDDY}" && \
        grep -q '_report_peddy_overlap()' "${RUN_PEDDY}" && \
@@ -174,10 +176,15 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -q '_prepare_peddy_site_windows()' "${RUN_PEDDY}" && \
        grep -q 'GRCH38.sites.windows' "${RUN_PEDDY}" && \
        grep -q 'if (chr !~ /^chr/) chr="chr"chr' "${RUN_PEDDY}" && \
+       grep -Fq 'bcftools index -s "${vcf}"' <<< "${HAS_CHR_PREFIX_BLOCK}" && \
        grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
        grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}" && \
        grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
        grep -q 'peddy_input.vcf.gz' "${RUN_PEDDY}" && \
+       grep -Fq 'bcftools view "${src_vcf}" --threads "${THREADS}"' <<< "${GRCH38_SUBSET_BLOCK}" && \
+       grep -Fq -- '-T "${RESOURCE_DIR}/GRCH38.sites.windows"' <<< "${GRCH38_SUBSET_BLOCK}" && \
+       grep -Fq -- '-Oz -o "${TMP_DIR}/peddy_input.vcf.gz"' <<< "${GRCH38_SUBSET_BLOCK}" && \
+       ! grep -q 'bcftools sort' <<< "${GRCH38_SUBSET_BLOCK}" && \
        grep -q -- '--sites hg38' "${RUN_PEDDY}" && \
        grep -q 'verify manifest realignment to GRCh38 completed' "${RUN_PEDDY}" && \
        ! grep -q 'strip_chr.txt' "${RUN_PEDDY}" && \

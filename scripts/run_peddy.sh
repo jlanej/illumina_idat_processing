@@ -186,7 +186,14 @@ _create_add_chr_map() {
 _has_chr_prefix() {
     local vcf="$1"
     local first_chr
-    first_chr=$(bcftools view -H "${vcf}" 2>/dev/null | head -1 | cut -f1)
+
+    # Prefer contig lookup from index metadata (fast, no record decode).
+    first_chr=$(bcftools index -s "${vcf}" 2>/dev/null | awk 'NR==1 {print $1; exit}')
+    if [[ -z "${first_chr}" ]]; then
+        # Fallback for unindexed/non-standard inputs.
+        first_chr=$(bcftools view -H "${vcf}" 2>/dev/null | head -1 | cut -f1)
+    fi
+
     [[ "${first_chr}" == chr* ]]
 }
 
@@ -307,17 +314,17 @@ _prepare_peddy_input() {
 }
 
 # ------------------------------------------------------------------
-# GRCh38: already correct positions, coordinate-filter and sort
+# GRCh38: already correct positions, coordinate-filter only
 # ------------------------------------------------------------------
 _prepare_grch38_subset() {
     local src_vcf="$1"
     local source_variant_count="$2"
     local sites_count="$3"
 
-    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.\" -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
-    bcftools view "${src_vcf}" --threads "${THREADS}" -Ou | \
-    bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
-    bcftools sort -T "${TMP_DIR}/bcftools." -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
+    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
+    bcftools view "${src_vcf}" --threads "${THREADS}" \
+        -T "${RESOURCE_DIR}/GRCH38.sites.windows" \
+        -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
     bcftools index -t "${TMP_DIR}/peddy_input.vcf.gz"
     INPUT_VCF="${TMP_DIR}/peddy_input.vcf.gz"
 
