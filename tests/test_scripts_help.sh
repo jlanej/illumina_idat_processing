@@ -131,6 +131,14 @@ if [[ -f "${DOCKERFILE}" ]]; then
         echo "  FAIL: Dockerfile (missing required directives)"
         (( FAIL++ )) || true
     fi
+
+    if grep -E 'pip3[[:space:]]+install.*peddy' "${DOCKERFILE}" | grep -Eq 'numpy(<=1\.24(\.[0-9]+)?|<1\.25)'; then
+        echo "  PASS: Dockerfile pins numpy<1.25 for peddy compatibility"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Dockerfile missing numpy<1.25 pin for peddy compatibility"
+        (( FAIL++ )) || true
+    fi
 else
     echo "  SKIP: Dockerfile not found"
 fi
