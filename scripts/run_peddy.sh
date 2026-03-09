@@ -227,7 +227,7 @@ _report_peddy_overlap() {
     fi
 
     if [[ "${warn_overlap}" == "true" ]]; then
-        echo "Warning: Very low overlap with peddy GRCH38 sites (${matched_count} matched). Check genome build, liftover chain/source FASTA compatibility, and chromosome naming."
+        echo "Warning: Very low overlap with peddy GRCh38 sites (${matched_count} matched). Check genome build, liftover chain/source FASTA compatibility, and chromosome naming."
     fi
 }
 
