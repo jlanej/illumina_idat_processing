@@ -209,7 +209,11 @@ _count_variants() {
         if [[ "${indexed_count_trimmed}" =~ ^[0-9]+$ ]]; then
             echo "${indexed_count_trimmed}"
             return
+        elif [[ "${DEBUG}" == "true" ]]; then
+            echo "  [debug] bcftools index -n returned non-numeric count for ${vcf}: ${indexed_count_raw}" >&2
         fi
+    elif [[ "${DEBUG}" == "true" ]]; then
+        echo "  [debug] bcftools index -n failed for ${vcf}; falling back to streamed count" >&2
     fi
     bcftools view -H "${vcf}" 2>/dev/null | wc -l | tr -d ' '
 }
@@ -217,7 +221,7 @@ _count_variants() {
 _debug_log_command() {
     local cmd="$1"
     if [[ "${DEBUG}" == "true" ]]; then
-        echo "  [debug] ${cmd}"
+        echo "  [debug] ${cmd}" >&2
     fi
 }
 
