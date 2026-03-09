@@ -26,7 +26,8 @@ RUN_PEDDY="${REPO_DIR}/scripts/run_peddy.sh"
 
 if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/stage1_initial_genotyping"' "${STAGE1}" && \
    grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage1_batch\.' "${STAGE1}" && \
-   grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage1_sample\.' "${STAGE1}"; then
+   grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage1_sample\.' "${STAGE1}" && \
+   grep -Eq 'bcftools sort .* -T "\$\{TMP_DIR\}/bcftools\."' "${STAGE1}"; then
     echo "  PASS: stage1 temp files are scoped under \${OUTPUT_DIR}/tmp"
     (( PASS++ )) || true
 else
@@ -36,7 +37,8 @@ fi
 
 if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/stage2_recluster"' "${STAGE2}" && \
    grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage2_batch\.' "${STAGE2}" && \
-   grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage2_sample\.' "${STAGE2}"; then
+   grep -Eq 'mktemp -p "\$\{TMP_DIR\}" stage2_sample\.' "${STAGE2}" && \
+   grep -Eq 'bcftools sort .* -T "\$\{TMP_DIR\}/bcftools\."' "${STAGE2}"; then
     echo "  PASS: stage2 temp files are scoped under \${OUTPUT_DIR}/tmp"
     (( PASS++ )) || true
 else
@@ -72,7 +74,8 @@ else
     (( FAIL++ )) || true
 fi
 
-if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/run_peddy"' "${RUN_PEDDY}"; then
+if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/run_peddy"' "${RUN_PEDDY}" && \
+   grep -Eq 'bcftools sort -T "\$\{TMP_DIR\}/bcftools\.sort\."' "${RUN_PEDDY}"; then
     echo "  PASS: run_peddy temp directory is scoped under \${OUTPUT_DIR}/tmp"
     (( PASS++ )) || true
 else

@@ -466,7 +466,7 @@ else
         --extra "${EXTRA_TSV}" \
         --adjust-clusters \
         --threads "${THREADS}" | \
-    bcftools sort -Ob -m "${SORT_MEM}" -T "${OUTPUT_DIR}/bcftools." \
+    bcftools sort -Ob -m "${SORT_MEM}" -T "${TMP_DIR}/bcftools." \
         -o "${PRE_NORM_BCF}" --write-index
 
     # Diagnostic: count variants before normalization
