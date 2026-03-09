@@ -166,6 +166,11 @@ if [[ -f "${RUN_PEDDY}" ]]; then
     if grep -q 'PEDDY_MIN_OVERLAP_WARN_COUNT=' "${RUN_PEDDY}" && \
        grep -q 'PEDDY_COORD_BUFFER_BP=100' "${RUN_PEDDY}" && \
        grep -q '_report_peddy_overlap()' "${RUN_PEDDY}" && \
+       grep -q '_debug_log_command()' "${RUN_PEDDY}" && \
+       grep -q 'DEBUG="true"' "${RUN_PEDDY}" && \
+       grep -q -- '--debug' "${RUN_PEDDY}" && \
+       grep -q -- '--no-debug' "${RUN_PEDDY}" && \
+       grep -q 'bcftools index -n' "${RUN_PEDDY}" && \
        grep -q '_prepare_peddy_site_windows()' "${RUN_PEDDY}" && \
        grep -q 'GRCH38.sites.windows' "${RUN_PEDDY}" && \
        grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
