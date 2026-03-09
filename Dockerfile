@@ -33,10 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install peddy for pedigree/sex/ancestry QC
-# Pin numpy<2 so the pip-installed version stays compatible with the
-# apt-installed python3-matplotlib (compiled against NumPy 1.x).
-RUN pip3 install "numpy<2" peddy
+# Install peddy for pedigree/sex/ancestry QC.
+# Pin NumPy below 1.25 to stay compatible with Ubuntu 22.04 scipy/matplotlib
+# ABI expectations and avoid runtime scipy numpy-version warnings in peddy.
+RUN pip3 install "numpy<1.25" peddy
 
 # Build bcftools with gtc2vcf, mocha, and liftover plugins
 WORKDIR /tmp/build

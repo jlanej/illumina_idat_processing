@@ -68,7 +68,7 @@ export BCFTOOLS_PLUGINS="$HOME/bin"
 ### 2. Install Python packages
 
 ```bash
-pip install numpy matplotlib
+pip install "numpy<1.25" matplotlib
 ```
 
 ### 3. Run the pipeline
