@@ -267,7 +267,7 @@ def create_plots(s1_data, s2_data, output_dir):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-    except ImportError:
+    except (ImportError, AttributeError):
         print("Warning: matplotlib not available. Skipping plots.", file=sys.stderr)
         return
 
@@ -381,7 +381,7 @@ def create_variant_plots(s1_vqc_dir, s2_vqc_dir, output_dir):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-    except ImportError:
+    except (ImportError, AttributeError):
         return
 
     s1_miss = read_variant_missingness(os.path.join(s1_vqc_dir, "variant_qc.vmiss")) if s1_vqc_dir else []

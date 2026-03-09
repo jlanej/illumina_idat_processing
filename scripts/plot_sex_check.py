@@ -149,7 +149,7 @@ def create_sex_check_plot(chrx_medians, chry_medians, sample_names,
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-    except ImportError:
+    except (ImportError, AttributeError):
         print("Warning: matplotlib not available. Skipping sex check plot.",
               file=sys.stderr)
         return None

@@ -224,7 +224,7 @@ def create_sample_qc_dashboard(qc_rows, stage_label=''):
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         import matplotlib.gridspec as gridspec
-    except ImportError:
+    except (ImportError, AttributeError):
         return None
 
     # Extract values
@@ -388,7 +388,7 @@ def create_pca_plot(pca_file, qc_rows):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-    except ImportError:
+    except (ImportError, AttributeError):
         return None
 
     if not os.path.exists(pca_file):
@@ -671,7 +671,7 @@ def generate_html_report(output_dir):
             with open(sex_check_path, 'rb') as f:
                 figures['sex_check'] = base64.b64encode(f.read()).decode('utf-8')
 
-    except ImportError:
+    except (ImportError, AttributeError):
         print("Warning: matplotlib not available. Report will have no figures.",
               file=sys.stderr)
 
