@@ -172,16 +172,6 @@ _ensure_index() {
     fi
 }
 
-# Create chr -> bare chromosome rename map
-_create_strip_chr_map() {
-    local dest="$1"
-    : > "${dest}"
-    for i in $(seq 1 22); do echo "chr${i} ${i}"; done >> "${dest}"
-    echo "chrX X" >> "${dest}"
-    echo "chrY Y" >> "${dest}"
-    echo "chrM MT" >> "${dest}"
-}
-
 # Create bare -> chr chromosome rename map
 _create_add_chr_map() {
     local dest="$1"
@@ -267,19 +257,17 @@ _prepare_peddy_site_windows() {
     # peddy GRCH38.sites format is CHROM:POS:REF:ALT (one record per line).
     # End coordinates beyond chromosome bounds are tolerated by bcftools region
     # handling and are effectively clipped during querying.
-    awk -F: -v b="${buffer_bp}" 'NF >= 2 {start=$2-b; if (start < 1) start=1; end=$2+b; print $1"\t"start"\t"end}' \
+    awk -F: -v b="${buffer_bp}" 'NF >= 2 {chr=$1; if (chr !~ /^chr/) chr="chr"chr; start=$2-b; if (start < 1) start=1; end=$2+b; print chr"\t"start"\t"end}' \
         "${sites_file}" > "${windows_file}"
 }
 
 # ======================================================================
 #  Prepare peddy-compatible VCF
 # ======================================================================
-# Peddy requires a VCF.gz with tabix index.  Its internal site list uses
-# GRCh38 coordinates with bare chromosome names ("1" not "chr1").
+# Peddy requires a VCF.gz with tabix index.
 #
 # Strategy (following user specification):
 #   bcftools +liftover  (source -> GRCh38, when genome != GRCh38)
-#     | bcftools annotate --rename-chrs  (chr1 -> 1)
 #     | bcftools view -T GRCH38.sites.windows  (coordinate ±buffer subset)
 #     | bcftools sort -Oz -o peddy_input.vcf.gz
 # ======================================================================
@@ -306,9 +294,6 @@ _prepare_peddy_input() {
     source_variant_count=$(_count_variants "${src_vcf}")
     echo "  Source variants: ${source_variant_count}"
 
-    # Prepare rename maps (used in all paths)
-    _create_strip_chr_map "${TMP_DIR}/strip_chr.txt"
-
     if [[ "${GENOME}" == "GRCh38" ]]; then
         echo "Genome is GRCh38 — subsetting VCF to peddy sites..."
         _prepare_grch38_subset "${src_vcf}" "${source_variant_count}" "${sites_count}"
@@ -322,16 +307,15 @@ _prepare_peddy_input() {
 }
 
 # ------------------------------------------------------------------
-# GRCh38: already correct positions, just rename chr and coordinate-filter
+# GRCh38: already correct positions, coordinate-filter and sort
 # ------------------------------------------------------------------
 _prepare_grch38_subset() {
     local src_vcf="$1"
     local source_variant_count="$2"
     local sites_count="$3"
 
-    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools annotate --rename-chrs \"${TMP_DIR}/strip_chr.txt\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
+    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
     bcftools view "${src_vcf}" --threads "${THREADS}" -Ou | \
-    bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
     bcftools sort -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
     bcftools index -t "${TMP_DIR}/peddy_input.vcf.gz"
@@ -347,7 +331,7 @@ _prepare_grch38_subset() {
 }
 
 # ------------------------------------------------------------------
-# CHM13 / GRCh37: liftover to GRCh38, rename chr, re-ID, filter
+# CHM13 / GRCh37: liftover to GRCh38, normalize, and coordinate-filter
 # ------------------------------------------------------------------
 _prepare_liftover_subset() {
     local src_vcf="$1"
@@ -411,7 +395,7 @@ _prepare_liftover_subset() {
         liftover_src_fasta="${chr_ref}"
     fi
 
-    # Run the pipe: liftover | strip-chr | normalize to GRCh38 REF
+    # Run the pipe: liftover | normalize to GRCh38 REF
     #              -> inline pre-site-filter variant count + coordinate-window subset.
     # We intentionally avoid writing the full lifted VCF and only persist the
     # peddy marker-window subset.
@@ -419,13 +403,12 @@ _prepare_liftover_subset() {
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
     local lifted_count_file="${TMP_DIR}/lifted_variants.count"
     rm -f "${lifted_count_file}"
-    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" --no-tags-update 2>\"${TMP_DIR}/liftover.log\" | bcftools annotate --rename-chrs \"${TMP_DIR}/strip_chr.txt\" -Ou | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -Oz -o \"${peddy_vcf}\""
+    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" --no-tags-update 2>\"${TMP_DIR}/liftover.log\" | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -Oz -o \"${peddy_vcf}\""
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
         -c "${RESOURCE_DIR}/liftover_chain.gz" \
         --no-tags-update 2>"${TMP_DIR}/liftover.log" | \
-    bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
     # -c s: fix REF mismatches against GRCh38 target FASTA after coordinate liftover.
     bcftools norm -f "${target_fasta}" -c s -Ou 2>"${TMP_DIR}/liftover.norm.log" | \
     tee >(bcftools view -H | wc -l > "${lifted_count_file}") | \
