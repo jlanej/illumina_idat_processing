@@ -202,11 +202,12 @@ _has_chr_prefix() {
 
 _count_variants() {
     local vcf="$1"
-    local indexed_count
-    if indexed_count=$(bcftools index -n "${vcf}" 2>/dev/null); then
-        indexed_count=$(tr -d '[:space:]' <<< "${indexed_count}")
-        if [[ "${indexed_count}" =~ ^[0-9]+$ ]]; then
-            echo "${indexed_count}"
+    local indexed_count_raw
+    local indexed_count_trimmed
+    if indexed_count_raw=$(bcftools index -n "${vcf}" 2>/dev/null); then
+        indexed_count_trimmed=$(tr -d '[:space:]' <<< "${indexed_count_raw}")
+        if [[ "${indexed_count_trimmed}" =~ ^[0-9]+$ ]]; then
+            echo "${indexed_count_trimmed}"
             return
         fi
     fi
