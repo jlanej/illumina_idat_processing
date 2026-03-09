@@ -125,7 +125,7 @@ if [[ "${FORCE}" != "true" ]]; then
 fi
 
 # --- Prepare working directories ---
-TMP_DIR="${OUTPUT_DIR}/tmp"
+TMP_DIR="${OUTPUT_DIR}/tmp/run_peddy"
 RESOURCE_DIR="${OUTPUT_DIR}/resources"
 mkdir -p "${TMP_DIR}" "${RESOURCE_DIR}"
 if [[ -n "${REF_DIR}" ]]; then
