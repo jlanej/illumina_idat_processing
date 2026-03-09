@@ -277,6 +277,8 @@ _prepare_peddy_site_windows() {
 #   bcftools +liftover  (source -> GRCh38, when genome != GRCh38)
 #     | bcftools view -T GRCH38.sites.windows  (coordinate ±buffer subset)
 #     | bcftools sort -Oz -o peddy_input.vcf.gz
+#   then append all source chrX variants without liftover so peddy sex_check
+#   always has chrX input regardless of genome coordinate system.
 # ======================================================================
 
 _prepare_peddy_input() {
@@ -313,6 +315,59 @@ _prepare_peddy_input() {
     fi
 }
 
+_vcf_has_contig() {
+    local vcf="$1"
+    local contig="$2"
+
+    if bcftools index -s "${vcf}" 2>/dev/null | awk '{print $1}' | grep -Fxq "${contig}"; then
+        return 0
+    fi
+
+    bcftools view -h "${vcf}" 2>/dev/null | grep -Eq "##contig=<ID=${contig}(,|>)"
+}
+
+_append_source_chrx() {
+    local source_vcf="$1"
+    local base_vcf="$2"
+
+    local source_chrx_region
+    if _has_chr_prefix "${source_vcf}"; then
+        source_chrx_region="chrX"
+    else
+        source_chrx_region="X"
+    fi
+
+    if ! _vcf_has_contig "${source_vcf}" "${source_chrx_region}"; then
+        echo "  chrX append: source VCF has no ${source_chrx_region} contig; skipping chrX append."
+        INPUT_VCF="${base_vcf}"
+        return
+    fi
+
+    local source_chrx_vcf="${TMP_DIR}/source_chrx.vcf.gz"
+    _debug_log_command "bcftools view \"${source_vcf}\" --threads \"${THREADS}\" -r \"${source_chrx_region}\" -Oz -o \"${source_chrx_vcf}\""
+    bcftools view "${source_vcf}" --threads "${THREADS}" \
+        -r "${source_chrx_region}" \
+        -Oz -o "${source_chrx_vcf}"
+    bcftools index -t "${source_chrx_vcf}"
+
+    local source_chrx_count
+    source_chrx_count=$(_count_variants "${source_chrx_vcf}")
+    if (( source_chrx_count == 0 )); then
+        echo "  chrX append: source VCF has 0 ${source_chrx_region} variants; skipping chrX append."
+        INPUT_VCF="${base_vcf}"
+        return
+    fi
+
+    echo "  chrX append: adding ${source_chrx_count} source ${source_chrx_region} variants without liftover."
+    local merged_vcf="${TMP_DIR}/peddy_input.with_source_chrx.vcf.gz"
+    _debug_log_command "bcftools concat -a \"${base_vcf}\" \"${source_chrx_vcf}\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.merge.\" -Ou | bcftools norm -d exact -Oz -o \"${merged_vcf}\""
+    bcftools concat -a "${base_vcf}" "${source_chrx_vcf}" -Ou | \
+    bcftools sort -T "${TMP_DIR}/bcftools.merge." -Ou | \
+    bcftools norm -d exact -Oz -o "${merged_vcf}"
+    bcftools index -t "${merged_vcf}"
+    INPUT_VCF="${merged_vcf}"
+}
+
 # ------------------------------------------------------------------
 # GRCh38: already correct positions, coordinate-filter only
 # ------------------------------------------------------------------
@@ -326,7 +381,12 @@ _prepare_grch38_subset() {
         -T "${RESOURCE_DIR}/GRCH38.sites.windows" \
         -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
     bcftools index -t "${TMP_DIR}/peddy_input.vcf.gz"
-    INPUT_VCF="${TMP_DIR}/peddy_input.vcf.gz"
+    local site_filtered_vcf="${TMP_DIR}/peddy_input.vcf.gz"
+    INPUT_VCF="${site_filtered_vcf}"
+
+    local site_filtered_variants
+    site_filtered_variants=$(_count_variants "${site_filtered_vcf}")
+    _append_source_chrx "${src_vcf}" "${site_filtered_vcf}"
 
     local n_variants
     n_variants=$(_count_variants "${INPUT_VCF}")
@@ -334,7 +394,7 @@ _prepare_grch38_subset() {
     local source_pct
     source_pct=$(_percent "${n_variants}" "${source_variant_count}")
     echo "  Final peddy subset retained ${source_pct}% of source VCF variants"
-    _report_peddy_overlap "GRCh38 coordinate-window overlap" "source VCF variants" "${source_variant_count}" "${sites_count}" "${n_variants}"
+    _report_peddy_overlap "GRCh38 coordinate-window overlap" "source VCF variants" "${source_variant_count}" "${sites_count}" "${site_filtered_variants}"
 }
 
 # ------------------------------------------------------------------
@@ -434,6 +494,10 @@ _prepare_liftover_subset() {
     bcftools index -t "${peddy_vcf}"
     INPUT_VCF="${peddy_vcf}"
 
+    local site_filtered_variants
+    site_filtered_variants=$(_count_variants "${peddy_vcf}")
+    _append_source_chrx "${src_vcf}" "${peddy_vcf}"
+
     local lifted_variants
     lifted_variants="0"
     if [[ -f "${lifted_count_file}" ]]; then
@@ -469,7 +533,7 @@ _prepare_liftover_subset() {
     local n_variants
     n_variants=$(_count_variants "${INPUT_VCF}")
     echo "  Peddy input: ${n_variants} variants (lifted to GRCh38 coordinates)"
-    _report_peddy_overlap "Liftover coordinate-window overlap" "lifted variants" "${lifted_variants}" "${sites_count}" "${n_variants}"
+    _report_peddy_overlap "Liftover coordinate-window overlap" "lifted variants" "${lifted_variants}" "${sites_count}" "${site_filtered_variants}"
 }
 
 # ------------------------------------------------------------------

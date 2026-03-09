@@ -174,7 +174,11 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -q -- '--no-debug' "${RUN_PEDDY}" && \
        grep -q 'bcftools index -n' "${RUN_PEDDY}" && \
        grep -q '_prepare_peddy_site_windows()' "${RUN_PEDDY}" && \
+       grep -q '_append_source_chrx()' "${RUN_PEDDY}" && \
        grep -q 'GRCH38.sites.windows' "${RUN_PEDDY}" && \
+       grep -q 'source_chrx_region="chrX"' "${RUN_PEDDY}" && \
+       grep -q 'source_chrx_region="X"' "${RUN_PEDDY}" && \
+       grep -q 'without liftover' "${RUN_PEDDY}" && \
        grep -q 'if (chr !~ /^chr/) chr="chr"chr' "${RUN_PEDDY}" && \
        grep -Fq 'bcftools index -s "${vcf}"' <<< "${HAS_CHR_PREFIX_BLOCK}" && \
        grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
