@@ -163,7 +163,7 @@ echo ""
 echo "--- Peddy overlap reporting validation ---"
 RUN_PEDDY="${REPO_DIR}/scripts/run_peddy.sh"
 if [[ -f "${RUN_PEDDY}" ]]; then
-    GRCH38_SUBSET_BLOCK="$(awk '/_prepare_grch38_subset\(\)/,/^}/' "${RUN_PEDDY}")"
+    GRCH38_SUBSET_BLOCK="$(awk '/_prepare_grch38_subset\(\)/,/^[[:space:]]*}/' "${RUN_PEDDY}")"
     if grep -q 'PEDDY_MIN_OVERLAP_WARN_COUNT=' "${RUN_PEDDY}" && \
        grep -q 'PEDDY_COORD_BUFFER_BP=100' "${RUN_PEDDY}" && \
        grep -q '_report_peddy_overlap()' "${RUN_PEDDY}" && \
