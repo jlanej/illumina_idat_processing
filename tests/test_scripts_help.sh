@@ -144,6 +144,32 @@ else
 fi
 
 echo ""
+
+# ---------------------------------------------------------------
+# Validate peddy overlap reporting guards
+# ---------------------------------------------------------------
+echo "--- Peddy overlap reporting validation ---"
+RUN_PEDDY="${REPO_DIR}/scripts/run_peddy.sh"
+if [[ -f "${RUN_PEDDY}" ]]; then
+    if grep -q 'PEDDY_MIN_OVERLAP_WARN_COUNT=' "${RUN_PEDDY}" && \
+       grep -q 'PEDDY_COORD_BUFFER_BP=100' "${RUN_PEDDY}" && \
+       grep -q '_report_peddy_overlap()' "${RUN_PEDDY}" && \
+       grep -q '_prepare_peddy_site_windows()' "${RUN_PEDDY}" && \
+       grep -q 'GRCH38.sites.windows' "${RUN_PEDDY}" && \
+       grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
+       grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}"; then
+        echo "  PASS: run_peddy.sh reports liftover/site overlap and low-overlap warnings"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: run_peddy.sh missing overlap reporting or warning checks"
+        (( FAIL++ )) || true
+    fi
+else
+    echo "  FAIL: scripts/run_peddy.sh not found"
+    (( FAIL++ )) || true
+fi
+
+echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
 echo "============================================"
