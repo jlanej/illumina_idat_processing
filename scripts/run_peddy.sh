@@ -31,6 +31,9 @@ CHAIN_URL_GRCh37="https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19T
 PEDDY_SITES_URL="https://raw.githubusercontent.com/brentp/peddy/master/peddy/GRCH38.sites"
 GRCH38_FASTA_URL="https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz"
 GRCH38_FASTA_NAME="GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
+PEDDY_MIN_OVERLAP_WARN_COUNT=500
+PEDDY_MIN_OVERLAP_WARN_SITE_FRACTION=0.005
+PEDDY_MIN_LIFTOVER_RETAIN_FRACTION=0.10
 
 usage() {
     cat <<EOF
@@ -191,6 +194,43 @@ _has_chr_prefix() {
     [[ "${first_chr}" == chr* ]]
 }
 
+_count_variants() {
+    local vcf="$1"
+    bcftools view -H "${vcf}" 2>/dev/null | wc -l | tr -d ' '
+}
+
+_percent() {
+    local numerator="$1"
+    local denominator="$2"
+    awk -v n="${numerator}" -v d="${denominator}" \
+        'BEGIN{ if (d > 0) printf "%.2f", (100*n/d); else printf "0.00" }'
+}
+
+_report_peddy_overlap() {
+    local context="$1"
+    local candidate_label="$2"
+    local candidate_count="$3"
+    local sites_count="$4"
+    local matched_count="$5"
+
+    local candidate_pct sites_pct
+    candidate_pct=$(_percent "${matched_count}" "${candidate_count}")
+    sites_pct=$(_percent "${matched_count}" "${sites_count}")
+    echo "  ${context}: ${matched_count} variants matched peddy sites (${candidate_pct}% of ${candidate_label}, ${sites_pct}% of GRCH38.sites)"
+
+    local warn_overlap="false"
+    if (( matched_count < PEDDY_MIN_OVERLAP_WARN_COUNT )); then
+        warn_overlap="true"
+    elif awk -v n="${matched_count}" -v d="${sites_count}" -v thr="${PEDDY_MIN_OVERLAP_WARN_SITE_FRACTION}" \
+        'BEGIN{ exit !(d > 0 && (n/d) < thr) }'; then
+        warn_overlap="true"
+    fi
+
+    if [[ "${warn_overlap}" == "true" ]]; then
+        echo "Warning: Very low overlap with peddy GRCH38 sites (${matched_count} matched). Check genome build, liftover chain/source FASTA compatibility, and chromosome naming."
+    fi
+}
+
 # ======================================================================
 #  Prepare peddy-compatible VCF
 # ======================================================================
@@ -218,15 +258,19 @@ _prepare_peddy_input() {
     sites_count=$(wc -l < "${RESOURCE_DIR}/GRCH38.sites" | tr -d ' ')
     echo "  Peddy GRCH38 sites: ${sites_count}"
 
+    local source_variant_count
+    source_variant_count=$(_count_variants "${src_vcf}")
+    echo "  Source variants: ${source_variant_count}"
+
     # Prepare the strip-chr rename map (used in all paths)
     _create_strip_chr_map "${TMP_DIR}/strip_chr.txt"
 
     if [[ "${GENOME}" == "GRCh38" ]]; then
         echo "Genome is GRCh38 — subsetting VCF to peddy sites..."
-        _prepare_grch38_subset "${src_vcf}"
+        _prepare_grch38_subset "${src_vcf}" "${source_variant_count}" "${sites_count}"
     elif [[ "${GENOME}" == "CHM13" || "${GENOME}" == "GRCh37" ]]; then
         echo "Genome is ${GENOME} — lifting over to GRCh38 via bcftools +liftover..."
-        _prepare_liftover_subset "${src_vcf}"
+        _prepare_liftover_subset "${src_vcf}" "${source_variant_count}" "${sites_count}"
     else
         echo "Warning: Unknown genome '${GENOME}'. Converting VCF as-is."
         _prepare_basic_convert "${src_vcf}"
@@ -238,6 +282,8 @@ _prepare_peddy_input() {
 # ------------------------------------------------------------------
 _prepare_grch38_subset() {
     local src_vcf="$1"
+    local source_variant_count="$2"
+    local sites_count="$3"
 
     bcftools view "${src_vcf}" --threads "${THREADS}" -Ou | \
     bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
@@ -249,8 +295,9 @@ _prepare_grch38_subset() {
     INPUT_VCF="${TMP_DIR}/peddy_input.vcf.gz"
 
     local n_variants
-    n_variants=$(bcftools view -H "${INPUT_VCF}" 2>/dev/null | wc -l | tr -d ' ')
+    n_variants=$(_count_variants "${INPUT_VCF}")
     echo "  Peddy input: ${n_variants} variants (GRCh38 coordinates)"
+    _report_peddy_overlap "GRCh38 subset overlap" "source VCF variants" "${source_variant_count}" "${sites_count}" "${n_variants}"
 }
 
 # ------------------------------------------------------------------
@@ -258,6 +305,8 @@ _prepare_grch38_subset() {
 # ------------------------------------------------------------------
 _prepare_liftover_subset() {
     local src_vcf="$1"
+    local source_variant_count="$2"
+    local sites_count="$3"
 
     # Validate source FASTA
     if [[ -z "${SRC_FASTA}" || ! -f "${SRC_FASTA}" ]]; then
@@ -317,6 +366,7 @@ _prepare_liftover_subset() {
 
     # Run the pipe:  liftover | strip-chr | set-id | filter-sites | sort
     echo "  Running bcftools +liftover pipeline..."
+    local lifted_vcf="${TMP_DIR}/lifted_grch38.vcf.gz"
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
@@ -324,8 +374,25 @@ _prepare_liftover_subset() {
         --no-tags-update 2>"${TMP_DIR}/liftover.log" | \
     bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
     bcftools annotate --set-id '%CHROM:%POS:%REF:%ALT' -Ou | \
-    bcftools view -i 'ID=@'"${RESOURCE_DIR}/GRCH38.sites" -Ou | \
-    bcftools sort -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
+    bcftools sort -Oz -o "${lifted_vcf}"
+
+    bcftools index -t "${lifted_vcf}"
+
+    local lifted_variants
+    lifted_variants=$(_count_variants "${lifted_vcf}")
+    local lifted_pct
+    lifted_pct=$(_percent "${lifted_variants}" "${source_variant_count}")
+    echo "  Liftover output (pre-site-filter): ${lifted_variants} variants (${lifted_pct}% of source variants)"
+
+    if (( lifted_variants == 0 )); then
+        echo "Warning: Liftover produced zero variants. Verify source reference FASTA and chain file compatibility."
+    elif awk -v n="${lifted_variants}" -v d="${source_variant_count}" -v thr="${PEDDY_MIN_LIFTOVER_RETAIN_FRACTION}" \
+        'BEGIN{ exit !(d > 0 && (n/d) < thr) }'; then
+        echo "Warning: Liftover retained only ${lifted_pct}% of source variants. This suggests a possible build or contig naming mismatch."
+    fi
+
+    bcftools view -i 'ID=@'"${RESOURCE_DIR}/GRCH38.sites" \
+        "${lifted_vcf}" -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
 
     bcftools index -t "${TMP_DIR}/peddy_input.vcf.gz"
     INPUT_VCF="${TMP_DIR}/peddy_input.vcf.gz"
@@ -337,8 +404,9 @@ _prepare_liftover_subset() {
     fi
 
     local n_variants
-    n_variants=$(bcftools view -H "${INPUT_VCF}" 2>/dev/null | wc -l | tr -d ' ')
+    n_variants=$(_count_variants "${INPUT_VCF}")
     echo "  Peddy input: ${n_variants} variants (lifted to GRCh38 coordinates)"
+    _report_peddy_overlap "Liftover subset overlap" "lifted variants" "${lifted_variants}" "${sites_count}" "${n_variants}"
 }
 
 # ------------------------------------------------------------------
