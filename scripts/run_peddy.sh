@@ -314,10 +314,10 @@ _prepare_grch38_subset() {
     local source_variant_count="$2"
     local sites_count="$3"
 
-    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.sort.\" -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
+    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.\" -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
     bcftools view "${src_vcf}" --threads "${THREADS}" -Ou | \
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
-    bcftools sort -T "${TMP_DIR}/bcftools.sort." -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
+    bcftools sort -T "${TMP_DIR}/bcftools." -Oz -o "${TMP_DIR}/peddy_input.vcf.gz"
     bcftools index -t "${TMP_DIR}/peddy_input.vcf.gz"
     INPUT_VCF="${TMP_DIR}/peddy_input.vcf.gz"
 
@@ -403,7 +403,7 @@ _prepare_liftover_subset() {
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
     local lifted_count_file="${TMP_DIR}/lifted_variants.count"
     rm -f "${lifted_count_file}"
-    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" --no-tags-update 2>\"${TMP_DIR}/liftover.log\" | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.sort.\" -Oz -o \"${peddy_vcf}\""
+    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" --no-tags-update 2>\"${TMP_DIR}/liftover.log\" | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.\" -Oz -o \"${peddy_vcf}\""
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
@@ -413,7 +413,7 @@ _prepare_liftover_subset() {
     bcftools norm -f "${target_fasta}" -c s -Ou 2>"${TMP_DIR}/liftover.norm.log" | \
     tee >(bcftools view -H | wc -l > "${lifted_count_file}") | \
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
-    bcftools sort -T "${TMP_DIR}/bcftools.sort." -Oz -o "${peddy_vcf}"
+    bcftools sort -T "${TMP_DIR}/bcftools." -Oz -o "${peddy_vcf}"
 
     local wait_attempts=0
     while (( wait_attempts < PEDDY_COUNT_WAIT_ATTEMPTS )); do

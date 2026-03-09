@@ -75,7 +75,7 @@ else
 fi
 
 if grep -Eq 'TMP_DIR="\$\{OUTPUT_DIR\}/tmp/run_peddy"' "${RUN_PEDDY}" && \
-   grep -Eq 'bcftools sort -T "\$\{TMP_DIR\}/bcftools\.sort\."' "${RUN_PEDDY}"; then
+   grep -Eq 'bcftools sort -T "\$\{TMP_DIR\}/bcftools\."' "${RUN_PEDDY}"; then
     echo "  PASS: run_peddy temp directory is scoped under \${OUTPUT_DIR}/tmp"
     (( PASS++ )) || true
 else
