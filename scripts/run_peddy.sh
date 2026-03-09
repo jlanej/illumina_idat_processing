@@ -339,7 +339,6 @@ _append_source_chrx() {
 
     if ! _vcf_has_contig "${source_vcf}" "${source_chrx_region}"; then
         echo "  chrX append: source VCF has no ${source_chrx_region} contig; skipping chrX append."
-        INPUT_VCF="${base_vcf}"
         return
     fi
 
@@ -354,7 +353,6 @@ _append_source_chrx() {
     source_chrx_count=$(_count_variants "${source_chrx_vcf}")
     if (( source_chrx_count == 0 )); then
         echo "  chrX append: source VCF has 0 ${source_chrx_region} variants; skipping chrX append."
-        INPUT_VCF="${base_vcf}"
         return
     fi
 
