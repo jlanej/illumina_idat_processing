@@ -458,6 +458,9 @@ if [[ -f "${FINAL_VCF}" ]]; then
         --output-dir "${PCA_DIR}"
         --threads "${THREADS}"
     )
+    if [[ "${FORCE}" == "true" ]]; then
+        PCA_ARGS+=(--force)
+    fi
 
     bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
 else
@@ -479,6 +482,7 @@ else
     echo ""
 
     if [[ -f "${FINAL_VCF}" ]]; then
+        echo "Using pipeline final stage VCF as peddy base input: ${FINAL_VCF}"
         PEDDY_ARGS=(
             --vcf "${FINAL_VCF}"
             --output-dir "${PEDDY_DIR}"

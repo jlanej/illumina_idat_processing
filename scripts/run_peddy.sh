@@ -34,6 +34,7 @@ PEDDY_MIN_OVERLAP_WARN_COUNT=500
 PEDDY_MIN_OVERLAP_WARN_SITE_FRACTION=0.005
 PEDDY_MIN_LIFTOVER_RETAIN_FRACTION=0.10
 PEDDY_COORD_BUFFER_BP=100
+PEDDY_COUNT_WAIT_ATTEMPTS=50
 
 usage() {
     cat <<EOF
@@ -228,6 +229,9 @@ _report_peddy_overlap() {
 
     if [[ "${warn_overlap}" == "true" ]]; then
         echo "Warning: Very low overlap with peddy GRCh38 sites (${matched_count} matched). Check genome build, liftover chain/source FASTA compatibility, and chromosome naming."
+        if [[ "${GENOME}" == "GRCh38" ]]; then
+            echo "Hint: For legacy GRCh37 manifests (e.g., 1000G Omni2.5), verify manifest realignment to GRCh38 completed before genotyping. If coordinates are still GRCh37, run with --genome GRCh37 and provide --src-fasta so peddy can liftover."
+        fi
     fi
 }
 
@@ -381,12 +385,13 @@ _prepare_liftover_subset() {
     fi
 
     # Run the pipe: liftover | strip-chr | normalize to GRCh38 REF
-    #              -> tee pre-site-filter VCF and coordinate-window subset
+    #              -> inline pre-site-filter variant count + coordinate-window subset.
+    # We intentionally avoid writing the full lifted VCF and only persist the
+    # peddy marker-window subset.
     echo "  Running bcftools +liftover pipeline..."
-    local lifted_vcf="${TMP_DIR}/lifted_grch38.vcf.gz"
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
-    # liftover output is not guaranteed to be coordinate-sorted, so each branch
-    # is sorted independently to produce indexable VCF.gz outputs.
+    local lifted_count_file="${TMP_DIR}/lifted_variants.count"
+    rm -f "${lifted_count_file}"
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
@@ -395,16 +400,33 @@ _prepare_liftover_subset() {
     bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
     # -c s: fix REF mismatches against GRCh38 target FASTA after coordinate liftover.
     bcftools norm -f "${target_fasta}" -c s -Ou 2>"${TMP_DIR}/liftover.norm.log" | \
-    tee >(bcftools sort -Oz -o "${lifted_vcf}") | \
+    tee >(bcftools view -H | wc -l > "${lifted_count_file}") | \
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
     bcftools sort -Oz -o "${peddy_vcf}"
 
-    bcftools index -t "${lifted_vcf}"
+    local wait_attempts=0
+    while (( wait_attempts < PEDDY_COUNT_WAIT_ATTEMPTS )); do
+        if [[ -f "${lifted_count_file}" ]]; then
+            break
+        fi
+        ((wait_attempts += 1))
+        sleep 0.1
+    done
+
     bcftools index -t "${peddy_vcf}"
     INPUT_VCF="${peddy_vcf}"
 
     local lifted_variants
-    lifted_variants=$(_count_variants "${lifted_vcf}")
+    lifted_variants="0"
+    if [[ -f "${lifted_count_file}" ]]; then
+        lifted_variants=$(tr -d '[:space:]' < "${lifted_count_file}")
+    else
+        echo "Warning: Streamed liftover variant count file was not produced (liftover stream failed early or async count write did not complete)."
+    fi
+    if [[ ! "${lifted_variants}" =~ ^[0-9]+$ ]]; then
+        echo "Warning: Failed to read streamed liftover variant count; defaulting to 0."
+        lifted_variants="0"
+    fi
     local lifted_pct
     lifted_pct=$(_percent "${lifted_variants}" "${source_variant_count}")
     echo "  Liftover output (pre-site-filter): ${lifted_variants} variants (${lifted_pct}% of source variants)"
