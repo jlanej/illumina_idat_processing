@@ -56,6 +56,8 @@ Optional:
                          PED with unrelated singletons is generated.
   --sample-qc FILE       Sample QC TSV for sex annotation in generated PED
   --threads INT          Number of threads (default: 4)
+  --debug                Print expanded bcftools commands (default: enabled)
+  --no-debug             Disable debug command logging
   --force                Re-run even if outputs exist
   --help                 Show this help message
 EOF
@@ -70,6 +72,7 @@ REF_DIR=""
 PED_FILE=""
 SAMPLE_QC=""
 THREADS=4
+DEBUG="true"
 FORCE="false"
 
 while [[ $# -gt 0 ]]; do
@@ -82,6 +85,8 @@ while [[ $# -gt 0 ]]; do
         --ped-file)    PED_FILE="$2"; shift 2 ;;
         --sample-qc)   SAMPLE_QC="$2"; shift 2 ;;
         --threads)     THREADS="$2"; shift 2 ;;
+        --debug)       DEBUG="true"; shift ;;
+        --no-debug)    DEBUG="false"; shift ;;
         --force)       FORCE="true"; shift ;;
         --help)        usage ;;
         *)             echo "Error: Unknown option: $1" >&2; exit 1 ;;
@@ -197,7 +202,22 @@ _has_chr_prefix() {
 
 _count_variants() {
     local vcf="$1"
+    local indexed_count
+    if indexed_count=$(bcftools index -n "${vcf}" 2>/dev/null); then
+        indexed_count=$(tr -d '[:space:]' <<< "${indexed_count}")
+        if [[ "${indexed_count}" =~ ^[0-9]+$ ]]; then
+            echo "${indexed_count}"
+            return
+        fi
+    fi
     bcftools view -H "${vcf}" 2>/dev/null | wc -l | tr -d ' '
+}
+
+_debug_log_command() {
+    local cmd="$1"
+    if [[ "${DEBUG}" == "true" ]]; then
+        echo "  [debug] ${cmd}"
+    fi
 }
 
 _percent() {
@@ -304,6 +324,7 @@ _prepare_grch38_subset() {
     local source_variant_count="$2"
     local sites_count="$3"
 
+    _debug_log_command "bcftools view \"${src_vcf}\" --threads \"${THREADS}\" -Ou | bcftools annotate --rename-chrs \"${TMP_DIR}/strip_chr.txt\" -Ou | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -Oz -o \"${TMP_DIR}/peddy_input.vcf.gz\""
     bcftools view "${src_vcf}" --threads "${THREADS}" -Ou | \
     bcftools annotate --rename-chrs "${TMP_DIR}/strip_chr.txt" -Ou | \
     bcftools view -T "${RESOURCE_DIR}/GRCH38.sites.windows" -Ou | \
@@ -366,6 +387,7 @@ _prepare_liftover_subset() {
         echo "  GRCh37 detected with bare chromosome names — adding chr prefix..."
         _create_add_chr_map "${TMP_DIR}/add_chr.txt"
 
+        _debug_log_command "bcftools annotate --rename-chrs \"${TMP_DIR}/add_chr.txt\" \"${src_vcf}\" --threads \"${THREADS}\" -Ob -o \"${TMP_DIR}/chr_prefixed.bcf\""
         bcftools annotate --rename-chrs "${TMP_DIR}/add_chr.txt" \
             "${src_vcf}" --threads "${THREADS}" \
             -Ob -o "${TMP_DIR}/chr_prefixed.bcf"
@@ -392,6 +414,7 @@ _prepare_liftover_subset() {
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
     local lifted_count_file="${TMP_DIR}/lifted_variants.count"
     rm -f "${lifted_count_file}"
+    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" --no-tags-update 2>\"${TMP_DIR}/liftover.log\" | bcftools annotate --rename-chrs \"${TMP_DIR}/strip_chr.txt\" -Ou | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -Oz -o \"${peddy_vcf}\""
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
@@ -505,9 +528,11 @@ _prepare_basic_convert() {
 
     if [[ "${src_vcf}" == *.bcf ]]; then
         echo "  Converting BCF to VCF.gz for peddy..."
+        _debug_log_command "bcftools view \"${src_vcf}\" -Oz -o \"${INPUT_VCF}\" --threads \"${THREADS}\""
         bcftools view "${src_vcf}" -Oz -o "${INPUT_VCF}" --threads "${THREADS}"
     elif [[ "${src_vcf}" == *.vcf && ! "${src_vcf}" == *.vcf.gz ]]; then
         echo "  Compressing VCF to VCF.gz for peddy..."
+        _debug_log_command "bcftools view \"${src_vcf}\" -Oz -o \"${INPUT_VCF}\" --threads \"${THREADS}\""
         bcftools view "${src_vcf}" -Oz -o "${INPUT_VCF}" --threads "${THREADS}"
     elif [[ "${src_vcf}" == *.vcf.gz ]]; then
         INPUT_VCF="${src_vcf}"
