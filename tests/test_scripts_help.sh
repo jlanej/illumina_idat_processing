@@ -132,7 +132,7 @@ if [[ -f "${DOCKERFILE}" ]]; then
         (( FAIL++ )) || true
     fi
 
-    if grep -q 'pip3 install "numpy<1.25" peddy' "${DOCKERFILE}"; then
+    if grep -E 'pip3[[:space:]]+install.*peddy' "${DOCKERFILE}" | grep -Eq 'numpy(<=1\.24(\.[0-9]+)?|<1\.25)'; then
         echo "  PASS: Dockerfile pins numpy<1.25 for peddy compatibility"
         (( PASS++ )) || true
     else
