@@ -178,6 +178,7 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}" && \
        grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
        grep -q 'peddy_input.vcf.gz' "${RUN_PEDDY}" && \
+       grep -q -- '--sites hg38' "${RUN_PEDDY}" && \
        grep -q 'verify manifest realignment to GRCh38 completed' "${RUN_PEDDY}" && \
        ! grep -q 'strip_chr.txt' "${RUN_PEDDY}" && \
        ! grep -q 'lifted_grch38.vcf.gz' "${RUN_PEDDY}"; then

@@ -590,6 +590,7 @@ PEDDY_START=${SECONDS}
 python3 -m peddy \
     -p "${THREADS}" \
     --plot \
+    --sites hg38 \
     --prefix "${PREFIX}" \
     "${INPUT_VCF}" \
     "${USED_PED}" 2>&1 || {
