@@ -551,7 +551,7 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
     return text
 
 
-def generate_html_report(output_dir):
+def generate_html_report(output_dir, genome=None):
     """Generate the complete HTML report."""
 
     # Auto-detect files from standard directory structure
@@ -622,8 +622,23 @@ def generate_html_report(output_dir):
     # Peddy directory
     peddy_dir = os.path.join(output_dir, 'peddy')
 
-    # Generate methods text
-    genome = 'CHM13'  # Could parse from config, but CHM13 is default
+    # Generate methods text — auto-detect genome from reference/ dir if not
+    # explicitly provided, so the methods paragraph names the correct build.
+    if genome is None:
+        ref_dir = os.path.join(output_dir, 'reference')
+        if os.path.isdir(ref_dir):
+            for name in os.listdir(ref_dir):
+                if 'chm13' in name.lower() and name.endswith(('.fa', '.fasta', '.fna')):
+                    genome = 'CHM13'
+                    break
+                if 'grch38' in name.lower() or 'hg38' in name.lower() or 'GCA_000001405' in name:
+                    genome = 'GRCh38'
+                    break
+                if 'g1k_v37' in name.lower() or 'grch37' in name.lower() or 'hg19' in name.lower():
+                    genome = 'GRCh37'
+                    break
+        if genome is None:
+            genome = 'CHM13'  # default
     methods_text = generate_methods_text(stats, tool_versions, genome)
 
     # ---- Create figures ----
@@ -2368,6 +2383,9 @@ def main():
     )
     parser.add_argument("--output-dir", required=True,
                         help="Pipeline output directory")
+    parser.add_argument("--genome", default=None,
+                        help="Genome build (CHM13, GRCh38, GRCh37). "
+                             "Auto-detected from reference/ dir if not provided.")
     args = parser.parse_args()
 
     if not os.path.isdir(args.output_dir):
@@ -2375,7 +2393,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    report_path = generate_html_report(args.output_dir)
+    report_path = generate_html_report(args.output_dir, genome=args.genome)
 
     if report_path:
         print(f"Pipeline report: {report_path}")

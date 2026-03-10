@@ -603,7 +603,8 @@ if command -v python3 &>/dev/null; then
         echo "Pipeline report outputs already exist. Skipping (use --force to regenerate)."
     else
         python3 "${SCRIPT_DIR}/generate_report.py" \
-            --output-dir "${OUTPUT_DIR}" 2>&1 || true
+            --output-dir "${OUTPUT_DIR}" \
+            --genome "${GENOME}" 2>&1 || true
         echo ""
         if [[ -f "${REPORT_PATH}" ]]; then
             echo "Pipeline report:     ${REPORT_PATH}"

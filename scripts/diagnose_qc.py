@@ -22,7 +22,13 @@ import statistics
 from pathlib import Path
 
 
-# Expected ranges for high-quality Illumina data
+# Expected ranges for high-quality Illumina data.
+# These thresholds are intentionally wider than the standard GWAS QC thresholds
+# (call rate >= 0.97, LRR SD <= 0.35) used in filter_qc_samples.py and
+# generate_report.py.  As a diagnostic tool, diagnose_qc.py uses looser
+# thresholds to catch potential issues early — samples/datasets that fall
+# between these diagnostic thresholds and the stricter GWAS thresholds are
+# flagged as warnings rather than errors.
 EXPECTED_CALL_RATE_MIN = 0.95
 EXPECTED_CALL_RATE_TYPICAL = 0.98
 EXPECTED_LRR_SD_MAX = 0.40
