@@ -45,6 +45,10 @@ mkdir -p "${OUTPUT_DIR}"
 if [[ "${GENOME}" == "CHM13" ]]; then
     FASTA_NAME="chm13v2.0.fa"
     FASTA_URL="https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz"
+    # No CHM13-specific genetic map exists yet; the GRCh38 genetic map is used
+    # as a proxy because CHM13 and GRCh38 share highly syntenic coordinates for
+    # the autosomes.  This map is only used by downstream phasing tools (e.g.
+    # Eagle/SHAPEIT5), not by the genotyping pipeline itself.
     MAP_URL="https://data.broadinstitute.org/alkesgroup/Eagle/downloads/tables/genetic_map_hg38_withX.txt.gz"
     MAP_NAME="genetic_map_hg38_withX.txt.gz"
     CYTO_URL="https://hgdownload.cse.ucsc.edu/goldenPath/hs1/bigZips/hs1.cytoBand.txt.gz"

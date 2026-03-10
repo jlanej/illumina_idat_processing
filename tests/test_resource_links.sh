@@ -11,6 +11,12 @@
 # These pages require free registration to download files, but the pages
 # themselves should be reachable (HTTP 200).
 #
+# Exit behaviour:
+#   - HTTP 000 (no response / network timeout): WARN — treated as a soft failure.
+#     These indicate a transient server/network outage and do NOT fail the CI job.
+#   - HTTP 4xx / 5xx (server replied with an error): FAIL — hard failure that
+#     indicates a genuinely broken or moved URL and DOES fail the CI job.
+#
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +25,7 @@ MANIFEST_FILE="${REPO_DIR}/config/manifest_urls.tsv"
 
 PASS=0
 FAIL=0
+WARN=0
 SKIP=0
 
 check_url() {
@@ -39,7 +46,13 @@ check_url() {
     if [[ "${http_code}" =~ ^(200|301|302|303|307|308)$ ]]; then
         echo "  PASS: ${description} (HTTP ${http_code})"
         (( PASS++ )) || true
+    elif [[ "${http_code}" == "000" ]]; then
+        # No response at all — transient network/server outage; do not fail CI.
+        echo "  WARN: ${description} (HTTP 000 — network timeout or server unreachable)"
+        echo "        URL: ${url}"
+        (( WARN++ )) || true
     else
+        # Server responded with an error code — likely a genuinely broken link.
         echo "  FAIL: ${description} (HTTP ${http_code})"
         echo "        URL: ${url}"
         (( FAIL++ )) || true
@@ -125,12 +138,19 @@ check_url "https://raw.githubusercontent.com/freeseek/mocha/master/mocha.c" \
 
 echo ""
 echo "============================================"
-echo "  Results: ${PASS} passed, ${FAIL} failed, ${SKIP} skipped"
+echo "  Results: ${PASS} passed, ${FAIL} failed, ${WARN} warned, ${SKIP} skipped"
 echo "============================================"
+
+if [[ "${WARN}" -gt 0 ]]; then
+    echo ""
+    echo "NOTE: ${WARN} resource URL(s) returned no response (HTTP 000)."
+    echo "This indicates a transient server/network outage, not a broken link."
+    echo "These warnings do not fail the CI job. Re-run if you suspect a real issue."
+fi
 
 if [[ "${FAIL}" -gt 0 ]]; then
     echo ""
-    echo "WARNING: ${FAIL} resource URL(s) are unreachable."
-    echo "This may indicate broken links that need updating."
+    echo "ERROR: ${FAIL} resource URL(s) returned a server error response."
+    echo "These indicate genuinely broken or moved links that need updating."
     exit 1
 fi

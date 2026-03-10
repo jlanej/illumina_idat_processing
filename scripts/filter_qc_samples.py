@@ -81,9 +81,11 @@ def filter_samples(qc_file, hq_output, excluded_output, min_call_rate, max_lrr_s
                          'ok', 'FAIL(parse)'))
                     continue
 
-            # Apply thresholds
+            # Apply thresholds.  Samples with missing LRR SD are excluded
+            # because the metric could not be computed (e.g. too few variants),
+            # so we cannot confirm sample quality.
             cr_pass = call_rate >= min_call_rate
-            sd_pass = lrr_sd is None or lrr_sd <= max_lrr_sd
+            sd_pass = lrr_sd is not None and lrr_sd <= max_lrr_sd
 
             if cr_pass and sd_pass:
                 hq_samples.append(sample_id)

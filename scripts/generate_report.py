@@ -8,12 +8,14 @@ figures, summary statistics, and auto-generated methods text.
 This is the final step of the pipeline, producing a single self-contained
 HTML report with:
   - Pipeline configuration and runtime summary
-  - Sample QC dashboard (call rate vs LRR SD, BAF SD, het rate distributions)
+  - Sample QC dashboard (call rate vs LRR SD scatter, BAF SD, het rate distributions)
+  - Per-sample detail table with QC failure reasons and downloadable pass/fail lists
   - Manifest realignment summary
   - Reclustering comparison (if Stage 2 was run)
-  - Sex check visualization
-  - PCA scatter plots (PC1 vs PC2, PC3 vs PC4)
+  - Sex check visualization with annotation guide for common sex chromosome patterns
+  - Ancestry PCA scatter plots (PC1 vs PC2, PC3 vs PC4) with k-means clustering
   - Variant QC summary
+  - Peddy pedigree/sex/ancestry QC
   - Auto-generated methods paragraph for publications
   - Summary statistics table in publication-ready format
 
@@ -551,7 +553,7 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
     return text
 
 
-def generate_html_report(output_dir):
+def generate_html_report(output_dir, genome=None):
     """Generate the complete HTML report."""
 
     # Auto-detect files from standard directory structure
@@ -622,8 +624,23 @@ def generate_html_report(output_dir):
     # Peddy directory
     peddy_dir = os.path.join(output_dir, 'peddy')
 
-    # Generate methods text
-    genome = 'CHM13'  # Could parse from config, but CHM13 is default
+    # Generate methods text — auto-detect genome from reference/ dir if not
+    # explicitly provided, so the methods paragraph names the correct build.
+    if genome is None:
+        ref_dir = os.path.join(output_dir, 'reference')
+        if os.path.isdir(ref_dir):
+            for name in os.listdir(ref_dir):
+                if 'chm13' in name.lower() and name.endswith(('.fa', '.fasta', '.fna')):
+                    genome = 'CHM13'
+                    break
+                if 'grch38' in name.lower() or 'hg38' in name.lower() or 'GCA_000001405' in name:
+                    genome = 'GRCh38'
+                    break
+                if 'g1k_v37' in name.lower() or 'grch37' in name.lower() or 'hg19' in name.lower():
+                    genome = 'GRCh37'
+                    break
+        if genome is None:
+            genome = 'CHM13'  # default
     methods_text = generate_methods_text(stats, tool_versions, genome)
 
     # ---- Create figures ----
@@ -811,12 +828,22 @@ def _prepare_sample_json(qc_rows, stats):
         lsd = safe_float(r.get('lrr_sd'))
         bsd = safe_float(r.get('baf_sd'))
         hr = safe_float(r.get('het_rate'))
-        passes = (cr is not None and cr >= GWAS_THRESHOLDS['call_rate_min']
-                  and lsd is not None
-                  and lsd <= GWAS_THRESHOLDS['lrr_sd_max'])
+        cr_pass = cr is not None and cr >= GWAS_THRESHOLDS['call_rate_min']
+        lsd_pass = lsd is not None and lsd <= GWAS_THRESHOLDS['lrr_sd_max']
+        passes = cr_pass and lsd_pass
         het_outlier = (hr is not None and het_sd > 0
                        and abs(hr - het_mean)
                        > GWAS_THRESHOLDS['het_rate_sd_multiplier'] * het_sd)
+        # Build a human-readable failure reason string for the report table
+        fail_reasons = []
+        if cr is None:
+            fail_reasons.append('CR missing')
+        elif not cr_pass:
+            fail_reasons.append(f'CR < {GWAS_THRESHOLDS["call_rate_min"]}')
+        if lsd is None:
+            fail_reasons.append('LRR SD missing')
+        elif not lsd_pass:
+            fail_reasons.append(f'LRR SD > {GWAS_THRESHOLDS["lrr_sd_max"]}')
         samples.append({
             'id': r.get('sample_id', ''),
             'call_rate': _clean(cr),
@@ -827,6 +854,7 @@ def _prepare_sample_json(qc_rows, stats):
             'het_rate': _clean(hr),
             'gender': r.get('computed_gender', 'NA'),
             'qc_pass': passes,
+            'fail_reason': ', '.join(fail_reasons) if fail_reasons else '',
             'baf_flag': bsd is not None and bsd > GWAS_THRESHOLDS['baf_sd_max'],
             'het_outlier': het_outlier,
         })
@@ -1084,6 +1112,7 @@ section h2 {
 }
 .status-pass { background: var(--success-light); color: #065f46; }
 .status-fail { background: var(--danger-light); color: #991b1b; }
+.status-flag { background: #fef3c7; color: #92400e; }
 
 /* Plots */
 .plot-grid {
@@ -1810,43 +1839,89 @@ document.addEventListener('DOMContentLoaded', function() {
     /* ---- Per-sample table ---- */
     var tbody = document.getElementById('sample-tbody');
     if (tbody) {
-        rawData.forEach(function(s) {
-            var tr = document.createElement('tr');
-            function cc(v,t,dir){
-                if(v===null)return '';
-                if(dir==='min')return v>=t?'cell-pass':'cell-fail';
-                return v<=t?'cell-pass':'cell-fail';
-            }
-            var crC=cc(s.call_rate,0.97,'min'), lrC=cc(s.lrr_sd,0.35,'max');
-            var bfC=s.baf_flag?'cell-warn':'cell-pass';
-            var htC=s.het_outlier?'cell-warn':'cell-pass';
-            var st=s.qc_pass?'<span class="status-badge status-pass">PASS</span>'
-                             :'<span class="status-badge status-fail">FAIL</span>';
-            function f4(v){return v!==null?v.toFixed(4):'NA';}
-            tr.innerHTML=
-                '<td>'+s.id+'</td>'+
-                '<td class="'+crC+'">'+f4(s.call_rate)+'</td>'+
-                '<td class="'+lrC+'">'+f4(s.lrr_sd)+'</td>'+
-                '<td>'+f4(s.lrr_mean)+'</td>'+
-                '<td>'+f4(s.lrr_median)+'</td>'+
-                '<td class="'+bfC+'">'+f4(s.baf_sd)+'</td>'+
-                '<td class="'+htC+'">'+f4(s.het_rate)+'</td>'+
-                '<td>'+s.gender+'</td>'+
-                '<td>'+st+'</td>';
-            tbody.appendChild(tr);
+        function cc(v,t,dir){
+            if(v===null)return '';
+            if(dir==='min')return v>=t?'cell-pass':'cell-fail';
+            return v<=t?'cell-pass':'cell-fail';
+        }
+        function f4(v){return v!==null?v.toFixed(4):'NA';}
+
+        function renderTable(filterMode) {
+            tbody.innerHTML = '';
+            var visible = 0;
+            rawData.forEach(function(s) {
+                if (filterMode === 'pass' && !s.qc_pass) return;
+                if (filterMode === 'fail' && s.qc_pass) return;
+                if (filterMode === 'flag' && !s.baf_flag && !s.het_outlier) return;
+                var searchVal = (document.getElementById('sample-search') || {}).value || '';
+                if (searchVal && s.id.toLowerCase().indexOf(searchVal.toLowerCase()) === -1) return;
+                visible++;
+                var tr = document.createElement('tr');
+                var crC=cc(s.call_rate,0.97,'min'), lrC=cc(s.lrr_sd,0.35,'max');
+                var bfC=s.baf_flag?'cell-warn':'';
+                var htC=s.het_outlier?'cell-warn':'';
+                var st=s.qc_pass?'<span class="status-badge status-pass">PASS</span>'
+                                 :'<span class="status-badge status-fail">FAIL</span>';
+                // Flags column: short badges for BAF and het-outlier warnings
+                var flags = '';
+                if (s.baf_flag) flags += '<span class="status-badge status-flag" style="margin-right:2px">BAF\u2191</span>';
+                if (s.het_outlier) flags += '<span class="status-badge status-flag">Het</span>';
+                tr.innerHTML=
+                    '<td>'+s.id+'</td>'+
+                    '<td class="'+crC+'">'+f4(s.call_rate)+'</td>'+
+                    '<td class="'+lrC+'">'+f4(s.lrr_sd)+'</td>'+
+                    '<td>'+f4(s.lrr_mean)+'</td>'+
+                    '<td>'+f4(s.lrr_median)+'</td>'+
+                    '<td class="'+bfC+'">'+f4(s.baf_sd)+'</td>'+
+                    '<td class="'+htC+'">'+f4(s.het_rate)+'</td>'+
+                    '<td>'+s.gender+'</td>'+
+                    '<td>'+st+'</td>'+
+                    '<td>'+flags+'</td>'+
+                    '<td style="font-size:0.75rem;color:#dc2626">'+s.fail_reason+'</td>';
+                tbody.appendChild(tr);
+            });
+            var sc = document.getElementById('shown-count');
+            if (sc) sc.textContent = visible + ' of ' + rawData.length + ' samples';
+        }
+
+        var currentFilter = 'all';
+        renderTable(currentFilter);
+
+        /* ---- Filter dropdown ---- */
+        var filterSel = document.getElementById('sample-filter');
+        if (filterSel) filterSel.addEventListener('change', function() {
+            currentFilter = this.value;
+            renderTable(currentFilter);
         });
     }
 
     /* ---- Search ---- */
     var si=document.getElementById('sample-search'), sc=document.getElementById('shown-count');
     if(si&&tbody){si.addEventListener('input',function(){
-        var f=this.value.toLowerCase(), rows=tbody.getElementsByTagName('tr'), n=0;
-        for(var i=0;i<rows.length;i++){
-            var show=rows[i].cells[0].textContent.toLowerCase().indexOf(f)>-1;
-            rows[i].style.display=show?'':'none'; if(show)n++;
-        }
-        if(sc) sc.textContent=n+' of '+rawData.length+' samples';
+        renderTable(currentFilter);
     });}
+
+    /* ---- Download helpers ---- */
+    function downloadIds(ids, filename) {
+        var blob = new Blob([ids.join('\n') + '\n'], {type: 'text/plain'});
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+    var dlPass = document.getElementById('dl-pass');
+    if (dlPass) dlPass.addEventListener('click', function() {
+        downloadIds(rawData.filter(function(s){return s.qc_pass;}).map(function(s){return s.id;}), 'qc_pass_samples.txt');
+    });
+    var dlFail = document.getElementById('dl-fail');
+    if (dlFail) dlFail.addEventListener('click', function() {
+        downloadIds(rawData.filter(function(s){return !s.qc_pass;}).map(function(s){return s.id;}), 'qc_fail_samples.txt');
+    });
+    var dlFlagged = document.getElementById('dl-flagged');
+    if (dlFlagged) dlFlagged.addEventListener('click', function() {
+        downloadIds(rawData.filter(function(s){return s.baf_flag||s.het_outlier;}).map(function(s){return s.id;}), 'qc_flagged_samples.txt');
+    });
 
     /* ---- Sort ---- */
     var ths=document.querySelectorAll('.sample-table th[data-col]');
@@ -2187,7 +2262,16 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         <div class="card">
             <div class="sample-controls">
                 <input type="text" id="sample-search" class="search-input" placeholder="Search by sample ID…">
+                <select id="sample-filter" class="plot-input" style="font-size:0.8rem">
+                    <option value="all">Show all samples</option>
+                    <option value="pass">Passing QC only</option>
+                    <option value="fail">Failing QC only</option>
+                    <option value="flag">Flagged (BAF/Het) only</option>
+                </select>
                 <span class="sample-count" id="shown-count">{stats.get('n_samples',0)} of {stats.get('n_samples',0)} samples</span>
+                <button id="dl-pass" class="plot-btn" type="button" title="Download list of passing sample IDs">⬇ Pass list</button>
+                <button id="dl-fail" class="plot-btn" type="button" title="Download list of failing sample IDs">⬇ Fail list</button>
+                <button id="dl-flagged" class="plot-btn" type="button" title="Download list of flagged sample IDs (BAF or Het outlier)">⬇ Flagged list</button>
             </div>
             <div class="sample-table-wrap">
                 <table class="sample-table">
@@ -2201,6 +2285,8 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                         <th data-col="6">Het Rate</th>
                         <th data-col="7">Sex</th>
                         <th data-col="8">Status</th>
+                        <th data-col="9">Flags</th>
+                        <th data-col="10">Failure Reason</th>
                     </tr></thead>
                     <tbody id="sample-tbody"></tbody>
                 </table>
@@ -2222,6 +2308,14 @@ def _build_html(stats, stage1_stats, figures, realign_text,
 
     <section id="sex-check">
         <h2>⚥ Sex Check</h2>
+        <div class="card" style="margin-bottom:0.75rem;font-size:0.83rem;color:#374151">
+            <strong>Interpretation guide:</strong> Females (XX) show higher median chrX LRR (near 0)
+            and low chrY LRR (negative, reflecting no chrY). Males (XY) show lower median chrX LRR
+            (slightly negative, hemizygous X) and higher chrY LRR (near 0 or slightly positive).
+            Outliers may indicate sex discordance, sex chromosome aneuploidies (XXY: high X and Y;
+            XO: very low X with absent Y signal), or sample swaps. Samples outside the expected
+            sex-specific clusters warrant manual review.
+        </div>
         <div class="plot-controls">
             <div class="btn-group">
                 <button id="sex-scatter-btn" class="plot-btn active" type="button">Scatter</button>
@@ -2368,6 +2462,9 @@ def main():
     )
     parser.add_argument("--output-dir", required=True,
                         help="Pipeline output directory")
+    parser.add_argument("--genome", default=None,
+                        help="Genome build (CHM13, GRCh38, GRCh37). "
+                             "Auto-detected from reference/ dir if not provided.")
     args = parser.parse_args()
 
     if not os.path.isdir(args.output_dir):
@@ -2375,7 +2472,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    report_path = generate_html_report(args.output_dir)
+    report_path = generate_html_report(args.output_dir, genome=args.genome)
 
     if report_path:
         print(f"Pipeline report: {report_path}")
