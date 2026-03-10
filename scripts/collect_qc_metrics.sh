@@ -198,7 +198,8 @@ collect_qc_metrics() {
                          print id "\t" $gi
                      }' "${metadata_tsv}" | sort -k1,1 > "${gender_file}"
     else
-        # Placeholder
+        # Fallback: metadata TSV is absent or lacks computed_gender column —
+        # fill all samples with 'NA' so the merge step produces a complete output.
         while read -r s; do echo -e "${s}\tNA"; done < "${samples_file}" > "${gender_file}"
     fi
 
