@@ -251,6 +251,20 @@ if [[ -f "${RUN_PIPELINE}" ]]; then
     fi
 fi
 
+echo "--- Pipeline freshness-aware idempotency validation ---"
+if [[ -f "${RUN_PIPELINE}" ]]; then
+    if grep -q 'any_input_newer_than()' "${RUN_PIPELINE}" && \
+       grep -q 'Peddy outputs exist but inputs are newer. Regenerating.' "${RUN_PIPELINE}" && \
+       grep -q 'Ancestry PCA outputs exist but inputs are newer. Regenerating.' "${RUN_PIPELINE}" && \
+       grep -q 'Ancestry-stratified QC outputs exist but inputs are newer. Regenerating.' "${RUN_PIPELINE}"; then
+        echo "  PASS: run_pipeline.sh refreshes stale downstream outputs when inputs change"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: run_pipeline.sh missing freshness-aware idempotency checks"
+        (( FAIL++ )) || true
+    fi
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"

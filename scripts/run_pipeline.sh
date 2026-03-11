@@ -159,6 +159,18 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
+any_input_newer_than() {
+    local output="$1"
+    shift
+    local input
+    for input in "$@"; do
+        if [[ -n "${input}" && -e "${input}" && "${input}" -nt "${output}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 echo "======================================================"
 echo "  Illumina IDAT Processing Pipeline"
 echo "======================================================"
@@ -469,29 +481,42 @@ else
 
     if [[ -f "${FINAL_VCF}" ]]; then
         echo "Using pipeline final stage VCF as peddy base input: ${FINAL_VCF}"
-        PEDDY_ARGS=(
-            --vcf "${FINAL_VCF}"
-            --output-dir "${PEDDY_DIR}"
-            --genome "${GENOME}"
-            --threads "${THREADS}"
-        )
-        if [[ -n "${REF_FASTA}" && -f "${REF_FASTA}" ]]; then
-            PEDDY_ARGS+=(--src-fasta "${REF_FASTA}")
-        fi
-        if [[ -n "${REF_DIR}" ]]; then
-            PEDDY_ARGS+=(--ref-dir "${REF_DIR}")
-        fi
-        if [[ -n "${PED_FILE}" && -f "${PED_FILE}" ]]; then
-            PEDDY_ARGS+=(--ped-file "${PED_FILE}")
-        fi
-        if [[ -f "${FINAL_QC}" ]]; then
-            PEDDY_ARGS+=(--sample-qc "${FINAL_QC}")
-        fi
-        if [[ "${FORCE}" == "true" ]]; then
-            PEDDY_ARGS+=(--force)
+        PEDDY_FORCE="${FORCE}"
+        PEDDY_HET_CHECK="${PEDDY_DIR}/peddy.het_check.csv"
+        if [[ "${PEDDY_FORCE}" != "true" && -s "${PEDDY_HET_CHECK}" ]]; then
+            if any_input_newer_than "${PEDDY_HET_CHECK}" "${FINAL_VCF}" "${FINAL_QC}" "${PED_FILE}"; then
+                echo "Peddy outputs exist but inputs are newer. Regenerating."
+                PEDDY_FORCE="true"
+            else
+                echo "Peddy outputs already exist and are up to date. Skipping (use --force to regenerate)."
+            fi
         fi
 
-        bash "${SCRIPT_DIR}/run_peddy.sh" "${PEDDY_ARGS[@]}" 2>&1 || true
+        if [[ "${PEDDY_FORCE}" == "true" || ! -s "${PEDDY_HET_CHECK}" ]]; then
+            PEDDY_ARGS=(
+                --vcf "${FINAL_VCF}"
+                --output-dir "${PEDDY_DIR}"
+                --genome "${GENOME}"
+                --threads "${THREADS}"
+            )
+            if [[ -n "${REF_FASTA}" && -f "${REF_FASTA}" ]]; then
+                PEDDY_ARGS+=(--src-fasta "${REF_FASTA}")
+            fi
+            if [[ -n "${REF_DIR}" ]]; then
+                PEDDY_ARGS+=(--ref-dir "${REF_DIR}")
+            fi
+            if [[ -n "${PED_FILE}" && -f "${PED_FILE}" ]]; then
+                PEDDY_ARGS+=(--ped-file "${PED_FILE}")
+            fi
+            if [[ -f "${FINAL_QC}" ]]; then
+                PEDDY_ARGS+=(--sample-qc "${FINAL_QC}")
+            fi
+            if [[ "${PEDDY_FORCE}" == "true" ]]; then
+                PEDDY_ARGS+=(--force)
+            fi
+
+            bash "${SCRIPT_DIR}/run_peddy.sh" "${PEDDY_ARGS[@]}" 2>&1 || true
+        fi
     else
         echo "Note: Skipping peddy (final VCF not available)."
     fi
@@ -509,16 +534,29 @@ echo "======================================================"
 echo ""
 
 if [[ -f "${FINAL_VCF}" ]]; then
-    PCA_ARGS=(
-        --vcf "${FINAL_VCF}"
-        --output-dir "${PCA_DIR}"
-        --threads "${THREADS}"
-    )
-    if [[ "${FORCE}" == "true" ]]; then
-        PCA_ARGS+=(--force)
+    PCA_FORCE="${FORCE}"
+    PCA_PROJ="${PCA_DIR}/pca_projections.tsv"
+    if [[ "${PCA_FORCE}" != "true" && -s "${PCA_PROJ}" ]]; then
+        if any_input_newer_than "${PCA_PROJ}" "${FINAL_VCF}"; then
+            echo "Ancestry PCA outputs exist but inputs are newer. Regenerating."
+            PCA_FORCE="true"
+        else
+            echo "Ancestry PCA outputs already exist and are up to date. Skipping (use --force to regenerate)."
+        fi
     fi
 
-    bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
+    if [[ "${PCA_FORCE}" == "true" || ! -s "${PCA_PROJ}" ]]; then
+        PCA_ARGS=(
+            --vcf "${FINAL_VCF}"
+            --output-dir "${PCA_DIR}"
+            --threads "${THREADS}"
+        )
+        if [[ "${PCA_FORCE}" == "true" ]]; then
+            PCA_ARGS+=(--force)
+        fi
+
+        bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
+    fi
 else
     echo "Note: Skipping ancestry PCA (final VCF not available)."
 fi
@@ -537,19 +575,33 @@ else
     echo "======================================================"
     echo ""
 
-    if [[ -f "${FINAL_VCF}" && -f "${PEDDY_DIR}/peddy.het_check.csv" ]]; then
-        STRAT_ARGS=(
-            --vcf "${FINAL_VCF}"
-            --peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv"
-            --output-dir "${ANCESTRY_QC_DIR}"
-            --min-samples "${MIN_ANCESTRY_SAMPLES}"
-            --threads "${THREADS}"
-        )
-        if [[ "${FORCE}" == "true" ]]; then
-            STRAT_ARGS+=(--force)
+    PEDDY_HET="${PEDDY_DIR}/peddy.het_check.csv"
+    if [[ -f "${FINAL_VCF}" && -f "${PEDDY_HET}" ]]; then
+        STRAT_FORCE="${FORCE}"
+        STRAT_COLLATED="${ANCESTRY_QC_DIR}/collated_variant_qc.tsv"
+        if [[ "${STRAT_FORCE}" != "true" && -s "${STRAT_COLLATED}" ]]; then
+            if any_input_newer_than "${STRAT_COLLATED}" "${FINAL_VCF}" "${PEDDY_HET}"; then
+                echo "Ancestry-stratified QC outputs exist but inputs are newer. Regenerating."
+                STRAT_FORCE="true"
+            else
+                echo "Ancestry-stratified QC outputs already exist and are up to date. Skipping (use --force to regenerate)."
+            fi
         fi
 
-        bash "${SCRIPT_DIR}/ancestry_stratified_qc.sh" "${STRAT_ARGS[@]}" 2>&1 || true
+        if [[ "${STRAT_FORCE}" == "true" || ! -s "${STRAT_COLLATED}" ]]; then
+            STRAT_ARGS=(
+                --vcf "${FINAL_VCF}"
+                --peddy-het-check "${PEDDY_HET}"
+                --output-dir "${ANCESTRY_QC_DIR}"
+                --min-samples "${MIN_ANCESTRY_SAMPLES}"
+                --threads "${THREADS}"
+            )
+            if [[ "${STRAT_FORCE}" == "true" ]]; then
+                STRAT_ARGS+=(--force)
+            fi
+
+            bash "${SCRIPT_DIR}/ancestry_stratified_qc.sh" "${STRAT_ARGS[@]}" 2>&1 || true
+        fi
     else
         echo "Note: Skipping ancestry-stratified QC (final VCF or peddy output not available)."
     fi
