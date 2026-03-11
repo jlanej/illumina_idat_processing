@@ -272,7 +272,7 @@ section h2 {
 
     <div class="header">
         <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
-        <p class="subtitle">Generated: 2026-03-11 17:57:45</p>
+        <p class="subtitle">Generated: 2026-03-11 18:56:23</p>
     </div>
 
     <nav class="nav-bar">
@@ -577,7 +577,7 @@ section h2 {
   Ti/Tv ratio:            2.02
   Mean inbreeding F:      0.0024
 </pre></div><div class="plot-grid"><div class="card"><div id="plot-vqc-cr-EUR" class="plot-box"></div></div><div class="card"><div id="plot-vqc-maf-EUR" class="plot-box"></div></div><div class="card"><div id="plot-vqc-hwe-EUR" class="plot-box"></div></div></div></div>
-        <div class="card"><h3>Cross-Ancestry Variant QC Pass Summary</h3><div id="vqc-cross-ancestry-summary" style="font-size:0.92rem;color:#374151">Not available.</div></div>
+        <div class="card"><h3>Cross-Ancestry Variant QC Pass Summary</h3><div id="vqc-cross-ancestry-summary" style="font-size:0.92rem;color:#374151">Not available. This summary requires collated_variant_qc.tsv to include all_ancestries_*_pass columns from ancestry-stratified QC (or at least one qualifying ancestry group).</div></div>
         <div class="card"><h3>Ancestry-Stratified QC Summary</h3><pre class="report-pre">======================================================
   Ancestry-Stratified QC Summary
 ======================================================
@@ -1583,9 +1583,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /* ---- Variant QC interactive plots ---- */
     var vqcEl = document.getElementById('collated-vqc-data');
+    function setVqcPlotPlaceholder(div, msg) {
+        if (!div) return;
+        div.innerHTML = '<div style="padding:1rem;color:#64748b;font-size:0.85rem">' + msg + '</div>';
+    }
     if (vqcEl) {
         var vqcData = {};
-        try { vqcData = JSON.parse(vqcEl.textContent || '{}'); } catch(e) {}
+        var vqcDataParseError = false;
+        try { vqcData = JSON.parse(vqcEl.textContent || '{}'); } catch(e) { vqcDataParseError = true; }
         var vqcCross = (vqcData._meta && vqcData._meta.cross_ancestry) || null;
         var vqcCrossDiv = document.getElementById('vqc-cross-ancestry-summary');
         if (vqcCrossDiv && vqcCross && vqcCross.n_variants > 0) {
@@ -1599,6 +1604,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<tr><td><strong>All metrics</strong></td><td><strong>' + vqcCross.n_qc_pass + '</strong></td><td><strong>' + formatPercentage(vqcCross.n_qc_pass, vqcCross.n_variants) + '%</strong></td></tr>' +
                 '</table>' +
                 '<div style="margin-top:0.5rem;color:#64748b">Total variants evaluated: ' + vqcCross.n_variants + '</div>';
+        } else if (vqcCrossDiv) {
+            if (vqcDataParseError) {
+                vqcCrossDiv.textContent = 'Not available: collated variant QC JSON could not be parsed.';
+            } else if (!Object.keys(vqcData || {}).length) {
+                vqcCrossDiv.textContent = 'Not available: collated variant QC data is missing or empty.';
+            } else {
+                vqcCrossDiv.textContent = 'Not available: cross-ancestry pass flags were not found in collated variant QC (expected all_ancestries_*_pass columns).';
+            }
         }
         var renderedVqcGroups = {};
         function renderVqcGroup(group) {
@@ -1623,6 +1636,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     annotations: [{x:0.98, y:1.04, yref:'paper', text:'\u2265 0.98',
                                    showarrow:false, font:{size:10, color:C.thresh}}]
                 }), cfg);
+            } else if (crDiv) {
+                setVqcPlotPlaceholder(crDiv, 'No call-rate values available for this group.');
             }
 
             var mafDiv = document.getElementById('plot-vqc-maf-' + group);
@@ -1640,6 +1655,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     annotations: [{x:0.01, y:1.04, yref:'paper', text:'MAF \u2265 0.01',
                                    showarrow:false, font:{size:10, color:C.thresh}}]
                 }), cfg);
+            } else if (mafDiv) {
+                setVqcPlotPlaceholder(mafDiv, 'No MAF values available for this group.');
             }
 
             var hweDiv = document.getElementById('plot-vqc-hwe-' + group);
@@ -1662,7 +1679,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         annotations: [{x:6, y:1.04, yref:'paper', text:'p \u2265 1e-6',
                                        showarrow:false, font:{size:10, color:C.thresh}}]
                     }), cfg);
+                } else {
+                    setVqcPlotPlaceholder(hweDiv, 'HWE values are present but not plottable (non-positive p-values).');
                 }
+            } else if (hweDiv) {
+                setVqcPlotPlaceholder(hweDiv, 'No HWE p-values available for this group.');
             }
         }
 
@@ -1710,6 +1731,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 xaxis:{title:'Group', gridcolor:'#f1f5f9'},
                 yaxis:{title:'Pass rate (%)', range:[0, 100], gridcolor:'#f1f5f9'}
             }), cfg);
+        } else if (compareDiv) {
+            setVqcPlotPlaceholder(compareDiv, 'Not available: need at least two groups with collated variant QC data.');
         }
     }
 });
