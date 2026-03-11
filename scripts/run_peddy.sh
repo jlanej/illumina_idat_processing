@@ -25,7 +25,7 @@
 set -euo pipefail
 
 # --- Resource URLs ---
-CHAIN_URL_CHM13="https://hgdownload.soe.ucsc.edu/gbdb/hs1/liftOver/chm13v2-hg38.over.chain.gz"
+CHAIN_URL_CHM13="https://hgdownload.soe.ucsc.edu/goldenPath/hs1/liftOver/hs1ToHg38.over.chain.gz"
 CHAIN_URL_GRCh37="https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz"
 PEDDY_SITES_URL="https://raw.githubusercontent.com/brentp/peddy/master/peddy/GRCH38.sites"
 GRCH38_FASTA_URL="https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_000001405.15_GRCh38/seqs_for_alignment_pipelines.ucsc_ids/GCA_000001405.15_GRCh38_no_alt_analysis_set.fna.gz"
