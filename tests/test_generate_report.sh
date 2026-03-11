@@ -623,25 +623,26 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 19: Ancestry-stratified variant QC tabs ---
-echo "--- Test 19: Ancestry-stratified variant QC tabs ---"
-if grep -q 'vqc-tab-bar' "${TMP_DIR}/pipeline_report.html" && \
-   grep -q 'data-tab="vqc-all"' "${TMP_DIR}/pipeline_report.html"; then
-    echo "  PASS: Variant QC tab bar with 'All' tab present"
+# --- Test 19: Ancestry-stratified variant QC toggles ---
+echo "--- Test 19: Ancestry-stratified variant QC toggles ---"
+if grep -q 'vqc-toggle-bar' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'class="vqc-toggle"' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'value="all"' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Variant QC toggle bar with 'All' option present"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Variant QC tab bar missing"
+    echo "  FAIL: Variant QC toggle bar missing"
     (( FAIL++ )) || true
 fi
 
-# --- Test 19b: Per-ancestry variant QC tabs ---
-echo "--- Test 19b: Per-ancestry variant QC tabs ---"
+# --- Test 19b: Per-ancestry variant QC toggles ---
+echo "--- Test 19b: Per-ancestry variant QC toggles ---"
 for anc in EUR AFR; do
-    if grep -q "data-tab=\"vqc-${anc}\"" "${TMP_DIR}/pipeline_report.html"; then
-        echo "  PASS: Variant QC tab for ${anc} present"
+    if grep -q "value=\"${anc}\"" "${TMP_DIR}/pipeline_report.html"; then
+        echo "  PASS: Variant QC toggle for ${anc} present"
         (( PASS++ )) || true
     else
-        echo "  FAIL: Variant QC tab for ${anc} missing"
+        echo "  FAIL: Variant QC toggle for ${anc} missing"
         (( FAIL++ )) || true
     fi
 done
@@ -656,28 +657,14 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 19d: Variant QC plot containers per ancestry ---
-echo "--- Test 19d: Variant QC plot containers per ancestry ---"
-for anc in all EUR AFR; do
-    if grep -q "plot-vqc-cr-${anc}" "${TMP_DIR}/pipeline_report.html"; then
-        echo "  PASS: Variant QC call rate plot container for ${anc} present"
+# --- Test 19d: Variant QC multi-ancestry plot containers ---
+echo "--- Test 19d: Variant QC multi-ancestry plot containers ---"
+for plot_id in plot-vqc-cr plot-vqc-maf plot-vqc-hwe; do
+    if grep -q "${plot_id}" "${TMP_DIR}/pipeline_report.html"; then
+        echo "  PASS: Variant QC plot container ${plot_id} present"
         (( PASS++ )) || true
     else
-        echo "  FAIL: Variant QC call rate plot container for ${anc} missing"
-        (( FAIL++ )) || true
-    fi
-    if grep -q "plot-vqc-maf-${anc}" "${TMP_DIR}/pipeline_report.html"; then
-        echo "  PASS: Variant QC MAF plot container for ${anc} present"
-        (( PASS++ )) || true
-    else
-        echo "  FAIL: Variant QC MAF plot container for ${anc} missing"
-        (( FAIL++ )) || true
-    fi
-    if grep -q "plot-vqc-hwe-${anc}" "${TMP_DIR}/pipeline_report.html"; then
-        echo "  PASS: Variant QC HWE plot container for ${anc} present"
-        (( PASS++ )) || true
-    else
-        echo "  FAIL: Variant QC HWE plot container for ${anc} missing"
+        echo "  FAIL: Variant QC plot container ${plot_id} missing"
         (( FAIL++ )) || true
     fi
 done
@@ -724,8 +711,8 @@ for art in collated_variant_qc.tsv ancestry_stratified_summary.txt; do
     fi
 done
 
-# --- Test 19i: Collated VQC downsampling is not first-N biased ---
-echo "--- Test 19i: Unbiased collated VQC histogram sampling ---"
+# --- Test 19i: Collated VQC uses full variant set for histograms ---
+echo "--- Test 19i: Complete collated VQC histogram values ---"
 if REPO_DIR="${REPO_DIR}" TMP_DIR="${TMP_DIR}" python3 - <<'PY'
 import json
 import os
@@ -739,28 +726,21 @@ from generate_report import _prepare_collated_vqc_json  # noqa: E402
 test_file = os.path.join(tmp_dir, 'collated_bias_test.tsv')
 with open(test_file, 'w') as f:
     f.write('variant_id\tall_call_rate\tall_hwe_p\tall_maf\n')
-    # Sorted-like input where the "first half" has only low MAF and second half high MAF.
-    # A naive [:5000] slice would contain no high-MAF values.
+    # Bimodal distribution verifies the payload retains every row (no subsampling).
     for i in range(10000):
         maf = 0.0 if i < 5000 else 0.5
         f.write(f'rs{i:06d}\t0.99\t0.5\t{maf}\n')
 
 payload = json.loads(_prepare_collated_vqc_json(test_file))
 vals = payload['all']['maf_values']
-assert len(vals) <= 5000, len(vals)
-high_maf_count = sum(1 for v in vals if v >= 0.5)
-# Input has an exact 50/50 split (0.0 vs 0.5). For unbiased sampling the
-# 5000-value reservoir should retain substantial representation from both halves.
-# Allow a wide tolerance around the expected ~2500 high-MAF values.
-LOWER_BOUND = 2000
-UPPER_BOUND = 3000
-assert LOWER_BOUND < high_maf_count < UPPER_BOUND, high_maf_count
+assert len(vals) == 10000, len(vals)
+assert sum(1 for v in vals if v >= 0.5) == 5000
 PY
 then
-    echo "  PASS: Sampling includes genome-wide tail values (not first-N slice)"
+    echo "  PASS: Histogram payload includes all variants without subsampling"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Sampling appears first-N biased"
+    echo "  FAIL: Histogram payload appears subsampled"
     (( FAIL++ )) || true
 fi
 
@@ -778,7 +758,7 @@ fi
 # --- Test 19ja: Cross-ancestry missing-data explanation text ---
 echo "--- Test 19ja: Cross-ancestry missing-data explanations present ---"
 if grep -q 'cross-ancestry pass flags were not found in collated variant QC' "${TMP_DIR}/pipeline_report.html" && \
-   grep -q 'No call-rate values available for this group' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'No values available for the selected ancestry group' "${TMP_DIR}/pipeline_report.html" && \
    grep -q 'need at least two groups in ancestry_stratified_qc/collated_variant_qc.tsv' "${TMP_DIR}/pipeline_report.html"; then
     echo "  PASS: Report includes explicit missing-data explanations for variant QC plots"
     (( PASS++ )) || true
@@ -834,8 +814,8 @@ else
     (( FAIL++ )) || true
 fi
 
-# --- Test 19n: Variant QC tabs can be derived from collated data ---
-echo "--- Test 19n: Variant QC tab fallback to collated groups ---"
+# --- Test 19n: Variant QC toggles can be derived from collated data ---
+echo "--- Test 19n: Variant QC toggle fallback to collated groups ---"
 if REPO_DIR="${REPO_DIR}" python3 - <<'PY'
 import json
 import os
@@ -862,14 +842,15 @@ html = _build_html(
     '', tool_versions, 'stage2',
     ancestry_vqc_texts={}, collated_vqc_json=collated
 )
-assert 'data-tab="vqc-EAS"' in html
-assert 'plot-vqc-cr-EAS' in html
+assert 'value="EAS"' in html
+assert 'plot-vqc-cr' in html
+assert 'class="vqc-toggle"' in html
 PY
 then
-    echo "  PASS: Variant QC tab/panel created from collated groups even without text summary"
+    echo "  PASS: Variant QC toggles created from collated groups even without text summary"
     (( PASS++ )) || true
 else
-    echo "  FAIL: Variant QC tab fallback from collated groups did not work"
+    echo "  FAIL: Variant QC toggle fallback from collated groups did not work"
     (( FAIL++ )) || true
 fi
 

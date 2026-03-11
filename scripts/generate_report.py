@@ -31,7 +31,6 @@ import io
 import json
 import math
 import os
-import random
 import shutil
 import subprocess
 import sys
@@ -57,12 +56,6 @@ GWAS_THRESHOLDS = {
     'maf_min': 0.01,
     'inbreeding_f_max': 0.05,
 }
-
-# Deterministic seed for bounded reservoir samples in large report payloads.
-# Keeps rendered histograms reproducible across runs/tests while avoiding
-# first-N bias from lexicographically sorted variant tables.
-COLLATED_VQC_SAMPLING_SEED = 42
-
 
 GWAS_METHODS_CITATIONS = [
     {
@@ -1018,9 +1011,6 @@ def _prepare_collated_vqc_json(collated_vqc_file):
         )
         return '{}'
 
-    MAX_PLOT_VALUES = 5000
-    rng = random.Random(COLLATED_VQC_SAMPLING_SEED)
-
     def _new_group_stats():
         return {
             'n_cr': 0,
@@ -1038,24 +1028,10 @@ def _prepare_collated_vqc_json(collated_vqc_file):
             'n_rare': 0,
             'n_low_freq': 0,
             'n_common': 0,
-            'cr_seen': 0,
-            'hwe_seen': 0,
-            'maf_seen': 0,
             'cr_values': [],
             'hwe_values': [],
             'maf_values': [],
         }
-
-    def _reservoir_append(values, seen_key, stats, val):
-        """Reservoir sample to avoid first-N bias in large sorted TSVs."""
-        stats[seen_key] += 1
-        seen = stats[seen_key]
-        if len(values) < MAX_PLOT_VALUES:
-            values.append(val)
-            return
-        j = rng.randrange(seen)
-        if j < MAX_PLOT_VALUES:
-            values[j] = val
 
     with open(collated_vqc_file) as f:
         header_line = f.readline().strip()
@@ -1115,7 +1091,7 @@ def _prepare_collated_vqc_json(collated_vqc_file):
                         stats['n_miss_gt2pct'] += 1
                     if cr_val < 0.99:
                         stats['n_miss_gt1pct'] += 1
-                    _reservoir_append(stats['cr_values'], 'cr_seen', stats, cr_val)
+                    stats['cr_values'].append(cr_val)
 
                 hwe_val = safe_float(row.get(hwe_col))
                 if hwe_val is not None:
@@ -1126,7 +1102,7 @@ def _prepare_collated_vqc_json(collated_vqc_file):
                         stats['n_hwe_lt1e10'] += 1
                     if hwe_val < 1e-20:
                         stats['n_hwe_lt1e20'] += 1
-                    _reservoir_append(stats['hwe_values'], 'hwe_seen', stats, hwe_val)
+                    stats['hwe_values'].append(hwe_val)
 
                 maf_val = safe_float(row.get(maf_col))
                 if maf_val is not None:
@@ -1140,7 +1116,7 @@ def _prepare_collated_vqc_json(collated_vqc_file):
                         stats['n_low_freq'] += 1
                     if maf_val >= 0.05:
                         stats['n_common'] += 1
-                    _reservoir_append(stats['maf_values'], 'maf_seen', stats, maf_val)
+                    stats['maf_values'].append(maf_val)
 
     result = {}
     for group in groups:
@@ -1448,21 +1424,16 @@ section h2 {
     align-self: center; flex-shrink: 0; margin: 0 0.15rem;
 }
 .plot-status { font-size: 0.75rem; color: var(--text-muted); }
-.vqc-tabs {
-    display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+.vqc-toggles {
+    display: flex; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.75rem;
 }
-.vqc-tab {
-    border: 1px solid var(--border); border-radius: 6px 6px 0 0;
-    background: #f1f5f9; padding: 0.4rem 0.9rem; font-size: 0.82rem;
-    cursor: pointer; font-weight: 500; color: var(--text-muted);
-    transition: background 0.15s, color 0.15s;
+.vqc-toggle-item {
+    display: inline-flex; align-items: center; gap: 0.32rem;
+    border: 1px solid var(--border); border-radius: 16px;
+    background: #f8fafc; padding: 0.24rem 0.6rem; font-size: 0.8rem;
+    color: #334155; cursor: pointer;
 }
-.vqc-tab:hover { background: var(--primary-light); color: var(--primary); }
-.vqc-tab.active {
-    background: var(--primary); color: white; border-color: var(--primary);
-    font-weight: 600;
-}
-.vqc-panel { margin-bottom: 0.5rem; }
+.vqc-toggle-item input { cursor: pointer; }
 """
 
 
@@ -2256,21 +2227,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    /* ---- Variant QC tabs ---- */
-    var vqcTabs = document.querySelectorAll('.vqc-tab');
-    if (vqcTabs.length) {
-        vqcTabs.forEach(function(tab) {
-            tab.addEventListener('click', function() {
-                vqcTabs.forEach(function(t) { t.classList.remove('active'); });
-                this.classList.add('active');
-                var panels = document.querySelectorAll('.vqc-panel');
-                panels.forEach(function(p) { p.style.display = 'none'; });
-                var target = document.getElementById(this.dataset.tab);
-                if (target) target.style.display = 'block';
-            });
-        });
-    }
-
     /* ---- Variant QC interactive plots ---- */
     var vqcEl = document.getElementById('collated-vqc-data');
     function setVqcPlotPlaceholder(div, msg) {
@@ -2303,90 +2259,92 @@ document.addEventListener('DOMContentLoaded', function() {
                 vqcCrossDiv.textContent = 'Not available: cross-ancestry pass flags were not found in collated variant QC (expected all_ancestries_*_pass columns).';
             }
         }
-        var renderedVqcGroups = {};
-        function renderVqcGroup(group) {
-            if (renderedVqcGroups[group]) return;
-            if (!vqcData[group] || group.charAt(0) === '_') return;
-            renderedVqcGroups[group] = true;
-            var gd = vqcData[group];
-            var label = group === 'all' ? 'All Samples' : group;
-
-            var crDiv = document.getElementById('plot-vqc-cr-' + group);
-            if (crDiv && gd.cr_values && gd.cr_values.length) {
-                Plotly.newPlot(crDiv, [{
-                    x: gd.cr_values, type: 'histogram',
-                    marker: {color: C.blue, opacity: 0.7, line: {color: 'white', width: 0.5}},
-                    hovertemplate: 'Call Rate: %{x}<br>Count: %{y}<extra></extra>'
-                }], Object.assign({}, baseLayout, {
-                    title: {text: 'Variant Call Rate (' + label + ')', font: {size: 13}},
-                    xaxis: {title: 'Call Rate', gridcolor: '#f1f5f9'},
-                    yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
-                    shapes: [{type:'line', x0:0.98, x1:0.98, y0:0, y1:1, yref:'paper',
-                              line:{color:C.thresh, width:1.5, dash:'dash'}}],
-                    annotations: [{x:0.98, y:1.04, yref:'paper', text:'\u2265 0.98',
-                                   showarrow:false, font:{size:10, color:C.thresh}}]
-                }), cfg);
-            } else if (crDiv) {
-                setVqcPlotPlaceholder(crDiv, 'No call-rate values available for this group.');
+        var vqcToggles = Array.prototype.slice.call(document.querySelectorAll('.vqc-toggle'));
+        var vqcColors = ['#0072B2', '#E69F00', '#009E73', '#CC79A7', '#56B4E9', '#D55E00', '#F0E442', '#000000'];
+        function selectedVqcGroups() {
+            return vqcToggles.filter(function(toggle) { return toggle.checked; })
+                .map(function(toggle) { return toggle.value; });
+        }
+        function groupLabel(group) {
+            return group === 'all' ? 'All' : group;
+        }
+        function groupColor(group, idx) {
+            return vqcColors[idx % vqcColors.length];
+        }
+        function overlayHistPlot(targetId, valueKey, title, xTitle, hoverPrefix, shape, annotationText, transformFn) {
+            var div = document.getElementById(targetId);
+            if (!div) return;
+            var groups = selectedVqcGroups();
+            if (!groups.length) {
+                setVqcPlotPlaceholder(div, 'Please select at least one ancestry group to view plots.');
+                return;
             }
-
-            var mafDiv = document.getElementById('plot-vqc-maf-' + group);
-            if (mafDiv && gd.maf_values && gd.maf_values.length) {
-                Plotly.newPlot(mafDiv, [{
-                    x: gd.maf_values, type: 'histogram',
-                    marker: {color: '#059669', opacity: 0.7, line: {color: 'white', width: 0.5}},
-                    hovertemplate: 'MAF: %{x}<br>Count: %{y}<extra></extra>'
-                }], Object.assign({}, baseLayout, {
-                    title: {text: 'MAF Distribution (' + label + ')', font: {size: 13}},
-                    xaxis: {title: 'Minor Allele Frequency', gridcolor: '#f1f5f9'},
-                    yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
-                    shapes: [{type:'line', x0:0.01, x1:0.01, y0:0, y1:1, yref:'paper',
-                              line:{color:C.thresh, width:1.5, dash:'dash'}}],
-                    annotations: [{x:0.01, y:1.04, yref:'paper', text:'MAF \u2265 0.01',
-                                   showarrow:false, font:{size:10, color:C.thresh}}]
-                }), cfg);
-            } else if (mafDiv) {
-                setVqcPlotPlaceholder(mafDiv, 'No MAF values available for this group.');
+            var traces = [];
+            groups.forEach(function(group, idx) {
+                var gd = vqcData[group];
+                if (!gd || !gd[valueKey] || !gd[valueKey].length) return;
+                var values = transformFn ? transformFn(gd[valueKey]) : gd[valueKey];
+                if (!values.length) return;
+                var color = groupColor(group, idx);
+                traces.push({
+                    x: values, type: 'histogram', name: groupLabel(group),
+                    marker: {color: color, opacity: 0.6, line: {color: 'white', width: 0.5}},
+                    hovertemplate: hoverPrefix + ': %{x}<br>Count: %{y}<extra>' + groupLabel(group) + '</extra>'
+                });
+            });
+            if (!traces.length) {
+                setVqcPlotPlaceholder(div, 'No values available for the selected ancestry group(s).');
+                return;
             }
-
-            var hweDiv = document.getElementById('plot-vqc-hwe-' + group);
-            if (hweDiv && gd.hwe_values && gd.hwe_values.length) {
-                var HWE_LOG10_CAP = 50;
-                var transformed = gd.hwe_values
-                    .filter(function(v) { return typeof v === 'number' && v > 0; })
-                    .map(function(v) { return Math.min(-Math.log10(v), HWE_LOG10_CAP); });
-                if (transformed.length) {
-                    Plotly.newPlot(hweDiv, [{
-                        x: transformed, type: 'histogram',
-                        marker: {color: '#7c3aed', opacity: 0.7, line: {color: 'white', width: 0.5}},
-                        hovertemplate: '-log10(HWE p): %{x:.2f}<br>Count: %{y}<extra></extra>'
-                    }], Object.assign({}, baseLayout, {
-                        title: {text: 'HWE Deviation (-log10 p) (' + label + ')', font: {size: 13}},
-                        xaxis: {title: '-log10(HWE p-value)', gridcolor: '#f1f5f9'},
-                        yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
-                        shapes: [{type:'line', x0:6, x1:6, y0:0, y1:1, yref:'paper',
-                                  line:{color:C.thresh, width:1.5, dash:'dash'}}],
-                        annotations: [{x:6, y:1.04, yref:'paper', text:'p \u2265 1e-6',
-                                       showarrow:false, font:{size:10, color:C.thresh}}]
-                    }), cfg);
-                } else {
-                    setVqcPlotPlaceholder(hweDiv, 'HWE values are present but not plottable (non-positive p-values).');
+            var plotLayout = Object.assign({}, baseLayout, {
+                title: {text: title, font: {size: 13}},
+                xaxis: {title: xTitle, gridcolor: '#f1f5f9'},
+                yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
+                barmode: 'overlay'
+            });
+            if (shape) plotLayout.shapes = [shape];
+            if (annotationText) {
+                plotLayout.annotations = [{
+                    x: shape.x0, y: 1.04, yref: 'paper', text: annotationText,
+                    showarrow: false, font: {size: 10, color: C.thresh}
+                }];
+            }
+            Plotly.newPlot(div, traces, plotLayout, cfg);
+        }
+        function renderVqcPlots() {
+            overlayHistPlot(
+                'plot-vqc-cr', 'cr_values', 'Variant Call Rate',
+                'Call Rate', 'Call Rate',
+                {type:'line', x0:0.98, x1:0.98, y0:0, y1:1, yref:'paper',
+                 line:{color:C.thresh, width:1.5, dash:'dash'}},
+                '\u2265 0.98'
+            );
+            overlayHistPlot(
+                'plot-vqc-maf', 'maf_values', 'MAF Distribution',
+                'Minor Allele Frequency', 'MAF',
+                {type:'line', x0:0.01, x1:0.01, y0:0, y1:1, yref:'paper',
+                 line:{color:C.thresh, width:1.5, dash:'dash'}},
+                'MAF \u2265 0.01'
+            );
+            var HWE_LOG10_CAP = 50;
+            overlayHistPlot(
+                'plot-vqc-hwe', 'hwe_values', 'HWE Deviation (-log10 p)',
+                '-log10(HWE p-value)', '-log10(HWE p)',
+                {type:'line', x0:6, x1:6, y0:0, y1:1, yref:'paper',
+                 line:{color:C.thresh, width:1.5, dash:'dash'}},
+                'p \u2265 1e-6',
+                function(values) {
+                    return values
+                        .filter(function(v) { return typeof v === 'number' && v > 0; })
+                        .map(function(v) { return Math.min(-Math.log10(v), HWE_LOG10_CAP); });
                 }
-            } else if (hweDiv) {
-                setVqcPlotPlaceholder(hweDiv, 'No HWE p-values available for this group.');
-            }
+            );
         }
 
-        renderVqcGroup('all');
-        vqcTabs.forEach(function(tab) {
-            tab.addEventListener('click', function() {
-                var group = (this.dataset.tab || '').replace('vqc-', '');
-                renderVqcGroup(group);
-                var panel = document.getElementById(this.dataset.tab);
-                if (!panel) return;
-                panel.querySelectorAll('.plot-box').forEach(function(el) {
-                    if (el.data && el.data.length) Plotly.Plots.resize(el);
-                });
+        renderVqcPlots();
+        vqcToggles.forEach(function(toggle) {
+            toggle.addEventListener('change', function() {
+                renderVqcPlots();
             });
         });
 
@@ -2498,25 +2456,19 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         missing_summaries = sorted(set(vqc_data_groups) - set(ancestry_vqc_texts.keys()))
         if missing_summaries:
             print(
-                "[diag] Variant QC plots: rendering ancestry plot tabs without text summary for: "
+                "[diag] Variant QC plots: rendering ancestry plot toggles without text summary for: "
                 + ", ".join(missing_summaries),
                 file=sys.stderr
             )
 
-    # Build variant QC tab buttons and panels for each ancestry group
-    vqc_tab_buttons = ''.join(
-        f'<button class="vqc-tab" data-tab="vqc-{anc}" type="button">{anc}</button>'
-        for anc in merged_vqc_groups
-    )
-    vqc_ancestry_panels = ''.join(
-        f'<div id="vqc-{anc}" class="vqc-panel" style="display:none">'
-        f'{_pre_block(ancestry_vqc_texts.get(anc), f"Variant QC Summary ({anc})")}'
-        f'<div class="plot-grid">'
-        f'<div class="card"><div id="plot-vqc-cr-{anc}" class="plot-box"></div></div>'
-        f'<div class="card"><div id="plot-vqc-maf-{anc}" class="plot-box"></div></div>'
-        f'<div class="card"><div id="plot-vqc-hwe-{anc}" class="plot-box"></div></div>'
-        f'</div></div>'
-        for anc in merged_vqc_groups
+    vqc_toggle_groups = ['all'] + merged_vqc_groups
+    vqc_toggle_controls = ''.join(
+        f'<label class="vqc-toggle-item" for="vqc-toggle-{idx}">'
+        f'<input id="vqc-toggle-{idx}" class="vqc-toggle" type="checkbox" value="{group}" '
+        f'aria-label="Show {("All" if group == "all" else group)} ancestry in variant QC plots" checked> '
+        f'{("All" if group == "all" else group)}'
+        '</label>'
+        for idx, group in enumerate(vqc_toggle_groups)
     )
     vqc_strat_summary = (
         _pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary')
@@ -2804,21 +2756,17 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 metrics summarize whether each variant passes call rate, HWE, MAF, and all
                 metrics combined in every ancestry subset analyzed.
             </p>
-            <div class="vqc-tabs" id="vqc-tab-bar">
-                <button class="vqc-tab active" data-tab="vqc-all" type="button">All</button>
-                {vqc_tab_buttons}
+            <div class="vqc-toggles" id="vqc-toggle-bar">
+                {vqc_toggle_controls}
             </div>
         </div>
-        <div id="vqc-all" class="vqc-panel" style="display:block">
-            {_pre_block(variant_qc_text, 'Variant QC Summary (All Samples)')}
-            <div class="plot-grid">
-                <div class="card"><div id="plot-vqc-cr-all" class="plot-box"></div></div>
-                <div class="card"><div id="plot-vqc-maf-all" class="plot-box"></div></div>
-                <div class="card"><div id="plot-vqc-hwe-all" class="plot-box"></div></div>
-            </div>
-            <div class="card"><div id="plot-vqc-pass-compare" class="plot-box"></div></div>
+        {_pre_block(variant_qc_text, 'Variant QC Summary (All Samples)')}
+        <div class="plot-grid">
+            <div class="card"><div id="plot-vqc-cr" class="plot-box"></div></div>
+            <div class="card"><div id="plot-vqc-maf" class="plot-box"></div></div>
+            <div class="card"><div id="plot-vqc-hwe" class="plot-box"></div></div>
         </div>
-        {vqc_ancestry_panels}
+        <div class="card"><div id="plot-vqc-pass-compare" class="plot-box"></div></div>
         {vqc_cross_summary}
         {vqc_strat_summary}
     </section>
