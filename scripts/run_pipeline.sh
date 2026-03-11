@@ -164,7 +164,7 @@ any_input_newer_than() {
     shift
     local input
     for input in "$@"; do
-        if [[ -n "${input}" && -e "${input}" && "${input}" -nt "${output}" ]]; then
+        if [[ -n "${input}" && -f "${input}" && "${input}" -nt "${output}" ]]; then
             return 0
         fi
     done
