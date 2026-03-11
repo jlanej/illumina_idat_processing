@@ -2306,9 +2306,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             var hweDiv = document.getElementById('plot-vqc-hwe-' + group);
             if (hweDiv && gd.hwe_values && gd.hwe_values.length) {
+                var HWE_LOG10_CAP = 50;
                 var transformed = gd.hwe_values
                     .filter(function(v) { return typeof v === 'number' && v > 0; })
-                    .map(function(v) { return -Math.log10(v); });
+                    .map(function(v) { return Math.min(-Math.log10(v), HWE_LOG10_CAP); });
                 if (transformed.length) {
                     Plotly.newPlot(hweDiv, [{
                         x: transformed, type: 'histogram',
