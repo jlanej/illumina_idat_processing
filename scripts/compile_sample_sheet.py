@@ -126,6 +126,10 @@ def main():
                         help="Peddy het_check.csv with ancestry/het QC metrics")
     parser.add_argument("--peddy-sex-check", default=None,
                         help="Peddy sex_check.csv with sex prediction metrics")
+    parser.add_argument("--ancestry-pca", action='append', default=[],
+                        help="Ancestry-specific PCA projections in format "
+                             "ANCESTRY:FILE (repeatable). Samples not of a "
+                             "given ancestry will have NaN for those PCs.")
     parser.add_argument("--output", required=True,
                         help="Output compiled sample sheet TSV")
     parser.add_argument("--n-pcs", type=int, default=20,
@@ -198,11 +202,40 @@ def main():
                 if field in row:
                     peddy_sex_data[sid][f'peddy_sex_{field}'] = row[field]
 
+    # Read ancestry-specific PCA projections if provided
+    # Each entry is ANCESTRY:FILE. Samples not belonging to that ancestry
+    # will have NaN for those PCs, following best practice for ancestry-
+    # stratified analyses (Peterson et al. 2019, AJHG 105:921-935).
+    ancestry_pca_data = {}  # ancestry -> (pc_cols, {sample_id -> {col: val}})
+    ancestry_pca_order = []
+    for spec in args.ancestry_pca:
+        if ':' not in spec:
+            print(f"Warning: Invalid ancestry-pca spec: {spec}",
+                  file=sys.stderr)
+            continue
+        anc, pca_file = spec.split(':', 1)
+        if os.path.exists(pca_file):
+            anc_pc_cols, anc_pc_data = read_pca_projections(pca_file)
+            anc_pc_cols = anc_pc_cols[:args.n_pcs]
+            # Prefix PC columns with ancestry name
+            prefixed_cols = [f'{anc}_{col}' for col in anc_pc_cols]
+            prefixed_data = {}
+            for sid, row in anc_pc_data.items():
+                prefixed_data[sid] = {}
+                for orig, pref in zip(anc_pc_cols, prefixed_cols):
+                    prefixed_data[sid][pref] = row.get(orig, 'NaN')
+            ancestry_pca_data[anc] = (prefixed_cols, prefixed_data)
+            ancestry_pca_order.append(anc)
+
     # Build unified header
     output_cols = list(qc_header)
     if het_data:
         output_cols.append('inbreeding_F')
     output_cols.extend(pc_cols)
+    # Add ancestry-specific PC columns
+    for anc in ancestry_pca_order:
+        anc_cols, _ = ancestry_pca_data[anc]
+        output_cols.extend(anc_cols)
     output_cols.extend(peddy_het_cols)
     output_cols.extend(peddy_sex_cols)
 
@@ -228,10 +261,16 @@ def main():
             # Inbreeding coefficient
             if het_data:
                 row.append(het_data.get(sample_id, 'NA'))
-            # PC columns
+            # PC columns (full-cohort)
             pc_row = pc_data.get(sample_id, {})
             for col in pc_cols:
                 row.append(pc_row.get(col, 'NA'))
+            # Ancestry-specific PC columns (NaN for non-members)
+            for anc in ancestry_pca_order:
+                anc_cols, anc_data_dict = ancestry_pca_data[anc]
+                anc_row = anc_data_dict.get(sample_id, {})
+                for col in anc_cols:
+                    row.append(anc_row.get(col, 'NaN'))
             # Peddy het_check columns
             peddy_het_row = peddy_het_data.get(sample_id, {})
             for col in peddy_het_cols:
@@ -250,6 +289,11 @@ def main():
     print(f"  QC columns:        {len(qc_header)}")
     print(f"  PC columns:        {len(pc_cols)}")
     print(f"  Samples with PCs:  {n_with_pcs}")
+    if ancestry_pca_order:
+        for anc in ancestry_pca_order:
+            anc_cols, anc_data_dict = ancestry_pca_data[anc]
+            n_with_anc_pcs = sum(1 for s in all_samples if s in anc_data_dict)
+            print(f"  {anc} PC columns:  {len(anc_cols)} ({n_with_anc_pcs} samples)")
     if peddy_het_cols or peddy_sex_cols:
         print(f"  Peddy columns:     {len(peddy_het_cols) + len(peddy_sex_cols)}")
         print(f"  Samples w/ peddy:  {n_with_peddy}")

@@ -23,6 +23,7 @@ GENOME="CHM13"
 THREADS=1
 MIN_CALL_RATE=0.97
 MAX_LRR_SD=0.35
+MIN_ANCESTRY_SAMPLES=100
 SKIP_STAGE2="false"
 SKIP_DOWNLOAD="false"
 SKIP_FAILURES="false"
@@ -56,6 +57,10 @@ Processing options:
   --threads INT          Number of threads (default: ${THREADS})
   --min-call-rate FLOAT  Min call rate for Stage 2 HQ samples (default: ${MIN_CALL_RATE})
   --max-lrr-sd FLOAT     Max LRR SD for Stage 2 HQ samples (default: ${MAX_LRR_SD})
+  --min-ancestry-samples INT
+                         Minimum samples per ancestry group for ancestry-
+                         stratified QC (variant QC and PCA within each
+                         ancestry). Uses peddy predictions. (default: ${MIN_ANCESTRY_SAMPLES})
   --sample-name-map FILE Two-column tab-delimited file mapping IDAT root names
                          (column 1) to desired sample names (column 2).
                          Renames samples in GTC files, VCFs, and QC reports.
@@ -118,6 +123,7 @@ while [[ $# -gt 0 ]]; do
         --threads)        THREADS="$2"; shift 2 ;;
         --min-call-rate)  MIN_CALL_RATE="$2"; shift 2 ;;
         --max-lrr-sd)     MAX_LRR_SD="$2"; shift 2 ;;
+        --min-ancestry-samples) MIN_ANCESTRY_SAMPLES="$2"; shift 2 ;;
         --sample-name-map) SAMPLE_NAME_MAP="$2"; shift 2 ;;
         --ped-file)       PED_FILE="$2"; shift 2 ;;
         --force-rename)   FORCE_RENAME="true"; shift ;;
@@ -519,6 +525,38 @@ fi
 echo ""
 
 # ---------------------------------------------------------------
+# Ancestry-Stratified QC (variant QC and PCA per ancestry)
+# ---------------------------------------------------------------
+ANCESTRY_QC_DIR="${OUTPUT_DIR}/ancestry_stratified_qc"
+
+if [[ "${SKIP_PEDDY}" == "true" ]]; then
+    echo "Skipping ancestry-stratified QC (peddy was skipped — ancestry predictions required)"
+else
+    echo "======================================================"
+    echo "  Running Ancestry-Stratified QC"
+    echo "======================================================"
+    echo ""
+
+    if [[ -f "${FINAL_VCF}" && -f "${PEDDY_DIR}/peddy.het_check.csv" ]]; then
+        STRAT_ARGS=(
+            --vcf "${FINAL_VCF}"
+            --peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv"
+            --output-dir "${ANCESTRY_QC_DIR}"
+            --min-samples "${MIN_ANCESTRY_SAMPLES}"
+            --threads "${THREADS}"
+        )
+        if [[ "${FORCE}" == "true" ]]; then
+            STRAT_ARGS+=(--force)
+        fi
+
+        bash "${SCRIPT_DIR}/ancestry_stratified_qc.sh" "${STRAT_ARGS[@]}" 2>&1 || true
+    else
+        echo "Note: Skipping ancestry-stratified QC (final VCF or peddy output not available)."
+    fi
+fi
+echo ""
+
+# ---------------------------------------------------------------
 # Compile unified sample sheet
 # ---------------------------------------------------------------
 echo "======================================================"
@@ -554,6 +592,16 @@ if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
         fi
         if [[ -f "${PEDDY_DIR}/peddy.sex_check.csv" ]]; then
             COMPILE_ARGS+=(--peddy-sex-check "${PEDDY_DIR}/peddy.sex_check.csv")
+        fi
+
+        # Include ancestry-specific PCA projections if available
+        if [[ -d "${ANCESTRY_QC_DIR}" ]]; then
+            for anc_dir in "${ANCESTRY_QC_DIR}"/*/pca; do
+                if [[ -f "${anc_dir}/pca_projections.tsv" ]]; then
+                    anc_name=$(basename "$(dirname "${anc_dir}")")
+                    COMPILE_ARGS+=(--ancestry-pca "${anc_name}:${anc_dir}/pca_projections.tsv")
+                fi
+            done
         fi
 
         python3 "${SCRIPT_DIR}/compile_sample_sheet.py" "${COMPILE_ARGS[@]}" 2>&1 || true
@@ -647,6 +695,13 @@ for pf in peddy.het_check.csv peddy.sex_check.csv peddy.ped_check.csv peddy.pedd
         cp -f "${OUTPUT_DIR}/peddy/${pf}" "${OUTPUT_DIR}/summary/${pf}"
     fi
 done
+# Copy ancestry-stratified QC outputs to summary
+if [[ -f "${ANCESTRY_QC_DIR}/collated_variant_qc.tsv" ]]; then
+    cp -f "${ANCESTRY_QC_DIR}/collated_variant_qc.tsv" "${OUTPUT_DIR}/summary/collated_variant_qc.tsv"
+fi
+if [[ -f "${ANCESTRY_QC_DIR}/ancestry_stratified_summary.txt" ]]; then
+    cp -f "${ANCESTRY_QC_DIR}/ancestry_stratified_summary.txt" "${OUTPUT_DIR}/summary/ancestry_stratified_summary.txt"
+fi
 
 echo ""
 echo "======================================================"
@@ -667,6 +722,9 @@ if [[ -d "${SEX_CHECK_DIR}" ]]; then
 fi
 if [[ -d "${PEDDY_DIR}" ]]; then
     echo "  Peddy QC:         ${PEDDY_DIR}/"
+fi
+if [[ -d "${ANCESTRY_QC_DIR}" ]]; then
+    echo "  Ancestry QC:      ${ANCESTRY_QC_DIR}/"
 fi
 if [[ -f "${REPORT_PATH}" ]]; then
     echo "  Pipeline report:  ${REPORT_PATH}"
