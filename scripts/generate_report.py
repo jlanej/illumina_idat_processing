@@ -2251,19 +2251,19 @@ document.addEventListener('DOMContentLoaded', function() {
         var vqcCross = (vqcData._meta && vqcData._meta.cross_ancestry) || null;
         var vqcCrossDiv = document.getElementById('vqc-cross-ancestry-summary');
         if (vqcCrossDiv && vqcCross && vqcCross.n_variants > 0) {
-            function vqcPct(n, d) { return d ? (100 * n / d).toFixed(1) : '0.0'; }
+            function formatPercentage(n, d) { return d ? (100 * n / d).toFixed(1) : '0.0'; }
             vqcCrossDiv.innerHTML =
                 '<table class="stats-table" style="margin-top:0.35rem">' +
                 '<tr><th>Metric</th><th>Variants Passing in All Ancestries</th><th>Percent</th></tr>' +
-                '<tr><td>Call rate (≥0.98)</td><td>' + vqcCross.n_call_rate_pass + '</td><td>' + vqcPct(vqcCross.n_call_rate_pass, vqcCross.n_variants) + '%</td></tr>' +
-                '<tr><td>HWE (p≥1e-6)</td><td>' + vqcCross.n_hwe_pass + '</td><td>' + vqcPct(vqcCross.n_hwe_pass, vqcCross.n_variants) + '%</td></tr>' +
-                '<tr><td>MAF (≥0.01)</td><td>' + vqcCross.n_maf_pass + '</td><td>' + vqcPct(vqcCross.n_maf_pass, vqcCross.n_variants) + '%</td></tr>' +
-                '<tr><td><strong>All metrics</strong></td><td><strong>' + vqcCross.n_qc_pass + '</strong></td><td><strong>' + vqcPct(vqcCross.n_qc_pass, vqcCross.n_variants) + '%</strong></td></tr>' +
+                '<tr><td>Call rate (≥0.98)</td><td>' + vqcCross.n_call_rate_pass + '</td><td>' + formatPercentage(vqcCross.n_call_rate_pass, vqcCross.n_variants) + '%</td></tr>' +
+                '<tr><td>HWE (p≥1e-6)</td><td>' + vqcCross.n_hwe_pass + '</td><td>' + formatPercentage(vqcCross.n_hwe_pass, vqcCross.n_variants) + '%</td></tr>' +
+                '<tr><td>MAF (≥0.01)</td><td>' + vqcCross.n_maf_pass + '</td><td>' + formatPercentage(vqcCross.n_maf_pass, vqcCross.n_variants) + '%</td></tr>' +
+                '<tr><td><strong>All metrics</strong></td><td><strong>' + vqcCross.n_qc_pass + '</strong></td><td><strong>' + formatPercentage(vqcCross.n_qc_pass, vqcCross.n_variants) + '%</strong></td></tr>' +
                 '</table>' +
                 '<div style="margin-top:0.5rem;color:#64748b">Total variants evaluated: ' + vqcCross.n_variants + '</div>';
         }
         Object.keys(vqcData).forEach(function(group) {
-            if (group.charAt(0) === '_') return;
+            if (group.startsWith('_')) return;
             var gd = vqcData[group];
             var label = group === 'all' ? 'All Samples' : group;
 
