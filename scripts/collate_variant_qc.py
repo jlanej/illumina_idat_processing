@@ -5,7 +5,9 @@ collate_variant_qc.py
 Collate per-variant QC metrics from the full cohort and ancestry-specific
 subsets into a single unified TSV file. Each variant has columns for
 call rate, HWE p-value, and MAF from each ancestry group alongside the
-full-cohort values.
+full-cohort values. The output also includes cross-ancestry pass flags
+indicating whether each variant passes call-rate/HWE/MAF thresholds in
+all ancestry subsets that were run, plus an overall pass flag.
 
 This enables analysts to compare variant quality across ancestry strata,
 which is essential because HWE tests assume panmixia and can produce
@@ -22,6 +24,17 @@ Usage:
 import argparse
 import os
 import sys
+
+CALL_RATE_THRESHOLD = 0.98
+HWE_P_THRESHOLD = 1e-6
+MAF_THRESHOLD = 0.01
+
+
+def _safe_float(val):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
 def read_plink2_vmiss(filepath):
@@ -164,6 +177,12 @@ def main():
             f'{anc}_hwe_p',
             f'{anc}_maf',
         ])
+    columns.extend([
+        'all_ancestries_call_rate_pass',
+        'all_ancestries_hwe_pass',
+        'all_ancestries_maf_pass',
+        'all_ancestries_qc_pass',
+    ])
 
     # Write collated output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -185,6 +204,28 @@ def main():
                     vd.get('hwe_p', 'NA'),
                     vd.get('maf', 'NA'),
                 ])
+
+            if ancestries_sorted:
+                cr_pass = True
+                hwe_pass = True
+                maf_pass = True
+                for anc in ancestries_sorted:
+                    anc_variant = ancestry_data.get(anc, {}).get(vid, {})
+                    cr_val = _safe_float(anc_variant.get('call_rate'))
+                    hwe_val = _safe_float(anc_variant.get('hwe_p'))
+                    maf_val = _safe_float(anc_variant.get('maf'))
+                    cr_pass = cr_pass and cr_val is not None and cr_val >= CALL_RATE_THRESHOLD
+                    hwe_pass = hwe_pass and hwe_val is not None and hwe_val >= HWE_P_THRESHOLD
+                    maf_pass = maf_pass and maf_val is not None and maf_val >= MAF_THRESHOLD
+                all_qc_pass = cr_pass and hwe_pass and maf_pass
+                row.extend([
+                    '1' if cr_pass else '0',
+                    '1' if hwe_pass else '0',
+                    '1' if maf_pass else '0',
+                    '1' if all_qc_pass else '0',
+                ])
+            else:
+                row.extend(['NA', 'NA', 'NA', 'NA'])
             f.write('\t'.join(row) + '\n')
 
     print(f"Collated variant QC: {args.output}")
