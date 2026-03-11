@@ -1006,6 +1006,8 @@ def _bin_values(values, bin_width, lo, hi):
     """
     if not values:
         return {"edges": [], "counts": []}
+    if hi <= lo:
+        return {"edges": [lo], "counts": [len(values)]}
     import math as _math
     n_bins = max(1, int(_math.ceil((hi - lo) / bin_width)))
     counts = [0] * n_bins
@@ -2327,7 +2329,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 traces.push({
                     x: hist.edges, y: hist.counts, type: 'bar', name: groupLabel(group),
                     width: width, offset: 0,
-                    marker: {color: color, opacity: 0.55, line: {color: color, width: 0.5}},
+                    marker: {color: color, opacity: 0.55, line: {color: 'white', width: 0.5}},
                     hovertemplate: hoverPrefix + ': %{x}<br>Count: %{y}<extra>' + groupLabel(group) + '</extra>'
                 });
             });
