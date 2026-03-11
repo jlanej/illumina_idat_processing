@@ -222,6 +222,7 @@ def safe_float(val, default=None):
         return default
     try:
         parsed = float(val)
+        # JSON.parse rejects NaN/Infinity tokens, so treat non-finite values as missing.
         if not math.isfinite(parsed):
             return default
         return parsed

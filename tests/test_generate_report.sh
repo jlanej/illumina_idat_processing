@@ -803,12 +803,18 @@ test_file = os.path.join(tmp_dir, 'collated_nan_test.tsv')
 with open(test_file, 'w') as f:
     f.write('variant_id\tall_call_rate\tall_hwe_p\tall_maf\tEUR_call_rate\tEUR_hwe_p\tEUR_maf\n')
     f.write('rs1\tnan\t0.5\t0.1\t0.99\t0.4\t0.1\n')
+    f.write('rs2\t0.98\tinf\t0.2\t0.97\t-inf\t0.2\n')
+    f.write('rs3\t0.97\t0.3\tinf\t0.96\t0.3\t-inf\n')
 
 payload_text = _prepare_collated_vqc_json(test_file)
-assert 'NaN' not in payload_text and 'Infinity' not in payload_text, payload_text
+assert 'NaN' not in payload_text and 'Infinity' not in payload_text and '-Infinity' not in payload_text, payload_text
 payload = json.loads(payload_text)
-assert payload['all']['n_cr'] == 0, payload
-assert payload['EUR']['n_cr'] == 1, payload
+assert payload['all']['n_cr'] == 2, payload
+assert payload['all']['n_hwe'] == 2, payload
+assert payload['all']['n_maf'] == 2, payload
+assert payload['EUR']['n_cr'] == 3, payload
+assert payload['EUR']['n_hwe'] == 2, payload
+assert payload['EUR']['n_maf'] == 2, payload
 PY
 then
     echo "  PASS: Collated VQC JSON payload is valid JSON when TSV contains NaN/Inf tokens"
