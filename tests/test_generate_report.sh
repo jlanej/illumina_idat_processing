@@ -574,6 +574,21 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 18ea: Peddy before Ancestry PCA in nav/section order ---
+echo "--- Test 18ea: Peddy before Ancestry PCA order ---"
+peddy_nav_line="$(grep -n 'href="#peddy"' "${TMP_DIR}/pipeline_report.html" | head -n1 | cut -d: -f1 || true)"
+pca_nav_line="$(grep -n 'href="#pca"' "${TMP_DIR}/pipeline_report.html" | head -n1 | cut -d: -f1 || true)"
+peddy_section_line="$(grep -n '<section id="peddy">' "${TMP_DIR}/pipeline_report.html" | head -n1 | cut -d: -f1 || true)"
+pca_section_line="$(grep -n '<section id="pca">' "${TMP_DIR}/pipeline_report.html" | head -n1 | cut -d: -f1 || true)"
+if [[ -n "${peddy_nav_line}" && -n "${pca_nav_line}" && -n "${peddy_section_line}" && -n "${pca_section_line}" && \
+      "${peddy_nav_line}" -lt "${pca_nav_line}" && "${peddy_section_line}" -lt "${pca_section_line}" ]]; then
+    echo "  PASS: Report orders peddy before ancestry PCA in nav and sections"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Report order should be peddy before ancestry PCA"
+    (( FAIL++ )) || true
+fi
+
 # --- Test 18f: Peddy citation ---
 echo "--- Test 18f: Peddy citation ---"
 if grep -q 'Pedersen and Quinlan' "${TMP_DIR}/pipeline_report.html" && \

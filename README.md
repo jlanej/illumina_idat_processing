@@ -16,9 +16,9 @@ The pipeline runs in ten phases:
 
 4. **Sex Check**: A scatter plot of median chrX vs chrY LRR per sample, colored by predicted sex, is generated for visual QC of sex concordance.
 
-5. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
+5. **Peddy QC** *(optional — skip with `--skip-peddy`)*: Run [peddy](https://github.com/brentp/peddy) for automated pedigree/sex/ancestry quality control. Peddy validates sex from genotypes, predicts ancestry by projecting onto 1000 Genomes principal components, and checks relatedness between all sample pairs. If a pedigree file (`--ped-file`) is provided it is validated; otherwise a minimal PED (unrelated singletons) is generated. A final pedigree incorporating peddy's discovered relationships is produced. Peddy's sample-level metrics (ancestry prediction, predicted sex, heterozygosity, PCs) are merged into the compiled sample sheet with a `peddy_` prefix. **Genome-aware**: when the pipeline genome is not GRCh38 (e.g. T2T-CHM13), `bcftools +liftover` is used to convert variant coordinates to GRCh38, variant IDs are set to `CHROM:POS:REF:ALT` to match peddy's GRCH38 sites list, and only matching sites are retained — producing a small, correctly-coordinated VCF for peddy regardless of the source reference build.
 
-6. **Peddy QC** *(optional — skip with `--skip-peddy`)*: Run [peddy](https://github.com/brentp/peddy) for automated pedigree/sex/ancestry quality control. Peddy validates sex from genotypes, predicts ancestry by projecting onto 1000 Genomes principal components, and checks relatedness between all sample pairs. If a pedigree file (`--ped-file`) is provided it is validated; otherwise a minimal PED (unrelated singletons) is generated. A final pedigree incorporating peddy's discovered relationships is produced. Peddy's sample-level metrics (ancestry prediction, predicted sex, heterozygosity, PCs) are merged into the compiled sample sheet with a `peddy_` prefix. **Genome-aware**: when the pipeline genome is not GRCh38 (e.g. T2T-CHM13), `bcftools +liftover` is used to convert variant coordinates to GRCh38, variant IDs are set to `CHROM:POS:REF:ALT` to match peddy's GRCH38 sites list, and only matching sites are retained — producing a small, correctly-coordinated VCF for peddy regardless of the source reference build.
+6. **Ancestry PCA**: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and samples. PCs are then projected to all samples. By default, 20 PCs are computed.
 
 7. **Ancestry-Stratified QC**: Using peddy's ancestry predictions, the pipeline performs ancestry-stratified variant QC and PCA for each ancestry group meeting a minimum sample threshold (default: 100 samples, configurable via `--min-ancestry-samples`). For each qualifying ancestry group (e.g., EUR, AFR, EAS):
    - The VCF is subset to samples of that ancestry
@@ -281,11 +281,6 @@ output/
 ├── sex_check/
 │   ├── sex_check_chrXY_lrr.png     # Median chrX vs chrY LRR by predicted sex
 │   └── sex_check_chrXY_lrr.tsv     # Per-sample median chrX/chrY LRR values used in report
-├── ancestry_pca/
-│   ├── pca_projections.tsv          # All-sample PC projections (20 PCs)
-│   ├── pca_eigenvalues.txt          # PCA eigenvalues
-│   ├── pca_qc_samples.txt           # QC'd sample set used for PCA
-│   └── qc_summary.txt               # QC filtering summary
 ├── peddy/                           # Peddy pedigree/sex/ancestry QC
 │   ├── peddy.het_check.csv          # Ancestry prediction, het ratio, PCs per sample
 │   ├── peddy.sex_check.csv          # Sex check: predicted vs PED sex per sample
@@ -294,6 +289,11 @@ output/
 │   ├── peddy_final.ped              # Final pedigree with discovered relationships
 │   ├── peddy.html                   # Peddy interactive report
 │   └── peddy.background_pca.json    # Ancestry PCA projection data
+├── ancestry_pca/
+│   ├── pca_projections.tsv          # All-sample PC projections (20 PCs)
+│   ├── pca_eigenvalues.txt          # PCA eigenvalues
+│   ├── pca_qc_samples.txt           # QC'd sample set used for PCA
+│   └── qc_summary.txt               # QC filtering summary
 ├── ancestry_stratified_qc/          # Ancestry-stratified QC (if peddy ran)
 │   ├── ancestry_assignments.tsv     # Sample-to-ancestry mapping from peddy
 │   ├── collated_variant_qc.tsv      # Unified variant QC across all ancestries
