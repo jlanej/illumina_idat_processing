@@ -31,6 +31,7 @@ import io
 import json
 import math
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -1002,71 +1003,136 @@ def _prepare_collated_vqc_json(collated_vqc_file):
     if not os.path.exists(collated_vqc_file):
         return '{}'
 
-    _, rows = read_tsv(collated_vqc_file)
-    if not rows:
-        return '{}'
+    MAX_PLOT_VALUES = 5000
+    rng = random.Random(42)  # deterministic sampling for reproducible reports/tests
 
-    # Identify ancestry prefixes from headers
-    header = list(rows[0].keys()) if rows else []
-    prefixes = set()
-    for col in header:
-        if col.endswith('_call_rate') and col != 'all_call_rate':
-            prefixes.add(col.replace('_call_rate', ''))
-    groups = ['all'] + sorted(prefixes)
+    def _new_group_stats():
+        return {
+            'n_cr': 0,
+            'n_hwe': 0,
+            'n_maf': 0,
+            'sum_cr': 0.0,
+            'sum_maf': 0.0,
+            'n_miss_gt5pct': 0,
+            'n_miss_gt2pct': 0,
+            'n_miss_gt1pct': 0,
+            'n_hwe_lt1e6': 0,
+            'n_hwe_lt1e10': 0,
+            'n_hwe_lt1e20': 0,
+            'n_mono': 0,
+            'n_rare': 0,
+            'n_low_freq': 0,
+            'n_common': 0,
+            'cr_seen': 0,
+            'hwe_seen': 0,
+            'maf_seen': 0,
+            'cr_values': [],
+            'hwe_values': [],
+            'maf_values': [],
+        }
+
+    def _reservoir_append(values, seen_key, stats, val):
+        """Reservoir sample to avoid first-N bias in large sorted TSVs."""
+        stats[seen_key] += 1
+        seen = stats[seen_key]
+        if len(values) < MAX_PLOT_VALUES:
+            values.append(val)
+            return
+        j = rng.randrange(seen)
+        if j < MAX_PLOT_VALUES:
+            values[j] = val
+
+    with open(collated_vqc_file) as f:
+        header_line = f.readline().strip()
+        if not header_line:
+            return '{}'
+        header = header_line.split('\t')
+
+        # Identify ancestry prefixes from header columns.
+        prefixes = set()
+        for col in header:
+            if col.endswith('_call_rate') and col != 'all_call_rate':
+                prefixes.add(col.replace('_call_rate', ''))
+        groups = ['all'] + sorted(prefixes)
+
+        group_stats = {g: _new_group_stats() for g in groups}
+
+        for line in f:
+            fields = line.rstrip('\n').split('\t')
+            row = {}
+            for i, col in enumerate(header):
+                row[col] = fields[i] if i < len(fields) else 'NA'
+
+            for group in groups:
+                stats = group_stats[group]
+                cr_col = f'{group}_call_rate'
+                hwe_col = f'{group}_hwe_p'
+                maf_col = f'{group}_maf'
+
+                cr_val = safe_float(row.get(cr_col))
+                if cr_val is not None:
+                    stats['n_cr'] += 1
+                    stats['sum_cr'] += cr_val
+                    if cr_val < 0.95:
+                        stats['n_miss_gt5pct'] += 1
+                    if cr_val < 0.98:
+                        stats['n_miss_gt2pct'] += 1
+                    if cr_val < 0.99:
+                        stats['n_miss_gt1pct'] += 1
+                    _reservoir_append(stats['cr_values'], 'cr_seen', stats, cr_val)
+
+                hwe_val = safe_float(row.get(hwe_col))
+                if hwe_val is not None:
+                    stats['n_hwe'] += 1
+                    if hwe_val < 1e-6:
+                        stats['n_hwe_lt1e6'] += 1
+                    if hwe_val < 1e-10:
+                        stats['n_hwe_lt1e10'] += 1
+                    if hwe_val < 1e-20:
+                        stats['n_hwe_lt1e20'] += 1
+                    _reservoir_append(stats['hwe_values'], 'hwe_seen', stats, hwe_val)
+
+                maf_val = safe_float(row.get(maf_col))
+                if maf_val is not None:
+                    stats['n_maf'] += 1
+                    stats['sum_maf'] += maf_val
+                    if maf_val < 0.001:
+                        stats['n_mono'] += 1
+                    if maf_val < 0.01:
+                        stats['n_rare'] += 1
+                    if 0.01 <= maf_val < 0.05:
+                        stats['n_low_freq'] += 1
+                    if maf_val >= 0.05:
+                        stats['n_common'] += 1
+                    _reservoir_append(stats['maf_values'], 'maf_seen', stats, maf_val)
 
     result = {}
     for group in groups:
-        cr_col = f'{group}_call_rate'
-        hwe_col = f'{group}_hwe_p'
-        maf_col = f'{group}_maf'
-
-        cr_vals = [safe_float(r.get(cr_col)) for r in rows
-                   if safe_float(r.get(cr_col)) is not None]
-        hwe_vals = [safe_float(r.get(hwe_col)) for r in rows
-                    if safe_float(r.get(hwe_col)) is not None]
-        maf_vals = [safe_float(r.get(maf_col)) for r in rows
-                    if safe_float(r.get(maf_col)) is not None]
-
-        n_variants = len(cr_vals) or len(hwe_vals) or len(maf_vals)
+        stats = group_stats[group]
+        n_variants = stats['n_cr'] or stats['n_hwe'] or stats['n_maf']
         if n_variants == 0:
             continue
 
-        # Missingness thresholds
-        n_miss_5 = sum(1 for v in cr_vals if v < 0.95)
-        n_miss_2 = sum(1 for v in cr_vals if v < 0.98)
-        n_miss_1 = sum(1 for v in cr_vals if v < 0.99)
-
-        # HWE thresholds
-        n_hwe_6 = sum(1 for v in hwe_vals if v < 1e-6)
-        n_hwe_10 = sum(1 for v in hwe_vals if v < 1e-10)
-        n_hwe_20 = sum(1 for v in hwe_vals if v < 1e-20)
-
-        # MAF distribution
-        n_mono = sum(1 for v in maf_vals if v < 0.001)
-        n_rare = sum(1 for v in maf_vals if v < 0.01)
-        n_low = sum(1 for v in maf_vals if 0.01 <= v < 0.05)
-        n_common = sum(1 for v in maf_vals if v >= 0.05)
-
         result[group] = {
             'n_variants': n_variants,
-            'n_cr': len(cr_vals),
-            'n_hwe': len(hwe_vals),
-            'n_maf': len(maf_vals),
-            'mean_cr': round(sum(cr_vals) / len(cr_vals), 6) if cr_vals else None,
-            'n_miss_gt5pct': n_miss_5,
-            'n_miss_gt2pct': n_miss_2,
-            'n_miss_gt1pct': n_miss_1,
-            'n_hwe_lt1e6': n_hwe_6,
-            'n_hwe_lt1e10': n_hwe_10,
-            'n_hwe_lt1e20': n_hwe_20,
-            'n_mono': n_mono,
-            'n_rare': n_rare,
-            'n_low_freq': n_low,
-            'n_common': n_common,
-            'mean_maf': round(sum(maf_vals) / len(maf_vals), 6) if maf_vals else None,
-            'cr_values': [round(v, 6) for v in cr_vals[:5000]],
-            'hwe_values': [round(v, 10) for v in hwe_vals[:5000]],
-            'maf_values': [round(v, 6) for v in maf_vals[:5000]],
+            'n_cr': stats['n_cr'],
+            'n_hwe': stats['n_hwe'],
+            'n_maf': stats['n_maf'],
+            'mean_cr': round(stats['sum_cr'] / stats['n_cr'], 6) if stats['n_cr'] else None,
+            'n_miss_gt5pct': stats['n_miss_gt5pct'],
+            'n_miss_gt2pct': stats['n_miss_gt2pct'],
+            'n_miss_gt1pct': stats['n_miss_gt1pct'],
+            'n_hwe_lt1e6': stats['n_hwe_lt1e6'],
+            'n_hwe_lt1e10': stats['n_hwe_lt1e10'],
+            'n_hwe_lt1e20': stats['n_hwe_lt1e20'],
+            'n_mono': stats['n_mono'],
+            'n_rare': stats['n_rare'],
+            'n_low_freq': stats['n_low_freq'],
+            'n_common': stats['n_common'],
+            'mean_maf': round(stats['sum_maf'] / stats['n_maf'], 6) if stats['n_maf'] else None,
+            'cr_values': [round(v, 6) for v in stats['cr_values']],
+            'hwe_values': [round(v, 10) for v in stats['hwe_values']],
+            'maf_values': [round(v, 6) for v in stats['maf_values']],
         }
 
     return json.dumps(result)

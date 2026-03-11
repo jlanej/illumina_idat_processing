@@ -695,6 +695,43 @@ for art in collated_variant_qc.tsv ancestry_stratified_summary.txt; do
     fi
 done
 
+# --- Test 19i: Collated VQC downsampling is not first-N biased ---
+echo "--- Test 19i: Unbiased collated VQC histogram sampling ---"
+if REPO_DIR="${REPO_DIR}" TMP_DIR="${TMP_DIR}" python3 - <<'PY'
+import json
+import os
+import sys
+
+repo_dir = os.environ['REPO_DIR']
+tmp_dir = os.environ['TMP_DIR']
+sys.path.insert(0, os.path.join(repo_dir, 'scripts'))
+from generate_report import _prepare_collated_vqc_json  # noqa: E402
+
+test_file = os.path.join(tmp_dir, 'collated_bias_test.tsv')
+with open(test_file, 'w') as f:
+    f.write('variant_id\tall_call_rate\tall_hwe_p\tall_maf\n')
+    # Sorted-like input where the "first half" has only low MAF and second half high MAF.
+    # A naive [:5000] slice would contain no high-MAF values.
+    for i in range(10000):
+        maf = 0.0 if i < 5000 else 0.5
+        f.write(f'rs{i:06d}\t0.99\t0.5\t{maf}\n')
+
+payload = json.loads(_prepare_collated_vqc_json(test_file))
+vals = payload['all']['maf_values']
+assert len(vals) <= 5000, len(vals)
+high_maf_count = sum(1 for v in vals if v >= 0.5)
+# Input has an exact 50/50 split (0.0 vs 0.5). For unbiased sampling the
+# 5000-value reservoir should retain substantial representation from both halves.
+assert 2000 < high_maf_count < 3000, high_maf_count
+PY
+then
+    echo "  PASS: Sampling includes genome-wide tail values (not first-N slice)"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sampling appears first-N biased"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
