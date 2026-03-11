@@ -455,32 +455,6 @@ fi
 echo ""
 
 # ---------------------------------------------------------------
-# Ancestry PCA: stringent QC + PCA computation
-# ---------------------------------------------------------------
-PCA_DIR="${OUTPUT_DIR}/ancestry_pca"
-
-echo "======================================================"
-echo "  Running Ancestry PCA"
-echo "======================================================"
-echo ""
-
-if [[ -f "${FINAL_VCF}" ]]; then
-    PCA_ARGS=(
-        --vcf "${FINAL_VCF}"
-        --output-dir "${PCA_DIR}"
-        --threads "${THREADS}"
-    )
-    if [[ "${FORCE}" == "true" ]]; then
-        PCA_ARGS+=(--force)
-    fi
-
-    bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
-else
-    echo "Note: Skipping ancestry PCA (final VCF not available)."
-fi
-echo ""
-
-# ---------------------------------------------------------------
 # Peddy: pedigree/sex/ancestry QC
 # ---------------------------------------------------------------
 PEDDY_DIR="${OUTPUT_DIR}/peddy"
@@ -521,6 +495,32 @@ else
     else
         echo "Note: Skipping peddy (final VCF not available)."
     fi
+fi
+echo ""
+
+# ---------------------------------------------------------------
+# Ancestry PCA: stringent QC + PCA computation
+# ---------------------------------------------------------------
+PCA_DIR="${OUTPUT_DIR}/ancestry_pca"
+
+echo "======================================================"
+echo "  Running Ancestry PCA"
+echo "======================================================"
+echo ""
+
+if [[ -f "${FINAL_VCF}" ]]; then
+    PCA_ARGS=(
+        --vcf "${FINAL_VCF}"
+        --output-dir "${PCA_DIR}"
+        --threads "${THREADS}"
+    )
+    if [[ "${FORCE}" == "true" ]]; then
+        PCA_ARGS+=(--force)
+    fi
+
+    bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
+else
+    echo "Note: Skipping ancestry PCA (final VCF not available)."
 fi
 echo ""
 
@@ -714,14 +714,14 @@ echo "  QC metrics:       ${FINAL_QC}"
 if [[ -f "${COMPILED_SHEET}" ]]; then
     echo "  Sample sheet:     ${COMPILED_SHEET}"
 fi
-if [[ -d "${PCA_DIR}" ]]; then
-    echo "  Ancestry PCA:     ${PCA_DIR}/"
-fi
 if [[ -d "${SEX_CHECK_DIR}" ]]; then
     echo "  Sex check:        ${SEX_CHECK_DIR}/"
 fi
 if [[ -d "${PEDDY_DIR}" ]]; then
     echo "  Peddy QC:         ${PEDDY_DIR}/"
+fi
+if [[ -d "${PCA_DIR}" ]]; then
+    echo "  Ancestry PCA:     ${PCA_DIR}/"
 fi
 if [[ -d "${ANCESTRY_QC_DIR}" ]]; then
     echo "  Ancestry QC:      ${ANCESTRY_QC_DIR}/"

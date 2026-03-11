@@ -555,18 +555,14 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"All samples were then re-genotyped using the study-specific clusters, "
         f"with additional BAF/LRR median adjustment (--adjust-clusters). "
         f"\n\n"
-        f"Variant-level QC included per-variant missingness, Hardy-Weinberg "
-        f"equilibrium tests (mid-p adjustment), allele frequency estimation, "
-        f"per-sample inbreeding coefficients (F statistic), and transition/"
-        f"transversion ratio computation ({plink_cite}). "
+        f"Sample ancestry was predicted using peddy (Pedersen and Quinlan, 2017), "
+        f"which projects samples onto 1000 Genomes principal components for "
+        f"ancestry classification. "
         f"Ancestry principal components were computed using stringent variant QC "
         f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning "
         f"(window = 1000 kb, step = 1, r² < 0.1), and flashpca2. "
         f"This stricter PCA MAF threshold was used to improve loading stability. "
-        f"\n\n"
-        f"Sample ancestry was predicted using peddy (Pedersen and Quinlan, 2017), "
-        f"which projects samples onto 1000 Genomes principal components for "
-        f"ancestry classification. For each ancestry group with sufficient "
+        f"For each ancestry group with sufficient "
         f"sample size (≥ 100 by default), ancestry-stratified variant QC "
         f"(missingness, HWE, allele frequency) was performed to avoid inflated "
         f"HWE deviation due to the Wahlund effect in mixed-ancestry samples "
@@ -574,6 +570,10 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"resolve finer population structure masked in multi-ancestry PCA "
         f"(Peterson et al., 2019). Ancestry-specific PCs and variant QC "
         f"metrics are collated alongside the full-cohort results. "
+        f"Variant-level QC included per-variant missingness, Hardy-Weinberg "
+        f"equilibrium tests (mid-p adjustment), allele frequency estimation, "
+        f"per-sample inbreeding coefficients (F statistic), and transition/"
+        f"transversion ratio computation ({plink_cite}). "
         f"After processing, the mean call rate was {cr:.4f} and the mean "
         f"LRR SD was {sd:.4f}."
     )
@@ -2406,8 +2406,8 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         <a href="#comparison">Stage Comparison</a>
         <a href="#variant-qc">Variant QC</a>
         <a href="#sex-check">Sex Check</a>
-        <a href="#pca">Ancestry PCA</a>
         <a href="#peddy">Peddy QC</a>
+        <a href="#pca">Ancestry PCA</a>
         <a href="#realignment">Realignment</a>
         <a href="#diagnostics">Diagnostics</a>
         <a href="#citations">Citations</a>
@@ -2647,6 +2647,26 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         </noscript>
     </section>
 
+    <section id="peddy">
+        <h2>🔬 Peddy QC (Pedigree/Sex/Ancestry)</h2>
+        <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.75rem">
+            Peddy validates sex, ancestry, and relatedness from VCF genotypes.
+            Ancestry predictions are colored by predicted population (EUR, AFR, EAS, AMR, SAS).
+            <strong>Note:</strong> Peddy PCs are projected onto the 1000 Genomes reference panel
+            and are in a separate coordinate space from the pipeline&rsquo;s own PCA &mdash;
+            the two are not directly comparable.
+        </p>
+        <div class="plot-grid">
+            <div class="card"><div id="plot-peddy-pca12" class="plot-box"></div></div>
+            <div class="card"><div id="plot-peddy-pca34" class="plot-box"></div></div>
+        </div>
+        <div class="plot-controls-note">
+            Peddy ancestry PCA projections colored by predicted population (peddy&rsquo;s own coordinate space).
+            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section above to recolor
+            the pipeline&rsquo;s own samples by their peddy ancestry predictions without mixing coordinate spaces.
+        </div>
+    </section>
+
     <section id="pca">
         <h2>🌍 Ancestry PCA</h2>
         <div class="plot-controls">
@@ -2686,26 +2706,6 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             {_fig_block('pca', 'Principal Components (colored by predicted sex)')}
         </noscript>
         {_pre_block(pca_summary, 'PCA QC Summary')}
-    </section>
-
-    <section id="peddy">
-        <h2>🔬 Peddy QC (Pedigree/Sex/Ancestry)</h2>
-        <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.75rem">
-            Peddy validates sex, ancestry, and relatedness from VCF genotypes.
-            Ancestry predictions are colored by predicted population (EUR, AFR, EAS, AMR, SAS).
-            <strong>Note:</strong> Peddy PCs are projected onto the 1000 Genomes reference panel
-            and are in a separate coordinate space from the pipeline&rsquo;s own PCA &mdash;
-            the two are not directly comparable.
-        </p>
-        <div class="plot-grid">
-            <div class="card"><div id="plot-peddy-pca12" class="plot-box"></div></div>
-            <div class="card"><div id="plot-peddy-pca34" class="plot-box"></div></div>
-        </div>
-        <div class="plot-controls-note">
-            Peddy ancestry PCA projections colored by predicted population (peddy&rsquo;s own coordinate space).
-            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section above to recolor
-            the pipeline&rsquo;s own samples by their peddy ancestry predictions without mixing coordinate spaces.
-        </div>
     </section>
 
     <section id="realignment">
