@@ -2662,7 +2662,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         </div>
         <div class="plot-controls-note">
             Peddy ancestry PCA projections colored by predicted population (peddy&rsquo;s own coordinate space).
-            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section above to recolor
+            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section to recolor
             the pipeline&rsquo;s own samples by their peddy ancestry predictions without mixing coordinate spaces.
         </div>
     </section>
