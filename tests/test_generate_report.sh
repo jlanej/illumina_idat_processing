@@ -114,6 +114,31 @@ S002	S002	0	0	2	-9
 S003	S003	0	0	1	-9
 EOF
 
+# --- Create mock ancestry-stratified QC output ---
+mkdir -p "${TMP_DIR}/ancestry_stratified_qc/EUR/variant_qc" \
+         "${TMP_DIR}/ancestry_stratified_qc/AFR/variant_qc"
+
+cat > "${TMP_DIR}/ancestry_stratified_qc/EUR/variant_qc/variant_qc_summary.txt" << 'EOF'
+Variant QC summary (EUR subset, mock)
+EOF
+
+cat > "${TMP_DIR}/ancestry_stratified_qc/AFR/variant_qc/variant_qc_summary.txt" << 'EOF'
+Variant QC summary (AFR subset, mock)
+EOF
+
+cat > "${TMP_DIR}/ancestry_stratified_qc/ancestry_stratified_summary.txt" << 'EOF'
+Ancestry-Stratified QC Summary (mock)
+EUR: 1 sample
+AFR: 1 sample
+EOF
+
+cat > "${TMP_DIR}/ancestry_stratified_qc/collated_variant_qc.tsv" << 'EOF'
+variant_id	all_call_rate	all_hwe_p	all_maf	AFR_call_rate	AFR_hwe_p	AFR_maf	EUR_call_rate	EUR_hwe_p	EUR_maf
+rs100000	0.985	1.2e-03	0.15	0.98	2.5e-04	0.12	0.99	5.1e-02	0.18
+rs100001	0.992	4.5e-01	0.32	0.99	3.2e-01	0.28	0.99	6.7e-01	0.35
+rs100002	0.978	8.9e-08	0.05	0.96	1.1e-06	0.08	0.99	2.3e-01	0.03
+EOF
+
 # --- Test 1: Generate report ---
 echo "--- Test 1: Report generation ---"
 python3 "${REPO_DIR}/scripts/generate_report.py" --output-dir "${TMP_DIR}" >/dev/null 2>&1
@@ -580,6 +605,133 @@ if grep -q 'peddy-pcs-toggle' "${TMP_DIR}/pipeline_report.html" && \
     (( PASS++ )) || true
 else
     echo "  FAIL: Peddy PCs toggle button missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19: Ancestry-stratified variant QC tabs ---
+echo "--- Test 19: Ancestry-stratified variant QC tabs ---"
+if grep -q 'vqc-tab-bar' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'data-tab="vqc-all"' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Variant QC tab bar with 'All' tab present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Variant QC tab bar missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19b: Per-ancestry variant QC tabs ---
+echo "--- Test 19b: Per-ancestry variant QC tabs ---"
+for anc in EUR AFR; do
+    if grep -q "data-tab=\"vqc-${anc}\"" "${TMP_DIR}/pipeline_report.html"; then
+        echo "  PASS: Variant QC tab for ${anc} present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Variant QC tab for ${anc} missing"
+        (( FAIL++ )) || true
+    fi
+done
+
+# --- Test 19c: Collated variant QC JSON data ---
+echo "--- Test 19c: Collated variant QC JSON data ---"
+if grep -q 'collated-vqc-data' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Collated variant QC JSON block present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Collated variant QC JSON block missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19d: Variant QC plot containers per ancestry ---
+echo "--- Test 19d: Variant QC plot containers per ancestry ---"
+for anc in all EUR AFR; do
+    if grep -q "plot-vqc-cr-${anc}" "${TMP_DIR}/pipeline_report.html"; then
+        echo "  PASS: Variant QC call rate plot container for ${anc} present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Variant QC call rate plot container for ${anc} missing"
+        (( FAIL++ )) || true
+    fi
+done
+
+# --- Test 19e: Ancestry-stratified summary in report ---
+echo "--- Test 19e: Ancestry-stratified summary ---"
+if grep -q 'Ancestry-Stratified QC Summary' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Ancestry-stratified summary present in report"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Ancestry-stratified summary missing from report"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19f: Peterson et al. 2019 citation ---
+echo "--- Test 19f: Peterson citation ---"
+if grep -q 'Peterson' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Peterson et al. 2019 citation present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Peterson et al. 2019 citation missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19g: Methods text mentions ancestry-stratified QC ---
+echo "--- Test 19g: Methods text ancestry-stratified QC ---"
+if grep -q 'ancestry-stratified' "${TMP_DIR}/methods_text.txt"; then
+    echo "  PASS: Methods text mentions ancestry-stratified QC"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Methods text does not mention ancestry-stratified QC"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19h: Summary bundle includes collated variant QC ---
+echo "--- Test 19h: Summary artifacts for ancestry-stratified QC ---"
+for art in collated_variant_qc.tsv ancestry_stratified_summary.txt; do
+    if [[ -f "${TMP_DIR}/summary/${art}" ]]; then
+        echo "  PASS: Summary artifact '${art}' present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Summary artifact '${art}' missing"
+        (( FAIL++ )) || true
+    fi
+done
+
+# --- Test 19i: Collated VQC downsampling is not first-N biased ---
+echo "--- Test 19i: Unbiased collated VQC histogram sampling ---"
+if REPO_DIR="${REPO_DIR}" TMP_DIR="${TMP_DIR}" python3 - <<'PY'
+import json
+import os
+import sys
+
+repo_dir = os.environ['REPO_DIR']
+tmp_dir = os.environ['TMP_DIR']
+sys.path.insert(0, os.path.join(repo_dir, 'scripts'))
+from generate_report import _prepare_collated_vqc_json  # noqa: E402
+
+test_file = os.path.join(tmp_dir, 'collated_bias_test.tsv')
+with open(test_file, 'w') as f:
+    f.write('variant_id\tall_call_rate\tall_hwe_p\tall_maf\n')
+    # Sorted-like input where the "first half" has only low MAF and second half high MAF.
+    # A naive [:5000] slice would contain no high-MAF values.
+    for i in range(10000):
+        maf = 0.0 if i < 5000 else 0.5
+        f.write(f'rs{i:06d}\t0.99\t0.5\t{maf}\n')
+
+payload = json.loads(_prepare_collated_vqc_json(test_file))
+vals = payload['all']['maf_values']
+assert len(vals) <= 5000, len(vals)
+high_maf_count = sum(1 for v in vals if v >= 0.5)
+# Input has an exact 50/50 split (0.0 vs 0.5). For unbiased sampling the
+# 5000-value reservoir should retain substantial representation from both halves.
+# Allow a wide tolerance around the expected ~2500 high-MAF values.
+LOWER_BOUND = 2000
+UPPER_BOUND = 3000
+assert LOWER_BOUND < high_maf_count < UPPER_BOUND, high_maf_count
+PY
+then
+    echo "  PASS: Sampling includes genome-wide tail values (not first-N slice)"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sampling appears first-N biased"
     (( FAIL++ )) || true
 fi
 

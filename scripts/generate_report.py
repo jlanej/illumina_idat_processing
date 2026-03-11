@@ -31,6 +31,7 @@ import io
 import json
 import math
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,11 @@ GWAS_THRESHOLDS = {
     'maf_min': 0.01,
     'inbreeding_f_max': 0.05,
 }
+
+# Deterministic seed for bounded reservoir samples in large report payloads.
+# Keeps rendered histograms reproducible across runs/tests while avoiding
+# first-N bias from lexicographically sorted variant tables.
+COLLATED_VQC_SAMPLING_SEED = 42
 
 
 GWAS_METHODS_CITATIONS = [
@@ -135,6 +141,16 @@ GWAS_METHODS_CITATIONS = [
         'pipeline_application': (
             'Supports coordinate conversion from non-GRCh38 builds to GRCh38 '
             'for peddy site matching via bcftools +liftover.'
+        ),
+    },
+    {
+        'citation': 'Peterson et al. 2019, Am J Hum Genet 105(5):921-935',
+        'doi': '10.1016/j.ajhg.2019.09.022',
+        'cited_for': 'Within-ancestry PCA and ancestry-stratified QC',
+        'pipeline_application': (
+            'Supports ancestry-stratified variant QC and within-ancestry PCA '
+            'to resolve finer population structure and avoid Wahlund effect in '
+            'HWE testing across mixed-ancestry cohorts.'
         ),
     },
 ]
@@ -547,6 +563,17 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"(missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning "
         f"(window = 1000 kb, step = 1, r² < 0.1), and flashpca2. "
         f"This stricter PCA MAF threshold was used to improve loading stability. "
+        f"\n\n"
+        f"Sample ancestry was predicted using peddy (Pedersen and Quinlan, 2017), "
+        f"which projects samples onto 1000 Genomes principal components for "
+        f"ancestry classification. For each ancestry group with sufficient "
+        f"sample size (≥ 100 by default), ancestry-stratified variant QC "
+        f"(missingness, HWE, allele frequency) was performed to avoid inflated "
+        f"HWE deviation due to the Wahlund effect in mixed-ancestry samples "
+        f"(Anderson et al., 2010). Within-ancestry PCA was also computed to "
+        f"resolve finer population structure masked in multi-ancestry PCA "
+        f"(Peterson et al., 2019). Ancestry-specific PCs and variant QC "
+        f"metrics are collated alongside the full-cohort results. "
         f"After processing, the mean call rate was {cr:.4f} and the mean "
         f"LRR SD was {sd:.4f}."
     )
@@ -611,6 +638,23 @@ def generate_html_report(output_dir, genome=None):
         if os.path.exists(vqc_path):
             variant_qc_text = read_text(vqc_path)
             break
+
+    # Ancestry-stratified variant QC summaries
+    ancestry_vqc_texts = {}  # ancestry -> summary text
+    ancestry_qc_dir = os.path.join(output_dir, 'ancestry_stratified_qc')
+    ancestry_strat_summary = read_text(
+        os.path.join(ancestry_qc_dir, 'ancestry_stratified_summary.txt'))
+    if os.path.isdir(ancestry_qc_dir):
+        for entry in sorted(os.listdir(ancestry_qc_dir)):
+            entry_path = os.path.join(ancestry_qc_dir, entry)
+            if os.path.isdir(entry_path) and entry not in ('tmp',):
+                vqc_path = os.path.join(entry_path, 'variant_qc',
+                                        'variant_qc_summary.txt')
+                if os.path.exists(vqc_path):
+                    ancestry_vqc_texts[entry] = read_text(vqc_path)
+
+    # Collated variant QC (for data-driven plots)
+    collated_vqc_file = os.path.join(ancestry_qc_dir, 'collated_variant_qc.tsv')
 
     # Diagnostic report
     diag_text = read_text(os.path.join(output_dir, 'qc_diagnostic_report.txt'))
@@ -696,6 +740,7 @@ def generate_html_report(output_dir, genome=None):
     pca_json = _prepare_pca_json(pca_file, qc_rows) if os.path.exists(pca_file) else '[]'
     sex_check_json = _prepare_sex_check_json(sex_check_table)
     peddy_json = _prepare_peddy_json(peddy_dir)
+    collated_vqc_json = _prepare_collated_vqc_json(collated_vqc_file)
     html = _build_html(stats, stage1_stats,
                        figures, realign_text, comparison_text,
                        variant_qc_text, diag_text, methods_text,
@@ -703,6 +748,9 @@ def generate_html_report(output_dir, genome=None):
                        qc_rows=qc_rows, pca_json=pca_json,
                        sex_check_json=sex_check_json,
                        peddy_json=peddy_json,
+                       ancestry_vqc_texts=ancestry_vqc_texts,
+                       ancestry_strat_summary=ancestry_strat_summary,
+                       collated_vqc_json=collated_vqc_json,
                        mock_notice=mock_notice or '')
 
     report_path = os.path.join(output_dir, 'pipeline_report.html')
@@ -765,6 +813,10 @@ def _consolidate_summary_outputs(output_dir):
         (os.path.join('peddy', 'peddy.ped_check.csv'), 'peddy.ped_check.csv'),
         (os.path.join('peddy', 'peddy.peddy.ped'), 'peddy.peddy.ped'),
         (os.path.join('peddy', 'peddy_final.ped'), 'peddy_final.ped'),
+        (os.path.join('ancestry_stratified_qc', 'collated_variant_qc.tsv'),
+         'collated_variant_qc.tsv'),
+        (os.path.join('ancestry_stratified_qc', 'ancestry_stratified_summary.txt'),
+         'ancestry_stratified_summary.txt'),
     ]:
         src = os.path.join(output_dir, relpath)
         if os.path.isfile(src):
@@ -944,6 +996,151 @@ def _prepare_peddy_json(peddy_dir):
             'het_ratio': round(safe_float(row.get('het_ratio')) or 0, 6),
         })
     return json.dumps(points)
+
+
+def _prepare_collated_vqc_json(collated_vqc_file):
+    """Prepare collated variant QC data as JSON for interactive plots.
+
+    Returns JSON with per-ancestry summary statistics (count of variants
+    at various thresholds) rather than raw per-variant data, which would
+    be too large for embedding in HTML.
+    """
+    if not os.path.exists(collated_vqc_file):
+        return '{}'
+
+    MAX_PLOT_VALUES = 5000
+    rng = random.Random(COLLATED_VQC_SAMPLING_SEED)
+
+    def _new_group_stats():
+        return {
+            'n_cr': 0,
+            'n_hwe': 0,
+            'n_maf': 0,
+            'sum_cr': 0.0,
+            'sum_maf': 0.0,
+            'n_miss_gt5pct': 0,
+            'n_miss_gt2pct': 0,
+            'n_miss_gt1pct': 0,
+            'n_hwe_lt1e6': 0,
+            'n_hwe_lt1e10': 0,
+            'n_hwe_lt1e20': 0,
+            'n_mono': 0,
+            'n_rare': 0,
+            'n_low_freq': 0,
+            'n_common': 0,
+            'cr_seen': 0,
+            'hwe_seen': 0,
+            'maf_seen': 0,
+            'cr_values': [],
+            'hwe_values': [],
+            'maf_values': [],
+        }
+
+    def _reservoir_append(values, seen_key, stats, val):
+        """Reservoir sample to avoid first-N bias in large sorted TSVs."""
+        stats[seen_key] += 1
+        seen = stats[seen_key]
+        if len(values) < MAX_PLOT_VALUES:
+            values.append(val)
+            return
+        j = rng.randrange(seen)
+        if j < MAX_PLOT_VALUES:
+            values[j] = val
+
+    with open(collated_vqc_file) as f:
+        header_line = f.readline().strip()
+        if not header_line:
+            return '{}'
+        header = header_line.split('\t')
+
+        # Identify ancestry prefixes from header columns.
+        prefixes = set()
+        for col in header:
+            if col.endswith('_call_rate') and col != 'all_call_rate':
+                prefixes.add(col.replace('_call_rate', ''))
+        groups = ['all'] + sorted(prefixes)
+
+        group_stats = {g: _new_group_stats() for g in groups}
+
+        for line in f:
+            fields = line.rstrip('\n').split('\t')
+            row = {}
+            for i, col in enumerate(header):
+                row[col] = fields[i] if i < len(fields) else 'NA'
+
+            for group in groups:
+                stats = group_stats[group]
+                cr_col = f'{group}_call_rate'
+                hwe_col = f'{group}_hwe_p'
+                maf_col = f'{group}_maf'
+
+                cr_val = safe_float(row.get(cr_col))
+                if cr_val is not None:
+                    stats['n_cr'] += 1
+                    stats['sum_cr'] += cr_val
+                    if cr_val < 0.95:
+                        stats['n_miss_gt5pct'] += 1
+                    if cr_val < 0.98:
+                        stats['n_miss_gt2pct'] += 1
+                    if cr_val < 0.99:
+                        stats['n_miss_gt1pct'] += 1
+                    _reservoir_append(stats['cr_values'], 'cr_seen', stats, cr_val)
+
+                hwe_val = safe_float(row.get(hwe_col))
+                if hwe_val is not None:
+                    stats['n_hwe'] += 1
+                    if hwe_val < 1e-6:
+                        stats['n_hwe_lt1e6'] += 1
+                    if hwe_val < 1e-10:
+                        stats['n_hwe_lt1e10'] += 1
+                    if hwe_val < 1e-20:
+                        stats['n_hwe_lt1e20'] += 1
+                    _reservoir_append(stats['hwe_values'], 'hwe_seen', stats, hwe_val)
+
+                maf_val = safe_float(row.get(maf_col))
+                if maf_val is not None:
+                    stats['n_maf'] += 1
+                    stats['sum_maf'] += maf_val
+                    if maf_val < 0.001:
+                        stats['n_mono'] += 1
+                    if maf_val < 0.01:
+                        stats['n_rare'] += 1
+                    if 0.01 <= maf_val < 0.05:
+                        stats['n_low_freq'] += 1
+                    if maf_val >= 0.05:
+                        stats['n_common'] += 1
+                    _reservoir_append(stats['maf_values'], 'maf_seen', stats, maf_val)
+
+    result = {}
+    for group in groups:
+        stats = group_stats[group]
+        n_variants = stats['n_cr'] or stats['n_hwe'] or stats['n_maf']
+        if n_variants == 0:
+            continue
+
+        result[group] = {
+            'n_variants': n_variants,
+            'n_cr': stats['n_cr'],
+            'n_hwe': stats['n_hwe'],
+            'n_maf': stats['n_maf'],
+            'mean_cr': round(stats['sum_cr'] / stats['n_cr'], 6) if stats['n_cr'] else None,
+            'n_miss_gt5pct': stats['n_miss_gt5pct'],
+            'n_miss_gt2pct': stats['n_miss_gt2pct'],
+            'n_miss_gt1pct': stats['n_miss_gt1pct'],
+            'n_hwe_lt1e6': stats['n_hwe_lt1e6'],
+            'n_hwe_lt1e10': stats['n_hwe_lt1e10'],
+            'n_hwe_lt1e20': stats['n_hwe_lt1e20'],
+            'n_mono': stats['n_mono'],
+            'n_rare': stats['n_rare'],
+            'n_low_freq': stats['n_low_freq'],
+            'n_common': stats['n_common'],
+            'mean_maf': round(stats['sum_maf'] / stats['n_maf'], 6) if stats['n_maf'] else None,
+            'cr_values': [round(v, 6) for v in stats['cr_values']],
+            'hwe_values': [round(v, 10) for v in stats['hwe_values']],
+            'maf_values': [round(v, 6) for v in stats['maf_values']],
+        }
+
+    return json.dumps(result)
 
 
 def _get_report_css():
@@ -1194,6 +1391,21 @@ section h2 {
     align-self: center; flex-shrink: 0; margin: 0 0.15rem;
 }
 .plot-status { font-size: 0.75rem; color: var(--text-muted); }
+.vqc-tabs {
+    display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.75rem;
+}
+.vqc-tab {
+    border: 1px solid var(--border); border-radius: 6px 6px 0 0;
+    background: #f1f5f9; padding: 0.4rem 0.9rem; font-size: 0.82rem;
+    cursor: pointer; font-weight: 500; color: var(--text-muted);
+    transition: background 0.15s, color 0.15s;
+}
+.vqc-tab:hover { background: var(--primary-light); color: var(--primary); }
+.vqc-tab.active {
+    background: var(--primary); color: white; border-color: var(--primary);
+    font-weight: 600;
+}
+.vqc-panel { margin-bottom: 0.5rem; }
 """
 
 
@@ -1986,6 +2198,68 @@ document.addEventListener('DOMContentLoaded', function() {
             peddyPcaPlot('plot-peddy-pca34', 'pc3', 'pc4', 'Peddy Ancestry PCA: PC3 vs PC4');
         }
     }
+
+    /* ---- Variant QC tabs ---- */
+    var vqcTabs = document.querySelectorAll('.vqc-tab');
+    if (vqcTabs.length) {
+        vqcTabs.forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                vqcTabs.forEach(function(t) { t.classList.remove('active'); });
+                this.classList.add('active');
+                var panels = document.querySelectorAll('.vqc-panel');
+                panels.forEach(function(p) { p.style.display = 'none'; });
+                var target = document.getElementById(this.dataset.tab);
+                if (target) target.style.display = 'block';
+            });
+        });
+    }
+
+    /* ---- Variant QC interactive plots ---- */
+    var vqcEl = document.getElementById('collated-vqc-data');
+    if (vqcEl) {
+        var vqcData = {};
+        try { vqcData = JSON.parse(vqcEl.textContent || '{}'); } catch(e) {}
+        Object.keys(vqcData).forEach(function(group) {
+            var gd = vqcData[group];
+            var label = group === 'all' ? 'All Samples' : group;
+
+            /* Call rate histogram */
+            var crDiv = document.getElementById('plot-vqc-cr-' + group);
+            if (crDiv && gd.cr_values && gd.cr_values.length) {
+                Plotly.newPlot(crDiv, [{
+                    x: gd.cr_values, type: 'histogram',
+                    marker: {color: C.blue, opacity: 0.7, line: {color: 'white', width: 0.5}},
+                    hovertemplate: 'Call Rate: %{x}<br>Count: %{y}<extra></extra>'
+                }], Object.assign({}, baseLayout, {
+                    title: {text: 'Variant Call Rate (' + label + ')', font: {size: 13}},
+                    xaxis: {title: 'Call Rate', gridcolor: '#f1f5f9'},
+                    yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
+                    shapes: [{type:'line', x0:0.98, x1:0.98, y0:0, y1:1, yref:'paper',
+                              line:{color:C.thresh, width:1.5, dash:'dash'}}],
+                    annotations: [{x:0.98, y:1.04, yref:'paper', text:'\u2265 0.98',
+                                   showarrow:false, font:{size:10, color:C.thresh}}]
+                }), cfg);
+            }
+
+            /* MAF histogram */
+            var mafDiv = document.getElementById('plot-vqc-maf-' + group);
+            if (mafDiv && gd.maf_values && gd.maf_values.length) {
+                Plotly.newPlot(mafDiv, [{
+                    x: gd.maf_values, type: 'histogram',
+                    marker: {color: '#059669', opacity: 0.7, line: {color: 'white', width: 0.5}},
+                    hovertemplate: 'MAF: %{x}<br>Count: %{y}<extra></extra>'
+                }], Object.assign({}, baseLayout, {
+                    title: {text: 'MAF Distribution (' + label + ')', font: {size: 13}},
+                    xaxis: {title: 'Minor Allele Frequency', gridcolor: '#f1f5f9'},
+                    yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
+                    shapes: [{type:'line', x0:0.01, x1:0.01, y0:0, y1:1, yref:'paper',
+                              line:{color:C.thresh, width:1.5, dash:'dash'}}],
+                    annotations: [{x:0.01, y:1.04, yref:'paper', text:'MAF \u2265 0.01',
+                                   showarrow:false, font:{size:10, color:C.thresh}}]
+                }), cfg);
+            }
+        });
+    }
 });
 """
 
@@ -1994,8 +2268,13 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 comparison_text, variant_qc_text, diag_text,
                 methods_text, pca_summary, tool_versions, stage_label,
                 qc_rows=None, pca_json='[]', sex_check_json='[]',
-                peddy_json='[]', mock_notice=''):
+                peddy_json='[]', ancestry_vqc_texts=None,
+                ancestry_strat_summary=None, collated_vqc_json='{}',
+                mock_notice=''):
     """Build the HTML report string with interactive Plotly charts."""
+
+    if ancestry_vqc_texts is None:
+        ancestry_vqc_texts = {}
 
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -2036,7 +2315,24 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 f'<img src="data:image/png;base64,{figures[key]}" '
                 f'alt="{title}"></div>')
 
-    # Build stats rows
+    # Build variant QC tab buttons and panels for each ancestry group
+    vqc_tab_buttons = ''.join(
+        f'<button class="vqc-tab" data-tab="vqc-{anc}" type="button">{anc}</button>'
+        for anc in sorted(ancestry_vqc_texts.keys())
+    )
+    vqc_ancestry_panels = ''.join(
+        f'<div id="vqc-{anc}" class="vqc-panel" style="display:none">'
+        f'{_pre_block(text, f"Variant QC Summary ({anc})")}'
+        f'<div class="plot-grid">'
+        f'<div class="card"><div id="plot-vqc-cr-{anc}" class="plot-box"></div></div>'
+        f'<div class="card"><div id="plot-vqc-maf-{anc}" class="plot-box"></div></div>'
+        f'</div></div>'
+        for anc, text in sorted(ancestry_vqc_texts.items())
+    )
+    vqc_strat_summary = (
+        _pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary')
+        if ancestry_strat_summary else ''
+    )
     stats_rows = ''
     for label, metric in [
         ('Call Rate', 'call_rate'), ('LRR SD', 'lrr_sd'),
@@ -2303,7 +2599,27 @@ def _build_html(stats, stage1_stats, figures, realign_text,
 
     <section id="variant-qc">
         <h2>🧪 Variant QC</h2>
-        {_pre_block(variant_qc_text, 'Variant QC Summary')}
+        <div class="card">
+            <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.75rem">
+                Variant-level QC metrics are shown for the full cohort ("All") and for each
+                ancestry group meeting the minimum sample threshold. Ancestry-stratified HWE
+                testing avoids inflated deviation from the Wahlund effect in mixed-ancestry
+                samples (Anderson et al. 2010; Marees et al. 2018).
+            </p>
+            <div class="vqc-tabs" id="vqc-tab-bar">
+                <button class="vqc-tab active" data-tab="vqc-all" type="button">All</button>
+                {vqc_tab_buttons}
+            </div>
+        </div>
+        <div id="vqc-all" class="vqc-panel" style="display:block">
+            {_pre_block(variant_qc_text, 'Variant QC Summary (All Samples)')}
+            <div class="plot-grid">
+                <div class="card"><div id="plot-vqc-cr-all" class="plot-box"></div></div>
+                <div class="card"><div id="plot-vqc-maf-all" class="plot-box"></div></div>
+            </div>
+        </div>
+        {vqc_ancestry_panels}
+        {vqc_strat_summary}
     </section>
 
     <section id="sex-check">
@@ -2450,6 +2766,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     html += f'<script type="application/json" id="pca-data">{pca_json}</script>\n'
     html += f'<script type="application/json" id="sex-data">{sex_check_json}</script>\n'
     html += f'<script type="application/json" id="peddy-data">{peddy_json}</script>\n'
+    html += f'<script type="application/json" id="collated-vqc-data">{collated_vqc_json}</script>\n'
     html += f'<script>{js}</script>\n'
     html += '</body>\n</html>'
 
