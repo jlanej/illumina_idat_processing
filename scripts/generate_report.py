@@ -2482,7 +2482,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         if isinstance(parsed_vqc, dict):
             vqc_data_groups = sorted(
                 g for g, payload in parsed_vqc.items()
-                if g not in ('all',) and not g.startswith('_')
+                if g != 'all' and not g.startswith('_')
                 and isinstance(payload, dict)
             )
     except (TypeError, ValueError):
@@ -2521,7 +2521,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     vqc_cross_summary = (
         '<div class="card"><h3>Cross-Ancestry Variant QC Pass Summary</h3>'
         '<div id="vqc-cross-ancestry-summary" style="font-size:0.92rem;color:#374151">'
-        'Not available yet. This summary requires collated_variant_qc.tsv '
+        'Not available. This summary requires collated_variant_qc.tsv '
         'to include all_ancestries_*_pass columns from ancestry-stratified QC '
         '(or at least one qualifying ancestry group).</div></div>'
     )
