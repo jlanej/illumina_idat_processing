@@ -996,12 +996,44 @@ def _prepare_peddy_json(peddy_dir):
     return json.dumps(points)
 
 
+def _bin_values(values, bin_width, lo, hi):
+    """Bin *values* into fixed-width bins and return (edges, counts).
+
+    Returns a dict ``{"edges": [...], "counts": [...]}`` where *edges*
+    are the left edges of each bin and *counts* are the number of values
+    falling in ``[edge, edge + bin_width)``.  The last bin is inclusive
+    on the right (``[edge, hi]``).
+    """
+    if not values:
+        return {"edges": [], "counts": []}
+    if hi <= lo:
+        return {"edges": [lo], "counts": [len(values)]}
+    import math as _math
+    n_bins = max(1, int(_math.ceil((hi - lo) / bin_width)))
+    counts = [0] * n_bins
+    for v in values:
+        idx = int((v - lo) / bin_width)
+        if idx < 0:
+            idx = 0
+        elif idx >= n_bins:
+            idx = n_bins - 1
+        counts[idx] += 1
+    edges = [round(lo + i * bin_width, 10) for i in range(n_bins)]
+    return {"edges": edges, "counts": counts}
+
+
 def _prepare_collated_vqc_json(collated_vqc_file):
     """Prepare collated variant QC data as JSON for interactive plots.
 
-    Returns JSON with per-ancestry summary statistics (count of variants
-    at various thresholds) rather than raw per-variant data, which would
-    be too large for embedding in HTML.
+    Returns JSON with per-ancestry summary statistics and **pre-binned
+    histogram data** (``cr_hist``, ``maf_hist``, ``hwe_hist``) instead of
+    raw per-variant arrays.  This keeps the embedded JSON small (a few KB)
+    regardless of the number of variants.
+
+    Bin widths (following GWAS QC best practice):
+      - Call rate: 0.01 bins over [0, 1]
+      - MAF:       0.01 bins over [0, 0.5]
+      - HWE:       0.1 bins in -log10(p) space over [0, 50]
     """
     if not os.path.exists(collated_vqc_file):
         print(
@@ -1010,6 +1042,8 @@ def _prepare_collated_vqc_json(collated_vqc_file):
             file=sys.stderr
         )
         return '{}'
+
+    HWE_LOG10_CAP = 50
 
     def _new_group_stats():
         return {
@@ -1029,7 +1063,7 @@ def _prepare_collated_vqc_json(collated_vqc_file):
             'n_low_freq': 0,
             'n_common': 0,
             'cr_values': [],
-            'hwe_values': [],
+            'hwe_log10_values': [],
             'maf_values': [],
         }
 
@@ -1102,7 +1136,10 @@ def _prepare_collated_vqc_json(collated_vqc_file):
                         stats['n_hwe_lt1e10'] += 1
                     if hwe_val < 1e-20:
                         stats['n_hwe_lt1e20'] += 1
-                    stats['hwe_values'].append(hwe_val)
+                    if hwe_val > 0:
+                        stats['hwe_log10_values'].append(
+                            min(-math.log10(hwe_val), HWE_LOG10_CAP)
+                        )
 
                 maf_val = safe_float(row.get(maf_col))
                 if maf_val is not None:
@@ -1142,9 +1179,11 @@ def _prepare_collated_vqc_json(collated_vqc_file):
             'n_low_freq': stats['n_low_freq'],
             'n_common': stats['n_common'],
             'mean_maf': round(stats['sum_maf'] / stats['n_maf'], 6) if stats['n_maf'] else None,
-            'cr_values': [round(v, 6) for v in stats['cr_values']],
-            'hwe_values': [round(v, 10) for v in stats['hwe_values']],
-            'maf_values': [round(v, 6) for v in stats['maf_values']],
+            # Pre-binned histograms (call rate 0.01 bins, MAF 0.01 bins,
+            # HWE -log10(p) 0.1 bins) – keeps JSON compact.
+            'cr_hist': _bin_values(stats['cr_values'], 0.01, 0.0, 1.0),
+            'maf_hist': _bin_values(stats['maf_values'], 0.01, 0.0, 0.5),
+            'hwe_hist': _bin_values(stats['hwe_log10_values'], 0.1, 0.0, HWE_LOG10_CAP),
         }
 
     if available_cross_cols and cross_total > 0:
@@ -2271,7 +2310,7 @@ document.addEventListener('DOMContentLoaded', function() {
         function groupColor(group, idx) {
             return vqcColors[idx % vqcColors.length];
         }
-        function overlayHistPlot(targetId, valueKey, title, xTitle, hoverPrefix, shape, annotationText, transformFn) {
+        function overlayBarPlot(targetId, histKey, title, xTitle, hoverPrefix, shape, annotationText) {
             var div = document.getElementById(targetId);
             if (!div) return;
             var groups = selectedVqcGroups();
@@ -2279,16 +2318,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 setVqcPlotPlaceholder(div, 'Please select at least one ancestry group to view plots.');
                 return;
             }
+            // Read range sliders for initial x-axis window
+            var metricId = targetId.replace('plot-vqc-', '');
+            var loEl = document.getElementById('vqc-' + metricId + '-lo');
+            var hiEl = document.getElementById('vqc-' + metricId + '-hi');
+            var rangeLo = loEl ? parseFloat(loEl.value) : null;
+            var rangeHi = hiEl ? parseFloat(hiEl.value) : null;
             var traces = [];
             groups.forEach(function(group, idx) {
                 var gd = vqcData[group];
-                if (!gd || !gd[valueKey] || !gd[valueKey].length) return;
-                var values = transformFn ? transformFn(gd[valueKey]) : gd[valueKey];
-                if (!values.length) return;
+                if (!gd || !gd[histKey]) return;
+                var hist = gd[histKey];
+                if (!hist.edges || !hist.edges.length) return;
                 var color = groupColor(group, idx);
+                var width = hist.edges.length > 1 ? hist.edges[1] - hist.edges[0] : 0.01;
                 traces.push({
-                    x: values, type: 'histogram', name: groupLabel(group),
-                    marker: {color: color, opacity: 0.6, line: {color: 'white', width: 0.5}},
+                    x: hist.edges, y: hist.counts, type: 'bar', name: groupLabel(group),
+                    width: width, offset: 0,
+                    marker: {color: color, opacity: 0.55, line: {color: 'white', width: 0.5}},
                     hovertemplate: hoverPrefix + ': %{x}<br>Count: %{y}<extra>' + groupLabel(group) + '</extra>'
                 });
             });
@@ -2296,11 +2343,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 setVqcPlotPlaceholder(div, 'No values available for the selected ancestry group(s).');
                 return;
             }
+            var xaxisConfig = {title: xTitle, gridcolor: '#f1f5f9'};
+            if (rangeLo !== null && rangeHi !== null) {
+                xaxisConfig.range = [rangeLo, rangeHi];
+            }
             var plotLayout = Object.assign({}, baseLayout, {
                 title: {text: title, font: {size: 13}},
-                xaxis: {title: xTitle, gridcolor: '#f1f5f9'},
-                yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
-                barmode: 'overlay'
+                xaxis: xaxisConfig,
+                yaxis: {title: 'Variant count', gridcolor: '#f1f5f9'},
+                barmode: 'overlay',
+                bargap: 0
             });
             if (shape) plotLayout.shapes = [shape];
             if (annotationText) {
@@ -2312,32 +2364,26 @@ document.addEventListener('DOMContentLoaded', function() {
             Plotly.newPlot(div, traces, plotLayout, cfg);
         }
         function renderVqcPlots() {
-            overlayHistPlot(
-                'plot-vqc-cr', 'cr_values', 'Variant Call Rate',
+            overlayBarPlot(
+                'plot-vqc-cr', 'cr_hist', 'Variant Call Rate',
                 'Call Rate', 'Call Rate',
                 {type:'line', x0:0.98, x1:0.98, y0:0, y1:1, yref:'paper',
                  line:{color:C.thresh, width:1.5, dash:'dash'}},
                 '\u2265 0.98'
             );
-            overlayHistPlot(
-                'plot-vqc-maf', 'maf_values', 'MAF Distribution',
+            overlayBarPlot(
+                'plot-vqc-maf', 'maf_hist', 'MAF Distribution',
                 'Minor Allele Frequency', 'MAF',
                 {type:'line', x0:0.01, x1:0.01, y0:0, y1:1, yref:'paper',
                  line:{color:C.thresh, width:1.5, dash:'dash'}},
                 'MAF \u2265 0.01'
             );
-            var HWE_LOG10_CAP = 50;
-            overlayHistPlot(
-                'plot-vqc-hwe', 'hwe_values', 'HWE Deviation (-log10 p)',
-                '-log10(HWE p-value)', '-log10(HWE p)',
+            overlayBarPlot(
+                'plot-vqc-hwe', 'hwe_hist', 'HWE Deviation (\u2212log\u2081\u2080 p)',
+                '\u2212log\u2081\u2080(HWE p-value)', '\u2212log\u2081\u2080(HWE p)',
                 {type:'line', x0:6, x1:6, y0:0, y1:1, yref:'paper',
                  line:{color:C.thresh, width:1.5, dash:'dash'}},
-                'p \u2265 1e-6',
-                function(values) {
-                    return values
-                        .filter(function(v) { return typeof v === 'number' && v > 0; })
-                        .map(function(v) { return Math.min(-Math.log10(v), HWE_LOG10_CAP); });
-                }
+                'p \u2265 1e-6'
             );
         }
 
@@ -2346,6 +2392,33 @@ document.addEventListener('DOMContentLoaded', function() {
             toggle.addEventListener('change', function() {
                 renderVqcPlots();
             });
+        });
+
+        // Range sliders for each VQC histogram – update xaxis via Plotly.relayout
+        [
+            {id: 'cr',  plotId: 'plot-vqc-cr',  decimals: 2},
+            {id: 'maf', plotId: 'plot-vqc-maf', decimals: 2},
+            {id: 'hwe', plotId: 'plot-vqc-hwe', decimals: 1}
+        ].forEach(function(m) {
+            var loEl    = document.getElementById('vqc-' + m.id + '-lo');
+            var hiEl    = document.getElementById('vqc-' + m.id + '-hi');
+            var loValEl = document.getElementById('vqc-' + m.id + '-lo-val');
+            var hiValEl = document.getElementById('vqc-' + m.id + '-hi-val');
+            if (!loEl || !hiEl) return;
+            function applyRange() {
+                var lo = parseFloat(loEl.value);
+                var hi = parseFloat(hiEl.value);
+                // Enforce lo ≤ hi: clamp whichever slider triggered the conflict
+                if (lo > hi) { loEl.value = hi; lo = hi; }
+                if (loValEl) loValEl.textContent = lo.toFixed(m.decimals);
+                if (hiValEl) hiValEl.textContent = hi.toFixed(m.decimals);
+                var plotDiv = document.getElementById(m.plotId);
+                if (plotDiv && plotDiv.data && plotDiv.data.length) {
+                    Plotly.relayout(plotDiv, {'xaxis.range': [lo, hi]});
+                }
+            }
+            loEl.addEventListener('input', applyRange);
+            hiEl.addEventListener('input', applyRange);
         });
 
         var groupKeys = Object.keys(vqcData).filter(function(g) {
@@ -2762,9 +2835,45 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         </div>
         {_pre_block(variant_qc_text, 'Variant QC Summary (All Samples)')}
         <div class="plot-grid">
-            <div class="card"><div id="plot-vqc-cr" class="plot-box"></div></div>
-            <div class="card"><div id="plot-vqc-maf" class="plot-box"></div></div>
-            <div class="card"><div id="plot-vqc-hwe" class="plot-box"></div></div>
+            <div class="card">
+                <div class="plot-controls">
+                    <span class="plot-status" style="white-space:nowrap">Range:
+                        <span id="vqc-cr-lo-val">0.00</span>&ndash;<span id="vqc-cr-hi-val">1.00</span>
+                    </span>
+                    <div class="control-sep"></div>
+                    <label for="vqc-cr-lo">Min</label>
+                    <input id="vqc-cr-lo" class="plot-slider" type="range" min="0" max="1" step="0.01" value="0">
+                    <label for="vqc-cr-hi">Max</label>
+                    <input id="vqc-cr-hi" class="plot-slider" type="range" min="0" max="1" step="0.01" value="1">
+                </div>
+                <div id="plot-vqc-cr" class="plot-box"></div>
+            </div>
+            <div class="card">
+                <div class="plot-controls">
+                    <span class="plot-status" style="white-space:nowrap">Range:
+                        <span id="vqc-maf-lo-val">0.00</span>&ndash;<span id="vqc-maf-hi-val">0.50</span>
+                    </span>
+                    <div class="control-sep"></div>
+                    <label for="vqc-maf-lo">Min</label>
+                    <input id="vqc-maf-lo" class="plot-slider" type="range" min="0" max="0.5" step="0.01" value="0">
+                    <label for="vqc-maf-hi">Max</label>
+                    <input id="vqc-maf-hi" class="plot-slider" type="range" min="0" max="0.5" step="0.01" value="0.5">
+                </div>
+                <div id="plot-vqc-maf" class="plot-box"></div>
+            </div>
+            <div class="card">
+                <div class="plot-controls">
+                    <span class="plot-status" style="white-space:nowrap">Range:
+                        <span id="vqc-hwe-lo-val">0.0</span>&ndash;<span id="vqc-hwe-hi-val">50.0</span>
+                    </span>
+                    <div class="control-sep"></div>
+                    <label for="vqc-hwe-lo">Min</label>
+                    <input id="vqc-hwe-lo" class="plot-slider" type="range" min="0" max="50" step="0.1" value="0">
+                    <label for="vqc-hwe-hi">Max</label>
+                    <input id="vqc-hwe-hi" class="plot-slider" type="range" min="0" max="50" step="0.1" value="50">
+                </div>
+                <div id="plot-vqc-hwe" class="plot-box"></div>
+            </div>
         </div>
         <div class="card"><div id="plot-vqc-pass-compare" class="plot-box"></div></div>
         {vqc_cross_summary}

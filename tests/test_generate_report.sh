@@ -732,9 +732,12 @@ with open(test_file, 'w') as f:
         f.write(f'rs{i:06d}\t0.99\t0.5\t{maf}\n')
 
 payload = json.loads(_prepare_collated_vqc_json(test_file))
-vals = payload['all']['maf_values']
-assert len(vals) == 10000, len(vals)
-assert sum(1 for v in vals if v >= 0.5) == 5000
+hist = payload['all']['maf_hist']
+total = sum(hist['counts'])
+assert total == 10000, total
+# Bin at edge 0.0 should hold 5000 (maf=0.0), bin at edge 0.5 should hold 5000 (maf=0.5)
+assert hist['counts'][0] == 5000, hist['counts'][0]
+assert hist['counts'][-1] == 5000, hist['counts'][-1]
 PY
 then
     echo "  PASS: Histogram payload includes all variants without subsampling"
@@ -814,6 +817,28 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 19mo: Variant QC range sliders ---
+echo "--- Test 19mo: Variant QC range sliders ---"
+slider_ok=1
+for metric in cr maf hwe; do
+    for bound in lo hi; do
+        if ! grep -q "id=\"vqc-${metric}-${bound}\"" "${TMP_DIR}/pipeline_report.html"; then
+            echo "  FAIL: Range slider vqc-${metric}-${bound} missing"
+            slider_ok=0
+        fi
+        if ! grep -q "id=\"vqc-${metric}-${bound}-val\"" "${TMP_DIR}/pipeline_report.html"; then
+            echo "  FAIL: Range label vqc-${metric}-${bound}-val missing"
+            slider_ok=0
+        fi
+    done
+done
+if [[ ${slider_ok} -eq 1 ]]; then
+    echo "  PASS: All six VQC range sliders and display labels present"
+    (( PASS++ )) || true
+else
+    (( FAIL++ )) || true
+fi
+
 # --- Test 19n: Variant QC toggles can be derived from collated data ---
 echo "--- Test 19n: Variant QC toggle fallback to collated groups ---"
 if REPO_DIR="${REPO_DIR}" python3 - <<'PY'
@@ -834,8 +859,8 @@ stats = {
 }
 tool_versions = {'python3': '3.x'}
 collated = json.dumps({
-    'all': {'n_variants': 1, 'cr_values': [0.99], 'hwe_values': [0.5], 'maf_values': [0.12]},
-    'EAS': {'n_variants': 1, 'cr_values': [0.98], 'hwe_values': [0.8], 'maf_values': [0.2]},
+    'all': {'n_variants': 1, 'cr_hist': {'edges': [0.99], 'counts': [1]}, 'hwe_hist': {'edges': [0.3], 'counts': [1]}, 'maf_hist': {'edges': [0.12], 'counts': [1]}},
+    'EAS': {'n_variants': 1, 'cr_hist': {'edges': [0.98], 'counts': [1]}, 'hwe_hist': {'edges': [0.1], 'counts': [1]}, 'maf_hist': {'edges': [0.2], 'counts': [1]}},
 })
 html = _build_html(
     stats, None, {}, '', '', '', '', '',
