@@ -124,6 +124,12 @@ check_url "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/001/405/GCA_00000140
 check_url "https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/human_g1k_v37.fasta.gz" \
     "GRCh37 reference genome"
 
+check_url "https://hgdownload.soe.ucsc.edu/goldenPath/hs1/liftOver/hs1ToHg38.over.chain.gz" \
+    "CHM13 (hs1) -> GRCh38 liftOver chain"
+
+check_url "https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz" \
+    "GRCh37 (hg19) -> GRCh38 liftOver chain"
+
 echo ""
 echo "--- Dependency Sources ---"
 
