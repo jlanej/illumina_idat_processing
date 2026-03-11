@@ -58,6 +58,11 @@ GWAS_THRESHOLDS = {
     'inbreeding_f_max': 0.05,
 }
 
+# Deterministic seed for bounded reservoir samples in large report payloads.
+# Keeps rendered histograms reproducible across runs/tests while avoiding
+# first-N bias from lexicographically sorted variant tables.
+COLLATED_VQC_SAMPLING_SEED = 42
+
 
 GWAS_METHODS_CITATIONS = [
     {
@@ -1004,7 +1009,7 @@ def _prepare_collated_vqc_json(collated_vqc_file):
         return '{}'
 
     MAX_PLOT_VALUES = 5000
-    rng = random.Random(42)  # deterministic sampling for reproducible reports/tests
+    rng = random.Random(COLLATED_VQC_SAMPLING_SEED)
 
     def _new_group_stats():
         return {

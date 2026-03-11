@@ -722,7 +722,10 @@ assert len(vals) <= 5000, len(vals)
 high_maf_count = sum(1 for v in vals if v >= 0.5)
 # Input has an exact 50/50 split (0.0 vs 0.5). For unbiased sampling the
 # 5000-value reservoir should retain substantial representation from both halves.
-assert 2000 < high_maf_count < 3000, high_maf_count
+# Allow a wide tolerance around the expected ~2500 high-MAF values.
+LOWER_BOUND = 2000
+UPPER_BOUND = 3000
+assert LOWER_BOUND < high_maf_count < UPPER_BOUND, high_maf_count
 PY
 then
     echo "  PASS: Sampling includes genome-wide tail values (not first-N slice)"
