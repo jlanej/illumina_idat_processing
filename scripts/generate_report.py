@@ -221,7 +221,11 @@ def safe_float(val, default=None):
     if val in ('NA', '', None):
         return default
     try:
-        return float(val)
+        parsed = float(val)
+        # JSON.parse rejects NaN/Infinity tokens, so treat non-finite values as missing.
+        if not math.isfinite(parsed):
+            return default
+        return parsed
     except (ValueError, TypeError):
         return default
 
@@ -2292,7 +2296,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<div style="margin-top:0.5rem;color:#64748b">Total variants evaluated: ' + vqcCross.n_variants + '</div>';
         } else if (vqcCrossDiv) {
             if (vqcDataParseError) {
-                vqcCrossDiv.textContent = 'Not available: collated variant QC JSON could not be parsed.';
+                vqcCrossDiv.textContent = 'Not available: collated variant QC JSON could not be parsed. Ensure ancestry_stratified_qc/collated_variant_qc.tsv has finite numeric values (no NaN/Inf) for *_call_rate, *_hwe_p, and *_maf columns.';
             } else if (!Object.keys(vqcData || {}).length) {
                 vqcCrossDiv.textContent = 'Not available: collated variant QC data is missing or empty.';
             } else {
@@ -2418,7 +2422,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 yaxis:{title:'Pass rate (%)', range:[0, 100], gridcolor:'#f1f5f9'}
             }), cfg);
         } else if (compareDiv) {
-            setVqcPlotPlaceholder(compareDiv, 'Not available: need at least two groups with collated variant QC data.');
+            setVqcPlotPlaceholder(compareDiv, 'Not available: need at least two groups in ancestry_stratified_qc/collated_variant_qc.tsv (all + at least one ancestry with *_call_rate/*_hwe_p/*_maf columns).');
         }
     }
 });

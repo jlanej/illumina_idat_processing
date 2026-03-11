@@ -778,11 +778,49 @@ fi
 # --- Test 19ja: Cross-ancestry missing-data explanation text ---
 echo "--- Test 19ja: Cross-ancestry missing-data explanations present ---"
 if grep -q 'cross-ancestry pass flags were not found in collated variant QC' "${TMP_DIR}/pipeline_report.html" && \
-   grep -q 'No call-rate values available for this group' "${TMP_DIR}/pipeline_report.html"; then
+   grep -q 'No call-rate values available for this group' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'need at least two groups in ancestry_stratified_qc/collated_variant_qc.tsv' "${TMP_DIR}/pipeline_report.html"; then
     echo "  PASS: Report includes explicit missing-data explanations for variant QC plots"
     (( PASS++ )) || true
 else
     echo "  FAIL: Missing-data explanations for variant QC plots not found"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19jb: Collated VQC JSON excludes NaN/Inf tokens ---
+echo "--- Test 19jb: Collated VQC JSON sanitizes NaN/Inf values ---"
+if REPO_DIR="${REPO_DIR}" TMP_DIR="${TMP_DIR}" python3 - <<'PY'
+import json
+import os
+import sys
+
+repo_dir = os.environ['REPO_DIR']
+tmp_dir = os.environ['TMP_DIR']
+sys.path.insert(0, os.path.join(repo_dir, 'scripts'))
+from generate_report import _prepare_collated_vqc_json  # noqa: E402
+
+test_file = os.path.join(tmp_dir, 'collated_nan_test.tsv')
+with open(test_file, 'w') as f:
+    f.write('variant_id\tall_call_rate\tall_hwe_p\tall_maf\tEUR_call_rate\tEUR_hwe_p\tEUR_maf\n')
+    f.write('rs1\tnan\t0.5\t0.1\t0.99\t0.4\t0.1\n')
+    f.write('rs2\t0.98\tinf\t0.2\t0.97\t-inf\t0.2\n')
+    f.write('rs3\t0.97\t0.3\tinf\t0.96\t0.3\t-inf\n')
+
+payload_text = _prepare_collated_vqc_json(test_file)
+assert 'NaN' not in payload_text and 'Infinity' not in payload_text and '-Infinity' not in payload_text, payload_text
+payload = json.loads(payload_text)
+assert payload['all']['n_cr'] == 2, payload
+assert payload['all']['n_hwe'] == 2, payload
+assert payload['all']['n_maf'] == 2, payload
+assert payload['EUR']['n_cr'] == 3, payload
+assert payload['EUR']['n_hwe'] == 2, payload
+assert payload['EUR']['n_maf'] == 2, payload
+PY
+then
+    echo "  PASS: Collated VQC JSON payload is valid JSON when TSV contains NaN/Inf tokens"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Collated VQC JSON payload still emits non-finite numeric tokens"
     (( FAIL++ )) || true
 fi
 
