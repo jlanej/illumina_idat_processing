@@ -666,6 +666,20 @@ for anc in all EUR AFR; do
         echo "  FAIL: Variant QC call rate plot container for ${anc} missing"
         (( FAIL++ )) || true
     fi
+    if grep -q "plot-vqc-maf-${anc}" "${TMP_DIR}/pipeline_report.html"; then
+        echo "  PASS: Variant QC MAF plot container for ${anc} present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Variant QC MAF plot container for ${anc} missing"
+        (( FAIL++ )) || true
+    fi
+    if grep -q "plot-vqc-hwe-${anc}" "${TMP_DIR}/pipeline_report.html"; then
+        echo "  PASS: Variant QC HWE plot container for ${anc} present"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Variant QC HWE plot container for ${anc} missing"
+        (( FAIL++ )) || true
+    fi
 done
 
 # --- Test 19e: Ancestry-stratified summary in report ---
@@ -758,6 +772,16 @@ if grep -q 'Cross-Ancestry Variant QC Pass Summary' "${TMP_DIR}/pipeline_report.
     (( PASS++ )) || true
 else
     echo "  FAIL: Cross-ancestry pass summary card missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19m: Variant pass-rate comparison plot container ---
+echo "--- Test 19m: Variant pass-rate comparison plot container ---"
+if grep -q 'plot-vqc-pass-compare' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Variant pass-rate comparison plot container present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Variant pass-rate comparison plot container missing"
     (( FAIL++ )) || true
 fi
 

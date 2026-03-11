@@ -2262,12 +2262,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 '</table>' +
                 '<div style="margin-top:0.5rem;color:#64748b">Total variants evaluated: ' + vqcCross.n_variants + '</div>';
         }
-        Object.keys(vqcData).forEach(function(group) {
-            if (group.startsWith('_')) return;
+        var renderedVqcGroups = {};
+        function renderVqcGroup(group) {
+            if (renderedVqcGroups[group]) return;
+            if (!vqcData[group] || group.charAt(0) === '_') return;
+            renderedVqcGroups[group] = true;
             var gd = vqcData[group];
             var label = group === 'all' ? 'All Samples' : group;
 
-            /* Call rate histogram */
             var crDiv = document.getElementById('plot-vqc-cr-' + group);
             if (crDiv && gd.cr_values && gd.cr_values.length) {
                 Plotly.newPlot(crDiv, [{
@@ -2285,7 +2287,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 }), cfg);
             }
 
-            /* MAF histogram */
             var mafDiv = document.getElementById('plot-vqc-maf-' + group);
             if (mafDiv && gd.maf_values && gd.maf_values.length) {
                 Plotly.newPlot(mafDiv, [{
@@ -2302,7 +2303,75 @@ document.addEventListener('DOMContentLoaded', function() {
                                    showarrow:false, font:{size:10, color:C.thresh}}]
                 }), cfg);
             }
+
+            var hweDiv = document.getElementById('plot-vqc-hwe-' + group);
+            if (hweDiv && gd.hwe_values && gd.hwe_values.length) {
+                var transformed = gd.hwe_values
+                    .filter(function(v) { return typeof v === 'number' && v > 0; })
+                    .map(function(v) { return -Math.log10(v); });
+                if (transformed.length) {
+                    Plotly.newPlot(hweDiv, [{
+                        x: transformed, type: 'histogram',
+                        marker: {color: '#7c3aed', opacity: 0.7, line: {color: 'white', width: 0.5}},
+                        hovertemplate: '-log10(HWE p): %{x:.2f}<br>Count: %{y}<extra></extra>'
+                    }], Object.assign({}, baseLayout, {
+                        title: {text: 'HWE Deviation (-log10 p) (' + label + ')', font: {size: 13}},
+                        xaxis: {title: '-log10(HWE p-value)', gridcolor: '#f1f5f9'},
+                        yaxis: {title: 'Count', gridcolor: '#f1f5f9'},
+                        shapes: [{type:'line', x0:6, x1:6, y0:0, y1:1, yref:'paper',
+                                  line:{color:C.thresh, width:1.5, dash:'dash'}}],
+                        annotations: [{x:6, y:1.04, yref:'paper', text:'p \u2265 1e-6',
+                                       showarrow:false, font:{size:10, color:C.thresh}}]
+                    }), cfg);
+                }
+            }
+        }
+
+        renderVqcGroup('all');
+        vqcTabs.forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                var group = (this.dataset.tab || '').replace('vqc-', '');
+                renderVqcGroup(group);
+                var panel = document.getElementById(this.dataset.tab);
+                if (!panel) return;
+                panel.querySelectorAll('.plot-box').forEach(function(el) {
+                    if (el.data && el.data.length) Plotly.Plots.resize(el);
+                });
+            });
         });
+
+        var groupKeys = Object.keys(vqcData).filter(function(g) {
+            return g.charAt(0) !== '_';
+        }).sort(function(a, b) {
+            if (a === 'all') return -1;
+            if (b === 'all') return 1;
+            return a.localeCompare(b);
+        });
+        var compareDiv = document.getElementById('plot-vqc-pass-compare');
+        if (compareDiv && groupKeys.length > 1) {
+            var callRatePass = [];
+            var hwePass = [];
+            var mafPass = [];
+            groupKeys.forEach(function(g) {
+                var gd = vqcData[g] || {};
+                var nCr = gd.n_cr || 0;
+                var nHwe = gd.n_hwe || 0;
+                var nMaf = gd.n_maf || 0;
+                callRatePass.push(nCr ? 100 * ((nCr - (gd.n_miss_gt2pct || 0)) / nCr) : null);
+                hwePass.push(nHwe ? 100 * ((nHwe - (gd.n_hwe_lt1e6 || 0)) / nHwe) : null);
+                mafPass.push(nMaf ? 100 * ((nMaf - (gd.n_rare || 0)) / nMaf) : null);
+            });
+            Plotly.newPlot(compareDiv, [
+                {x: groupKeys, y: callRatePass, type:'bar', name:'Call rate \u2265 0.98', marker:{color:'#2563eb'}},
+                {x: groupKeys, y: hwePass, type:'bar', name:'HWE p \u2265 1e-6', marker:{color:'#7c3aed'}},
+                {x: groupKeys, y: mafPass, type:'bar', name:'MAF \u2265 0.01', marker:{color:'#059669'}}
+            ], Object.assign({}, baseLayout, {
+                barmode:'group',
+                title:{text:'Variant Pass Rates by Group', font:{size:13}},
+                xaxis:{title:'Group', gridcolor:'#f1f5f9'},
+                yaxis:{title:'Pass rate (%)', range:[0, 100], gridcolor:'#f1f5f9'}
+            }), cfg);
+        }
     }
 });
 """
@@ -2370,6 +2439,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         f'<div class="plot-grid">'
         f'<div class="card"><div id="plot-vqc-cr-{anc}" class="plot-box"></div></div>'
         f'<div class="card"><div id="plot-vqc-maf-{anc}" class="plot-box"></div></div>'
+        f'<div class="card"><div id="plot-vqc-hwe-{anc}" class="plot-box"></div></div>'
         f'</div></div>'
         for anc, text in sorted(ancestry_vqc_texts.items())
     )
@@ -2667,7 +2737,9 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             <div class="plot-grid">
                 <div class="card"><div id="plot-vqc-cr-all" class="plot-box"></div></div>
                 <div class="card"><div id="plot-vqc-maf-all" class="plot-box"></div></div>
+                <div class="card"><div id="plot-vqc-hwe-all" class="plot-box"></div></div>
             </div>
+            <div class="card"><div id="plot-vqc-pass-compare" class="plot-box"></div></div>
         </div>
         {vqc_ancestry_panels}
         {vqc_cross_summary}
