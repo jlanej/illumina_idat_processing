@@ -521,6 +521,12 @@ def generate_ancestry_stratified_qc(output_dir, n_samples=30):
         cols = ['variant_id', 'all_call_rate', 'all_hwe_p', 'all_maf']
         for anc in sorted(mock_ancestries):
             cols.extend([f'{anc}_call_rate', f'{anc}_hwe_p', f'{anc}_maf'])
+        cols.extend([
+            'all_ancestries_call_rate_pass',
+            'all_ancestries_hwe_pass',
+            'all_ancestries_maf_pass',
+            'all_ancestries_qc_pass',
+        ])
         f.write('\t'.join(cols) + '\n')
         for v in range(200):
             row = [f'rs{100000 + v}']
@@ -529,11 +535,23 @@ def generate_ancestry_stratified_qc(output_dir, n_samples=30):
             hwe = f'{10 ** rng.uniform(-8, 0):.6e}'
             maf = round(rng.uniform(0, 0.5), 6)
             row.extend([str(cr), hwe, str(maf)])
+            cr_pass = True
+            hwe_pass = True
+            maf_pass = True
             for anc in sorted(mock_ancestries):
                 cr = round(1 - rng.uniform(0, 0.06), 6)
                 hwe = f'{10 ** rng.uniform(-10, 0):.6e}'
                 maf = round(rng.uniform(0, 0.5), 6)
                 row.extend([str(cr), hwe, str(maf)])
+                cr_pass = cr_pass and cr >= 0.98
+                hwe_pass = hwe_pass and float(hwe) >= 1e-6
+                maf_pass = maf_pass and maf >= 0.01
+            row.extend([
+                '1' if cr_pass else '0',
+                '1' if hwe_pass else '0',
+                '1' if maf_pass else '0',
+                '1' if (cr_pass and hwe_pass and maf_pass) else '0',
+            ])
             f.write('\t'.join(row) + '\n')
 
     # Summary

@@ -569,7 +569,8 @@ def generate_methods_text(stats, tool_versions, genome='CHM13'):
         f"(Anderson et al., 2010). Within-ancestry PCA was also computed to "
         f"resolve finer population structure masked in multi-ancestry PCA "
         f"(Peterson et al., 2019). Ancestry-specific PCs and variant QC "
-        f"metrics are collated alongside the full-cohort results. "
+        f"metrics are collated alongside the full-cohort results, including "
+        f"cross-ancestry pass flags for call rate, HWE, MAF, and overall QC. "
         f"Variant-level QC included per-variant missingness, Hardy-Weinberg "
         f"equilibrium tests (mid-p adjustment), allele frequency estimation, "
         f"per-sample inbreeding coefficients (F statistic), and transition/"
@@ -1061,12 +1062,29 @@ def _prepare_collated_vqc_json(collated_vqc_file):
         groups = ['all'] + sorted(prefixes)
 
         group_stats = {g: _new_group_stats() for g in groups}
+        cross_flag_cols = {
+            'call_rate': 'all_ancestries_call_rate_pass',
+            'hwe': 'all_ancestries_hwe_pass',
+            'maf': 'all_ancestries_maf_pass',
+            'qc': 'all_ancestries_qc_pass',
+        }
+        available_cross_cols = {
+            metric: col for metric, col in cross_flag_cols.items() if col in header
+        }
+        cross_counts = {metric: 0 for metric in available_cross_cols}
+        cross_total = 0
 
         for line in f:
             fields = line.rstrip('\n').split('\t')
             row = {}
             for i, col in enumerate(header):
                 row[col] = fields[i] if i < len(fields) else 'NA'
+
+            if available_cross_cols:
+                cross_total += 1
+                for metric, col in available_cross_cols.items():
+                    if row.get(col) == '1':
+                        cross_counts[metric] += 1
 
             for group in groups:
                 stats = group_stats[group]
@@ -1138,6 +1156,17 @@ def _prepare_collated_vqc_json(collated_vqc_file):
             'cr_values': [round(v, 6) for v in stats['cr_values']],
             'hwe_values': [round(v, 10) for v in stats['hwe_values']],
             'maf_values': [round(v, 6) for v in stats['maf_values']],
+        }
+
+    if available_cross_cols and cross_total > 0:
+        result['_meta'] = {
+            'cross_ancestry': {
+                'n_variants': cross_total,
+                'n_call_rate_pass': cross_counts.get('call_rate', 0),
+                'n_hwe_pass': cross_counts.get('hwe', 0),
+                'n_maf_pass': cross_counts.get('maf', 0),
+                'n_qc_pass': cross_counts.get('qc', 0),
+            }
         }
 
     return json.dumps(result)
@@ -2219,7 +2248,22 @@ document.addEventListener('DOMContentLoaded', function() {
     if (vqcEl) {
         var vqcData = {};
         try { vqcData = JSON.parse(vqcEl.textContent || '{}'); } catch(e) {}
+        var vqcCross = (vqcData._meta && vqcData._meta.cross_ancestry) || null;
+        var vqcCrossDiv = document.getElementById('vqc-cross-ancestry-summary');
+        if (vqcCrossDiv && vqcCross && vqcCross.n_variants > 0) {
+            function vqcPct(n, d) { return d ? (100 * n / d).toFixed(1) : '0.0'; }
+            vqcCrossDiv.innerHTML =
+                '<table class="stats-table" style="margin-top:0.35rem">' +
+                '<tr><th>Metric</th><th>Variants Passing in All Ancestries</th><th>Percent</th></tr>' +
+                '<tr><td>Call rate (≥0.98)</td><td>' + vqcCross.n_call_rate_pass + '</td><td>' + vqcPct(vqcCross.n_call_rate_pass, vqcCross.n_variants) + '%</td></tr>' +
+                '<tr><td>HWE (p≥1e-6)</td><td>' + vqcCross.n_hwe_pass + '</td><td>' + vqcPct(vqcCross.n_hwe_pass, vqcCross.n_variants) + '%</td></tr>' +
+                '<tr><td>MAF (≥0.01)</td><td>' + vqcCross.n_maf_pass + '</td><td>' + vqcPct(vqcCross.n_maf_pass, vqcCross.n_variants) + '%</td></tr>' +
+                '<tr><td><strong>All metrics</strong></td><td><strong>' + vqcCross.n_qc_pass + '</strong></td><td><strong>' + vqcPct(vqcCross.n_qc_pass, vqcCross.n_variants) + '%</strong></td></tr>' +
+                '</table>' +
+                '<div style="margin-top:0.5rem;color:#64748b">Total variants evaluated: ' + vqcCross.n_variants + '</div>';
+        }
         Object.keys(vqcData).forEach(function(group) {
+            if (group.charAt(0) === '_') return;
             var gd = vqcData[group];
             var label = group === 'all' ? 'All Samples' : group;
 
@@ -2332,6 +2376,11 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     vqc_strat_summary = (
         _pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary')
         if ancestry_strat_summary else ''
+    )
+    vqc_cross_summary = (
+        '<div class="card"><h3>Cross-Ancestry Variant QC Pass Summary</h3>'
+        '<div id="vqc-cross-ancestry-summary" style="font-size:0.92rem;color:#374151">'
+        'Not available.</div></div>'
     )
     stats_rows = ''
     for label, metric in [
@@ -2604,7 +2653,9 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 Variant-level QC metrics are shown for the full cohort ("All") and for each
                 ancestry group meeting the minimum sample threshold. Ancestry-stratified HWE
                 testing avoids inflated deviation from the Wahlund effect in mixed-ancestry
-                samples (Anderson et al. 2010; Marees et al. 2018).
+                samples (Anderson et al. 2010; Marees et al. 2018). Cross-ancestry pass
+                metrics summarize whether each variant passes call rate, HWE, MAF, and all
+                metrics combined in every ancestry subset analyzed.
             </p>
             <div class="vqc-tabs" id="vqc-tab-bar">
                 <button class="vqc-tab active" data-tab="vqc-all" type="button">All</button>
@@ -2619,6 +2670,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             </div>
         </div>
         {vqc_ancestry_panels}
+        {vqc_cross_summary}
         {vqc_strat_summary}
     </section>
 

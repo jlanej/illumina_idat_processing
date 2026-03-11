@@ -133,10 +133,10 @@ AFR: 1 sample
 EOF
 
 cat > "${TMP_DIR}/ancestry_stratified_qc/collated_variant_qc.tsv" << 'EOF'
-variant_id	all_call_rate	all_hwe_p	all_maf	AFR_call_rate	AFR_hwe_p	AFR_maf	EUR_call_rate	EUR_hwe_p	EUR_maf
-rs100000	0.985	1.2e-03	0.15	0.98	2.5e-04	0.12	0.99	5.1e-02	0.18
-rs100001	0.992	4.5e-01	0.32	0.99	3.2e-01	0.28	0.99	6.7e-01	0.35
-rs100002	0.978	8.9e-08	0.05	0.96	1.1e-06	0.08	0.99	2.3e-01	0.03
+variant_id	all_call_rate	all_hwe_p	all_maf	AFR_call_rate	AFR_hwe_p	AFR_maf	EUR_call_rate	EUR_hwe_p	EUR_maf	all_ancestries_call_rate_pass	all_ancestries_hwe_pass	all_ancestries_maf_pass	all_ancestries_qc_pass
+rs100000	0.985	1.2e-03	0.15	0.98	2.5e-04	0.12	0.99	5.1e-02	0.18	1	1	1	1
+rs100001	0.992	4.5e-01	0.32	0.99	3.2e-01	0.28	0.99	6.7e-01	0.35	1	1	1	1
+rs100002	0.978	8.9e-08	0.05	0.96	1.1e-06	0.08	0.99	2.3e-01	0.03	0	1	1	0
 EOF
 
 # --- Test 1: Generate report ---
@@ -747,6 +747,120 @@ then
     (( PASS++ )) || true
 else
     echo "  FAIL: Sampling appears first-N biased"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19j: Cross-ancestry pass summary rendered ---
+echo "--- Test 19j: Cross-ancestry pass summary in report ---"
+if grep -q 'Cross-Ancestry Variant QC Pass Summary' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'vqc-cross-ancestry-summary' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Cross-ancestry pass summary card present"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Cross-ancestry pass summary card missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19k: Cross-ancestry summary JSON computation ---
+echo "--- Test 19k: Cross-ancestry summary JSON computation ---"
+if REPO_DIR="${REPO_DIR}" TMP_DIR="${TMP_DIR}" python3 - <<'PY'
+import json
+import os
+import sys
+
+repo_dir = os.environ['REPO_DIR']
+tmp_dir = os.environ['TMP_DIR']
+sys.path.insert(0, os.path.join(repo_dir, 'scripts'))
+from generate_report import _prepare_collated_vqc_json  # noqa: E402
+
+test_file = os.path.join(tmp_dir, 'ancestry_stratified_qc', 'collated_variant_qc.tsv')
+payload = json.loads(_prepare_collated_vqc_json(test_file))
+cross = payload.get('_meta', {}).get('cross_ancestry')
+assert cross is not None
+assert cross['n_variants'] == 3, cross
+assert cross['n_call_rate_pass'] == 2, cross
+assert cross['n_hwe_pass'] == 3, cross
+assert cross['n_maf_pass'] == 3, cross
+assert cross['n_qc_pass'] == 2, cross
+PY
+then
+    echo "  PASS: Cross-ancestry pass counts are computed correctly"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Cross-ancestry pass counts not computed as expected"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19l: Collate script emits cross-ancestry pass flags ---
+echo "--- Test 19l: Collate script cross-ancestry flags ---"
+if REPO_DIR="${REPO_DIR}" TMP_DIR="${TMP_DIR}" python3 - <<'PY'
+import csv
+import os
+import subprocess
+import sys
+
+repo_dir = os.environ['REPO_DIR']
+tmp_dir = os.environ['TMP_DIR']
+base = os.path.join(tmp_dir, 'collate_flags_test')
+os.makedirs(base, exist_ok=True)
+
+def write_qc(prefix, rows):
+    qc_dir = os.path.join(base, prefix)
+    os.makedirs(qc_dir, exist_ok=True)
+    with open(os.path.join(qc_dir, 'variant_qc.vmiss'), 'w') as f:
+        f.write('#CHROM\tID\tMISSING_CT\tOBS_CT\tF_MISS\n')
+        for vid, vals in rows.items():
+            f.write(f"1\t{vid}\t0\t100\t{vals['fmiss']}\n")
+    with open(os.path.join(qc_dir, 'variant_qc.hardy'), 'w') as f:
+        f.write('#CHROM\tID\tA1\tA2\tCT\tP\n')
+        for vid, vals in rows.items():
+            f.write(f"1\t{vid}\tA\tG\t100\t{vals['hwe']}\n")
+    with open(os.path.join(qc_dir, 'variant_qc.afreq'), 'w') as f:
+        f.write('#CHROM\tID\tREF\tALT\tALT_FREQS\tOBS_CT\n')
+        for vid, vals in rows.items():
+            f.write(f"1\t{vid}\tA\tG\t{vals['af']}\t200\n")
+    return qc_dir
+
+eur = write_qc('EUR', {
+    'rs_pass_all': {'fmiss': '0.01', 'hwe': '1e-4', 'af': '0.20'},
+    'rs_missing_in_afr': {'fmiss': '0.01', 'hwe': '0.2', 'af': '0.10'},
+})
+afr = write_qc('AFR', {
+    'rs_pass_all': {'fmiss': '0.01', 'hwe': '0.2', 'af': '0.30'},
+    'rs_fail_some': {'fmiss': '0.03', 'hwe': '1e-7', 'af': '0.005'},
+})
+
+out_tsv = os.path.join(base, 'collated.tsv')
+cmd = [
+    sys.executable,
+    os.path.join(repo_dir, 'scripts', 'collate_variant_qc.py'),
+    '--ancestry-variant-qc', f'EUR:{eur}',
+    '--ancestry-variant-qc', f'AFR:{afr}',
+    '--output', out_tsv,
+]
+subprocess.check_call(cmd)
+
+with open(out_tsv) as f:
+    rows = list(csv.DictReader(f, delimiter='\t'))
+
+flags = {row['variant_id']: row for row in rows}
+assert flags['rs_pass_all']['all_ancestries_call_rate_pass'] == '1'
+assert flags['rs_pass_all']['all_ancestries_hwe_pass'] == '1'
+assert flags['rs_pass_all']['all_ancestries_maf_pass'] == '1'
+assert flags['rs_pass_all']['all_ancestries_qc_pass'] == '1'
+
+assert flags['rs_fail_some']['all_ancestries_call_rate_pass'] == '0'
+assert flags['rs_fail_some']['all_ancestries_hwe_pass'] == '0'
+assert flags['rs_fail_some']['all_ancestries_maf_pass'] == '0'
+assert flags['rs_fail_some']['all_ancestries_qc_pass'] == '0'
+
+assert flags['rs_missing_in_afr']['all_ancestries_qc_pass'] == '0'
+PY
+then
+    echo "  PASS: Collated TSV includes correct cross-ancestry pass flags"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Collated TSV cross-ancestry pass flags incorrect"
     (( FAIL++ )) || true
 fi
 
