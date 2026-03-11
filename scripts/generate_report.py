@@ -2318,6 +2318,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 setVqcPlotPlaceholder(div, 'Please select at least one ancestry group to view plots.');
                 return;
             }
+            // Read range sliders for initial x-axis window
+            var metricId = targetId.replace('plot-vqc-', '');
+            var loEl = document.getElementById('vqc-' + metricId + '-lo');
+            var hiEl = document.getElementById('vqc-' + metricId + '-hi');
+            var rangeLo = loEl ? parseFloat(loEl.value) : null;
+            var rangeHi = hiEl ? parseFloat(hiEl.value) : null;
             var traces = [];
             groups.forEach(function(group, idx) {
                 var gd = vqcData[group];
@@ -2337,9 +2343,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 setVqcPlotPlaceholder(div, 'No values available for the selected ancestry group(s).');
                 return;
             }
+            var xaxisConfig = {title: xTitle, gridcolor: '#f1f5f9'};
+            if (rangeLo !== null && rangeHi !== null) {
+                xaxisConfig.range = [rangeLo, rangeHi];
+            }
             var plotLayout = Object.assign({}, baseLayout, {
                 title: {text: title, font: {size: 13}},
-                xaxis: {title: xTitle, gridcolor: '#f1f5f9'},
+                xaxis: xaxisConfig,
                 yaxis: {title: 'Variant count', gridcolor: '#f1f5f9'},
                 barmode: 'overlay',
                 bargap: 0
@@ -2382,6 +2392,33 @@ document.addEventListener('DOMContentLoaded', function() {
             toggle.addEventListener('change', function() {
                 renderVqcPlots();
             });
+        });
+
+        // Range sliders for each VQC histogram – update xaxis via Plotly.relayout
+        [
+            {id: 'cr',  plotId: 'plot-vqc-cr',  decimals: 2},
+            {id: 'maf', plotId: 'plot-vqc-maf', decimals: 2},
+            {id: 'hwe', plotId: 'plot-vqc-hwe', decimals: 1}
+        ].forEach(function(m) {
+            var loEl    = document.getElementById('vqc-' + m.id + '-lo');
+            var hiEl    = document.getElementById('vqc-' + m.id + '-hi');
+            var loValEl = document.getElementById('vqc-' + m.id + '-lo-val');
+            var hiValEl = document.getElementById('vqc-' + m.id + '-hi-val');
+            if (!loEl || !hiEl) return;
+            function applyRange() {
+                var lo = parseFloat(loEl.value);
+                var hi = parseFloat(hiEl.value);
+                // Enforce lo ≤ hi: clamp whichever slider triggered the conflict
+                if (lo > hi) { loEl.value = hi; lo = hi; }
+                if (loValEl) loValEl.textContent = lo.toFixed(m.decimals);
+                if (hiValEl) hiValEl.textContent = hi.toFixed(m.decimals);
+                var plotDiv = document.getElementById(m.plotId);
+                if (plotDiv && plotDiv.data && plotDiv.data.length) {
+                    Plotly.relayout(plotDiv, {'xaxis.range': [lo, hi]});
+                }
+            }
+            loEl.addEventListener('input', applyRange);
+            hiEl.addEventListener('input', applyRange);
         });
 
         var groupKeys = Object.keys(vqcData).filter(function(g) {
@@ -2798,9 +2835,45 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         </div>
         {_pre_block(variant_qc_text, 'Variant QC Summary (All Samples)')}
         <div class="plot-grid">
-            <div class="card"><div id="plot-vqc-cr" class="plot-box"></div></div>
-            <div class="card"><div id="plot-vqc-maf" class="plot-box"></div></div>
-            <div class="card"><div id="plot-vqc-hwe" class="plot-box"></div></div>
+            <div class="card">
+                <div class="plot-controls">
+                    <span class="plot-status" style="white-space:nowrap">Range:
+                        <span id="vqc-cr-lo-val">0.00</span>&ndash;<span id="vqc-cr-hi-val">1.00</span>
+                    </span>
+                    <div class="control-sep"></div>
+                    <label for="vqc-cr-lo">Min</label>
+                    <input id="vqc-cr-lo" class="plot-slider" type="range" min="0" max="1" step="0.01" value="0">
+                    <label for="vqc-cr-hi">Max</label>
+                    <input id="vqc-cr-hi" class="plot-slider" type="range" min="0" max="1" step="0.01" value="1">
+                </div>
+                <div id="plot-vqc-cr" class="plot-box"></div>
+            </div>
+            <div class="card">
+                <div class="plot-controls">
+                    <span class="plot-status" style="white-space:nowrap">Range:
+                        <span id="vqc-maf-lo-val">0.00</span>&ndash;<span id="vqc-maf-hi-val">0.50</span>
+                    </span>
+                    <div class="control-sep"></div>
+                    <label for="vqc-maf-lo">Min</label>
+                    <input id="vqc-maf-lo" class="plot-slider" type="range" min="0" max="0.5" step="0.01" value="0">
+                    <label for="vqc-maf-hi">Max</label>
+                    <input id="vqc-maf-hi" class="plot-slider" type="range" min="0" max="0.5" step="0.01" value="0.5">
+                </div>
+                <div id="plot-vqc-maf" class="plot-box"></div>
+            </div>
+            <div class="card">
+                <div class="plot-controls">
+                    <span class="plot-status" style="white-space:nowrap">Range:
+                        <span id="vqc-hwe-lo-val">0.0</span>&ndash;<span id="vqc-hwe-hi-val">50.0</span>
+                    </span>
+                    <div class="control-sep"></div>
+                    <label for="vqc-hwe-lo">Min</label>
+                    <input id="vqc-hwe-lo" class="plot-slider" type="range" min="0" max="50" step="0.1" value="0">
+                    <label for="vqc-hwe-hi">Max</label>
+                    <input id="vqc-hwe-hi" class="plot-slider" type="range" min="0" max="50" step="0.1" value="50">
+                </div>
+                <div id="plot-vqc-hwe" class="plot-box"></div>
+            </div>
         </div>
         <div class="card"><div id="plot-vqc-pass-compare" class="plot-box"></div></div>
         {vqc_cross_summary}

@@ -817,6 +817,28 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 19mo: Variant QC range sliders ---
+echo "--- Test 19mo: Variant QC range sliders ---"
+slider_ok=1
+for metric in cr maf hwe; do
+    for bound in lo hi; do
+        if ! grep -q "id=\"vqc-${metric}-${bound}\"" "${TMP_DIR}/pipeline_report.html"; then
+            echo "  FAIL: Range slider vqc-${metric}-${bound} missing"
+            slider_ok=0
+        fi
+        if ! grep -q "id=\"vqc-${metric}-${bound}-val\"" "${TMP_DIR}/pipeline_report.html"; then
+            echo "  FAIL: Range label vqc-${metric}-${bound}-val missing"
+            slider_ok=0
+        fi
+    done
+done
+if [[ ${slider_ok} -eq 1 ]]; then
+    echo "  PASS: All six VQC range sliders and display labels present"
+    (( PASS++ )) || true
+else
+    (( FAIL++ )) || true
+fi
+
 # --- Test 19n: Variant QC toggles can be derived from collated data ---
 echo "--- Test 19n: Variant QC toggle fallback to collated groups ---"
 if REPO_DIR="${REPO_DIR}" python3 - <<'PY'
