@@ -775,6 +775,17 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 19ja: Cross-ancestry missing-data explanation text ---
+echo "--- Test 19ja: Cross-ancestry missing-data explanations present ---"
+if grep -q 'cross-ancestry pass flags were not found in collated variant QC' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'No call-rate values available for this group' "${TMP_DIR}/pipeline_report.html"; then
+    echo "  PASS: Report includes explicit missing-data explanations for variant QC plots"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Missing-data explanations for variant QC plots not found"
+    (( FAIL++ )) || true
+fi
+
 # --- Test 19m: Variant pass-rate comparison plot container ---
 echo "--- Test 19m: Variant pass-rate comparison plot container ---"
 if grep -q 'plot-vqc-pass-compare' "${TMP_DIR}/pipeline_report.html"; then
@@ -782,6 +793,45 @@ if grep -q 'plot-vqc-pass-compare' "${TMP_DIR}/pipeline_report.html"; then
     (( PASS++ )) || true
 else
     echo "  FAIL: Variant pass-rate comparison plot container missing"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 19n: Variant QC tabs can be derived from collated data ---
+echo "--- Test 19n: Variant QC tab fallback to collated groups ---"
+if REPO_DIR="${REPO_DIR}" python3 - <<'PY'
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.environ['REPO_DIR'], 'scripts'))
+from generate_report import _build_html  # noqa: E402
+
+stats = {
+    'n_samples': 1,
+    'n_pass': 1,
+    'n_fail': 0,
+    'n_male': 1,
+    'n_female': 0,
+    'pass_rate': 100.0,
+}
+tool_versions = {'python3': '3.x'}
+collated = json.dumps({
+    'all': {'n_variants': 1, 'cr_values': [0.99], 'hwe_values': [0.5], 'maf_values': [0.12]},
+    'EAS': {'n_variants': 1, 'cr_values': [0.98], 'hwe_values': [0.8], 'maf_values': [0.2]},
+})
+html = _build_html(
+    stats, None, {}, '', '', '', '', '',
+    '', tool_versions, 'stage2',
+    ancestry_vqc_texts={}, collated_vqc_json=collated
+)
+assert 'data-tab="vqc-EAS"' in html
+assert 'plot-vqc-cr-EAS' in html
+PY
+then
+    echo "  PASS: Variant QC tab/panel created from collated groups even without text summary"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Variant QC tab fallback from collated groups did not work"
     (( FAIL++ )) || true
 fi
 

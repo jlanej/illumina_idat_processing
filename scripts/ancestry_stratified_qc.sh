@@ -168,18 +168,8 @@ echo ""
 
 if [[ ${#ANCESTRIES[@]} -eq 0 ]]; then
     echo "No ancestry groups meet the minimum sample count (${MIN_SAMPLES})."
-    echo "Skipping ancestry-stratified QC."
-    {
-        echo "======================================================"
-        echo "  Ancestry-Stratified QC Summary"
-        echo "======================================================"
-        echo ""
-        echo "No ancestry groups met the minimum sample threshold (${MIN_SAMPLES})."
-        echo "Ancestry-stratified analyses were not performed."
-        echo ""
-        echo "======================================================"
-    } > "${SUMMARY}"
-    exit 0
+    echo "Per-ancestry analyses will be skipped."
+    echo "Will still collate full-cohort variant QC (if available) for report plots."
 fi
 
 # -----------------------------------------------------------------
@@ -298,18 +288,22 @@ fi
     echo "  Peddy het_check:              ${PEDDY_HET_CHECK}"
     echo ""
     echo "Ancestry Groups Analyzed:"
-    for ANCESTRY in "${PROCESSED_ANCESTRIES[@]}"; do
-        N_SAMPLES=$(wc -l < "${OUTPUT_DIR}/${ANCESTRY}/samples.txt" | tr -d ' ')
-        echo "  ${ANCESTRY}: ${N_SAMPLES} samples"
-        ANC_VQC="${OUTPUT_DIR}/${ANCESTRY}/variant_qc/variant_qc_summary.txt"
-        if [[ -f "${ANC_VQC}" ]]; then
-            echo "    Variant QC: available"
-        fi
-        ANC_PCA="${OUTPUT_DIR}/${ANCESTRY}/pca/pca_projections.tsv"
-        if [[ -f "${ANC_PCA}" ]]; then
-            echo "    PCA:        available"
-        fi
-    done
+    if [[ ${#PROCESSED_ANCESTRIES[@]} -eq 0 ]]; then
+        echo "  none (no groups met minimum sample threshold ${MIN_SAMPLES})"
+    else
+        for ANCESTRY in "${PROCESSED_ANCESTRIES[@]}"; do
+            N_SAMPLES=$(wc -l < "${OUTPUT_DIR}/${ANCESTRY}/samples.txt" | tr -d ' ')
+            echo "  ${ANCESTRY}: ${N_SAMPLES} samples"
+            ANC_VQC="${OUTPUT_DIR}/${ANCESTRY}/variant_qc/variant_qc_summary.txt"
+            if [[ -f "${ANC_VQC}" ]]; then
+                echo "    Variant QC: available"
+            fi
+            ANC_PCA="${OUTPUT_DIR}/${ANCESTRY}/pca/pca_projections.tsv"
+            if [[ -f "${ANC_PCA}" ]]; then
+                echo "    PCA:        available"
+            fi
+        done
+    fi
     echo ""
     echo "Collated variant QC: ${COLLATED}"
     echo ""

@@ -1007,6 +1007,11 @@ def _prepare_collated_vqc_json(collated_vqc_file):
     be too large for embedding in HTML.
     """
     if not os.path.exists(collated_vqc_file):
+        print(
+            f"[diag] Variant QC plots: collated file missing: {collated_vqc_file} "
+            "(ancestry-stratified collation may have been skipped or failed).",
+            file=sys.stderr
+        )
         return '{}'
 
     MAX_PLOT_VALUES = 5000
@@ -1051,6 +1056,10 @@ def _prepare_collated_vqc_json(collated_vqc_file):
     with open(collated_vqc_file) as f:
         header_line = f.readline().strip()
         if not header_line:
+            print(
+                f"[diag] Variant QC plots: collated file is empty: {collated_vqc_file}",
+                file=sys.stderr
+            )
             return '{}'
         header = header_line.split('\t')
 
@@ -1168,6 +1177,21 @@ def _prepare_collated_vqc_json(collated_vqc_file):
                 'n_qc_pass': cross_counts.get('qc', 0),
             }
         }
+
+    if not result:
+        print(
+            f"[diag] Variant QC plots: no usable call-rate/HWE/MAF values found in "
+            f"{collated_vqc_file}; plots will be empty.",
+            file=sys.stderr
+        )
+        return '{}'
+
+    available_groups = sorted(g for g in result.keys() if not g.startswith('_'))
+    print(
+        "[diag] Variant QC plots: prepared collated data for groups: "
+        + (", ".join(available_groups) if available_groups else "none"),
+        file=sys.stderr
+    )
 
     return json.dumps(result)
 
@@ -2245,9 +2269,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /* ---- Variant QC interactive plots ---- */
     var vqcEl = document.getElementById('collated-vqc-data');
+    function setVqcPlotPlaceholder(div, msg) {
+        if (!div) return;
+        div.innerHTML = '<div style="padding:1rem;color:#64748b;font-size:0.85rem">' + msg + '</div>';
+    }
     if (vqcEl) {
         var vqcData = {};
-        try { vqcData = JSON.parse(vqcEl.textContent || '{}'); } catch(e) {}
+        var vqcDataParseError = false;
+        try { vqcData = JSON.parse(vqcEl.textContent || '{}'); } catch(e) { vqcDataParseError = true; }
         var vqcCross = (vqcData._meta && vqcData._meta.cross_ancestry) || null;
         var vqcCrossDiv = document.getElementById('vqc-cross-ancestry-summary');
         if (vqcCrossDiv && vqcCross && vqcCross.n_variants > 0) {
@@ -2261,6 +2290,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<tr><td><strong>All metrics</strong></td><td><strong>' + vqcCross.n_qc_pass + '</strong></td><td><strong>' + formatPercentage(vqcCross.n_qc_pass, vqcCross.n_variants) + '%</strong></td></tr>' +
                 '</table>' +
                 '<div style="margin-top:0.5rem;color:#64748b">Total variants evaluated: ' + vqcCross.n_variants + '</div>';
+        } else if (vqcCrossDiv) {
+            if (vqcDataParseError) {
+                vqcCrossDiv.textContent = 'Not available: collated variant QC JSON could not be parsed.';
+            } else if (!Object.keys(vqcData || {}).length) {
+                vqcCrossDiv.textContent = 'Not available: collated variant QC data is missing or empty.';
+            } else {
+                vqcCrossDiv.textContent = 'Not available: cross-ancestry pass flags were not found in collated variant QC (expected all_ancestries_*_pass columns).';
+            }
         }
         var renderedVqcGroups = {};
         function renderVqcGroup(group) {
@@ -2285,6 +2322,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     annotations: [{x:0.98, y:1.04, yref:'paper', text:'\u2265 0.98',
                                    showarrow:false, font:{size:10, color:C.thresh}}]
                 }), cfg);
+            } else if (crDiv) {
+                setVqcPlotPlaceholder(crDiv, 'No call-rate values available for this group.');
             }
 
             var mafDiv = document.getElementById('plot-vqc-maf-' + group);
@@ -2302,6 +2341,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     annotations: [{x:0.01, y:1.04, yref:'paper', text:'MAF \u2265 0.01',
                                    showarrow:false, font:{size:10, color:C.thresh}}]
                 }), cfg);
+            } else if (mafDiv) {
+                setVqcPlotPlaceholder(mafDiv, 'No MAF values available for this group.');
             }
 
             var hweDiv = document.getElementById('plot-vqc-hwe-' + group);
@@ -2324,7 +2365,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         annotations: [{x:6, y:1.04, yref:'paper', text:'p \u2265 1e-6',
                                        showarrow:false, font:{size:10, color:C.thresh}}]
                     }), cfg);
+                } else {
+                    setVqcPlotPlaceholder(hweDiv, 'HWE values are present but not plottable (non-positive p-values).');
                 }
+            } else if (hweDiv) {
+                setVqcPlotPlaceholder(hweDiv, 'No HWE p-values available for this group.');
             }
         }
 
@@ -2372,6 +2417,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 xaxis:{title:'Group', gridcolor:'#f1f5f9'},
                 yaxis:{title:'Pass rate (%)', range:[0, 100], gridcolor:'#f1f5f9'}
             }), cfg);
+        } else if (compareDiv) {
+            setVqcPlotPlaceholder(compareDiv, 'Not available: need at least two groups with collated variant QC data.');
         }
     }
 });
@@ -2429,20 +2476,43 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 f'<img src="data:image/png;base64,{figures[key]}" '
                 f'alt="{title}"></div>')
 
+    vqc_data_groups = []
+    try:
+        parsed_vqc = json.loads(collated_vqc_json) if collated_vqc_json else {}
+        if isinstance(parsed_vqc, dict):
+            vqc_data_groups = sorted(
+                g for g, payload in parsed_vqc.items()
+                if g != 'all' and not g.startswith('_')
+                and isinstance(payload, dict)
+            )
+    except (TypeError, ValueError):
+        print("[diag] Variant QC plots: failed to parse collated VQC JSON for tab construction.",
+              file=sys.stderr)
+
+    merged_vqc_groups = sorted(set(ancestry_vqc_texts.keys()) | set(vqc_data_groups))
+    if vqc_data_groups:
+        missing_summaries = sorted(set(vqc_data_groups) - set(ancestry_vqc_texts.keys()))
+        if missing_summaries:
+            print(
+                "[diag] Variant QC plots: rendering ancestry plot tabs without text summary for: "
+                + ", ".join(missing_summaries),
+                file=sys.stderr
+            )
+
     # Build variant QC tab buttons and panels for each ancestry group
     vqc_tab_buttons = ''.join(
         f'<button class="vqc-tab" data-tab="vqc-{anc}" type="button">{anc}</button>'
-        for anc in sorted(ancestry_vqc_texts.keys())
+        for anc in merged_vqc_groups
     )
     vqc_ancestry_panels = ''.join(
         f'<div id="vqc-{anc}" class="vqc-panel" style="display:none">'
-        f'{_pre_block(text, f"Variant QC Summary ({anc})")}'
+        f'{_pre_block(ancestry_vqc_texts.get(anc), f"Variant QC Summary ({anc})")}'
         f'<div class="plot-grid">'
         f'<div class="card"><div id="plot-vqc-cr-{anc}" class="plot-box"></div></div>'
         f'<div class="card"><div id="plot-vqc-maf-{anc}" class="plot-box"></div></div>'
         f'<div class="card"><div id="plot-vqc-hwe-{anc}" class="plot-box"></div></div>'
         f'</div></div>'
-        for anc, text in sorted(ancestry_vqc_texts.items())
+        for anc in merged_vqc_groups
     )
     vqc_strat_summary = (
         _pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary')
@@ -2451,7 +2521,9 @@ def _build_html(stats, stage1_stats, figures, realign_text,
     vqc_cross_summary = (
         '<div class="card"><h3>Cross-Ancestry Variant QC Pass Summary</h3>'
         '<div id="vqc-cross-ancestry-summary" style="font-size:0.92rem;color:#374151">'
-        'Not available.</div></div>'
+        'Not available. This summary requires collated_variant_qc.tsv '
+        'to include all_ancestries_*_pass columns from ancestry-stratified QC '
+        '(or at least one qualifying ancestry group).</div></div>'
     )
     stats_rows = ''
     for label, metric in [
