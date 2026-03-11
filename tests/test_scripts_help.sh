@@ -185,11 +185,14 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        grep -Fq 'bcftools index -s "${vcf}"' <<< "${HAS_CHR_PREFIX_BLOCK}" && \
        grep -q 'bcftools norm -f' "${RUN_PEDDY}" && \
        grep -q 'Coordinate match window: +/-' "${RUN_PEDDY}" && \
-       grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
-       grep -q 'peddy_input.vcf.gz' "${RUN_PEDDY}" && \
-       grep -Fq 'bcftools view "${src_vcf}" --threads "${THREADS}"' <<< "${GRCH38_SUBSET_BLOCK}" && \
-       grep -Fq -- '-T "${RESOURCE_DIR}/GRCH38.sites.windows"' <<< "${GRCH38_SUBSET_BLOCK}" && \
-       grep -Fq -- '-Oz -o "${TMP_DIR}/peddy_input.vcf.gz"' <<< "${GRCH38_SUBSET_BLOCK}" && \
+        grep -q 'lifted_variants.count' "${RUN_PEDDY}" && \
+        grep -q 'peddy_input.vcf.gz' "${RUN_PEDDY}" && \
+        grep -q 'Downloading GRCh38 reference FASTA for liftover target..." >&2' "${RUN_PEDDY}" && \
+        grep -q 'Decompressing GRCh38 reference..." >&2' "${RUN_PEDDY}" && \
+        grep -q 'Indexing GRCh38 reference..." >&2' "${RUN_PEDDY}" && \
+        grep -Fq 'bcftools view "${src_vcf}" --threads "${THREADS}"' <<< "${GRCH38_SUBSET_BLOCK}" && \
+        grep -Fq -- '-T "${RESOURCE_DIR}/GRCH38.sites.windows"' <<< "${GRCH38_SUBSET_BLOCK}" && \
+        grep -Fq -- '-Oz -o "${TMP_DIR}/peddy_input.vcf.gz"' <<< "${GRCH38_SUBSET_BLOCK}" && \
        ! grep -q 'bcftools sort' <<< "${GRCH38_SUBSET_BLOCK}" && \
        grep -q -- '--sites hg38' "${RUN_PEDDY}" && \
        grep -q 'verify manifest realignment to GRCh38 completed' "${RUN_PEDDY}" && \

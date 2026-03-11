@@ -561,10 +561,10 @@ _resolve_grch38_fasta() {
     local dest="${dest_dir}/${GRCH38_FASTA_NAME}"
 
     if [[ ! -f "${dest}" ]]; then
-        echo "  Downloading GRCh38 reference FASTA for liftover target..."
+        echo "  Downloading GRCh38 reference FASTA for liftover target..." >&2
         if wget -q "${GRCH38_FASTA_URL}" -O "${dest}.gz" 2>/dev/null || \
            curl -sfL "${GRCH38_FASTA_URL}" -o "${dest}.gz" 2>/dev/null; then
-            echo "  Decompressing GRCh38 reference..."
+            echo "  Decompressing GRCh38 reference..." >&2
             gunzip -f "${dest}.gz"
         else
             echo "Error: Failed to download GRCh38 reference." >&2
@@ -575,7 +575,7 @@ _resolve_grch38_fasta() {
 
     # Index if needed
     if [[ ! -f "${dest}.fai" ]]; then
-        echo "  Indexing GRCh38 reference..."
+        echo "  Indexing GRCh38 reference..." >&2
         samtools faidx "${dest}"
     fi
 
