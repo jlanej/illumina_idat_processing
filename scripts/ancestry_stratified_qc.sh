@@ -99,12 +99,10 @@ if [[ ! -f "${PEDDY_HET_CHECK}" ]]; then
 fi
 
 # Check required tools
-for tool in bcftools; do
-    if ! command -v "${tool}" &>/dev/null; then
-        echo "Error: ${tool} not found" >&2
-        exit 1
-    fi
-done
+if ! command -v bcftools &>/dev/null; then
+    echo "Error: bcftools not found" >&2
+    exit 1
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -136,9 +134,6 @@ echo "Step 1: Parsing peddy ancestry predictions..."
 # Extract sample_id and ancestry-prediction columns from peddy het_check.csv
 # peddy het_check.csv is a proper CSV with headers including:
 #   sample_id, ancestry-prediction, ancestry-prob, etc.
-declare -A ANCESTRY_SAMPLES
-declare -A ANCESTRY_COUNTS
-
 # Use awk to parse the CSV and extract ancestry assignments
 # We need to find the column indices for sample_id and ancestry-prediction
 ANCESTRY_MAP="${OUTPUT_DIR}/ancestry_assignments.tsv"

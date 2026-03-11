@@ -6,7 +6,7 @@ Inspired by [MoChA](https://github.com/freeseek/mocha) and [MoChA WDL](https://g
 
 ## Overview
 
-The pipeline runs in eight phases:
+The pipeline runs in ten phases:
 
 1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
@@ -20,15 +20,25 @@ The pipeline runs in eight phases:
 
 6. **Peddy QC** *(optional — skip with `--skip-peddy`)*: Run [peddy](https://github.com/brentp/peddy) for automated pedigree/sex/ancestry quality control. Peddy validates sex from genotypes, predicts ancestry by projecting onto 1000 Genomes principal components, and checks relatedness between all sample pairs. If a pedigree file (`--ped-file`) is provided it is validated; otherwise a minimal PED (unrelated singletons) is generated. A final pedigree incorporating peddy's discovered relationships is produced. Peddy's sample-level metrics (ancestry prediction, predicted sex, heterozygosity, PCs) are merged into the compiled sample sheet with a `peddy_` prefix. **Genome-aware**: when the pipeline genome is not GRCh38 (e.g. T2T-CHM13), `bcftools +liftover` is used to convert variant coordinates to GRCh38, variant IDs are set to `CHROM:POS:REF:ALT` to match peddy's GRCH38 sites list, and only matching sites are retained — producing a small, correctly-coordinated VCF for peddy regardless of the source reference build.
 
-7. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F), ancestry PCs (default 20), and peddy sample-level metrics (ancestry prediction, sex check, heterozygosity) for every sample.
+7. **Ancestry-Stratified QC**: Using peddy's ancestry predictions, the pipeline performs ancestry-stratified variant QC and PCA for each ancestry group meeting a minimum sample threshold (default: 100 samples, configurable via `--min-ancestry-samples`). For each qualifying ancestry group (e.g., EUR, AFR, EAS):
+   - The VCF is subset to samples of that ancestry
+   - **Ancestry-specific variant QC** is computed (missingness, HWE, MAF), avoiding inflated HWE deviation from the Wahlund effect in mixed-ancestry samples (Anderson et al. 2010)
+   - **Within-ancestry PCA** resolves finer population structure masked by multi-ancestry PCA (Peterson et al. 2019)
+   - All per-ancestry variant QC metrics are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf` alongside the full-cohort `all_call_rate`, `all_hwe_p`, `all_maf`
+   - Ancestry-specific PCs are included in the compiled sample sheet, with `NaN` for samples not of a given ancestry
 
-8. **QC Diagnostics & Report**: Automated QC diagnostics (`scripts/diagnose_qc.py`) identify potential issues (deflated call rates, inflated LRR SD, build mismatches) using intentionally wider diagnostic thresholds (call rate ≥ 0.95, LRR SD ≤ 0.40) than the standard GWAS QC thresholds to surface warnings early. The diagnostic report can also be run standalone: `python3 scripts/diagnose_qc.py --output-dir /path/to/output`. A comprehensive **interactive HTML pipeline report** is generated featuring:
+8. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F), ancestry PCs (default 20), ancestry-specific PCs (e.g., `EUR_PC1`, `AFR_PC1`, with `NaN` for non-members), and peddy sample-level metrics (ancestry prediction, sex check, heterozygosity) for every sample.
+
+9. **QC Diagnostics & Report**: Automated QC diagnostics (`scripts/diagnose_qc.py`) identify potential issues (deflated call rates, inflated LRR SD, build mismatches) using intentionally wider diagnostic thresholds (call rate ≥ 0.95, LRR SD ≤ 0.40) than the standard GWAS QC thresholds to surface warnings early. The diagnostic report can also be run standalone: `python3 scripts/diagnose_qc.py --output-dir /path/to/output`. A comprehensive **interactive HTML pipeline report** is generated featuring:
    - **Interactive Plotly.js charts** — Call Rate vs LRR SD scatter plot and metric distribution histograms with hover tooltips, zoom, and pan
    - **GWAS QC best-practice thresholds** — Reference table citing Anderson et al. (2010), Marees et al. (2018), and Turner et al. (2011), covering sample call rate (≥ 0.97), LRR SD (≤ 0.35), BAF SD (≤ 0.15), heterozygosity rate (± 3 SD), variant missingness (< 0.02), HWE p-value (≥ 1e-6), MAF (≥ 0.01), and inbreeding F (|F| ≤ 0.05), with per-threshold rationale and citation notes in the report
+   - **Tabbed ancestry-stratified variant QC** — Switch between "All" (full cohort) and per-ancestry variant QC summaries and interactive plots (call rate histogram, MAF distribution) for each ancestry group
    - **Compiled methods citations summary** — Exported as `citations_summary.tsv` and rendered in the report, listing each citation, what it supports, and how that method/tool/algorithm is applied in this pipeline
    - **Per-sample QC table** — Searchable, sortable table with color-coded pass/fail/warning indicators for every sample
    - **Visual overview** — KPI metric cards, QC pass-rate progress bar, stage comparison with color-coded improvement indicators
    - Publication-quality static figures (QC dashboard, PCA scatter, sex check) and auto-generated methods paragraph
+
+10. **Summary Bundle**: All key outputs are consolidated into a `summary/` directory for easy retrieval.
 
 ### Reference Genome
 
@@ -136,11 +146,12 @@ apptainer exec --bind $PWD illumina_idat_processing_main.sif \
 | `--threads INT` | Number of threads (default: 1) |
 | `--min-call-rate FLOAT` | Min call rate for HQ samples in Stage 2 (default: 0.97) |
 | `--max-lrr-sd FLOAT` | Max LRR SD for HQ samples in Stage 2 (default: 0.35) |
+| `--min-ancestry-samples INT` | Minimum samples per ancestry group for ancestry-stratified QC (default: 100) |
 | `--sample-name-map FILE` | Two-column tab-delimited file mapping IDAT root names to desired sample names |
 | `--ped-file FILE` | Pedigree file (.ped/.fam) for peddy relationship validation. If not provided, a minimal PED (unrelated singletons) is generated |
 | `--force-rename` | Allow renaming even when fewer than 50% of samples match the name map |
 | `--skip-stage2` | Skip Stage 2 reclustering |
-| `--skip-peddy` | Skip peddy pedigree/sex/ancestry QC step |
+| `--skip-peddy` | Skip peddy pedigree/sex/ancestry QC step (also skips ancestry-stratified QC) |
 | `--skip-download` | Do not auto-download manifests or reference |
 | `--skip-failures` | Continue past corrupt/truncated IDAT files instead of halting |
 | `--force` | Force re-run of all steps, ignoring checkpoints |
@@ -283,7 +294,22 @@ output/
 │   ├── peddy_final.ped              # Final pedigree with discovered relationships
 │   ├── peddy.html                   # Peddy interactive report
 │   └── peddy.background_pca.json    # Ancestry PCA projection data
-├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + peddy metrics)
+├── ancestry_stratified_qc/          # Ancestry-stratified QC (if peddy ran)
+│   ├── ancestry_assignments.tsv     # Sample-to-ancestry mapping from peddy
+│   ├── collated_variant_qc.tsv      # Unified variant QC across all ancestries
+│   ├── ancestry_stratified_summary.txt # Summary of stratified analyses
+│   ├── EUR/                         # Per-ancestry analysis (example: EUR)
+│   │   ├── samples.txt              # Sample list for this ancestry
+│   │   ├── EUR_subset.bcf           # VCF subset to EUR samples
+│   │   ├── variant_qc/             # Ancestry-specific variant QC
+│   │   │   ├── variant_qc.vmiss    # EUR-specific missingness
+│   │   │   ├── variant_qc.hardy    # EUR-specific HWE
+│   │   │   └── variant_qc.afreq    # EUR-specific allele frequencies
+│   │   └── pca/                     # Within-ancestry PCA
+│   │       ├── pca_projections.tsv  # EUR PCs for EUR samples
+│   │       └── qc_summary.txt      # EUR PCA QC summary
+│   └── AFR/                         # (repeat for each qualifying ancestry)
+├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + ancestry PCs + peddy)
 ├── qc_diagnostic_report.txt         # Automated QC diagnostic report
 ├── pipeline_report.html             # Comprehensive HTML report with figures
 ├── summary_statistics.tsv           # Publication-ready summary statistics table

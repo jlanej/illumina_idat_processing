@@ -30,6 +30,7 @@ HELP_SCRIPTS=(
     scripts/process_1000g.sh
     scripts/compute_variant_qc.sh
     scripts/ancestry_pca.sh
+    scripts/ancestry_stratified_qc.sh
 )
 
 for relpath in "${HELP_SCRIPTS[@]}"; do
@@ -86,6 +87,7 @@ PYTHON_SCRIPTS=(
     scripts/filter_qc_samples.py
     scripts/bpm_header_probe.py
     scripts/generate_report.py
+    scripts/collate_variant_qc.py
 )
 for relpath in "${PYTHON_SCRIPTS[@]}"; do
     PYTHON_SCRIPT="${REPO_DIR}/${relpath}"

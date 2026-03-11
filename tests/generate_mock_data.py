@@ -436,6 +436,121 @@ def generate_peddy_data(output_dir, n_samples=30):
     return het_path
 
 
+def generate_ancestry_stratified_qc(output_dir, n_samples=30):
+    """Write mock ancestry-stratified QC outputs.
+
+    Creates per-ancestry variant QC summaries and a collated variant QC
+    file for the ancestry groups that exceed the minimum sample threshold
+    in the mock data.
+    """
+    rng = _rng()
+    strat_dir = os.path.join(output_dir, 'ancestry_stratified_qc')
+    os.makedirs(strat_dir, exist_ok=True)
+
+    ancestry_groups = ['EUR', 'AFR', 'EAS', 'AMR', 'SAS']
+    # In mock data, ancestry is assigned as i % 3 -> EUR, AFR, EAS cycle
+    # so with 30 samples: EUR=10, AFR=10, EAS=10, AMR=0, SAS=0
+    ancestry_counts = {}
+    for i in range(n_samples):
+        anc = ancestry_groups[i % 3]
+        ancestry_counts[anc] = ancestry_counts.get(anc, 0) + 1
+
+    # Write ancestry assignments
+    assign_path = os.path.join(strat_dir, 'ancestry_assignments.tsv')
+    with open(assign_path, 'w') as f:
+        f.write('sample_id\tancestry\n')
+        for i in range(n_samples):
+            sid = f"SAMPLE_{i + 1:03d}"
+            anc = ancestry_groups[i % 3]
+            f.write(f'{sid}\t{anc}\n')
+
+    # Generate per-ancestry variant QC for groups with >= 5 samples (mock threshold)
+    mock_ancestries = [a for a, c in ancestry_counts.items() if c >= 5]
+
+    for anc in mock_ancestries:
+        anc_dir = os.path.join(strat_dir, anc)
+        os.makedirs(os.path.join(anc_dir, 'variant_qc'), exist_ok=True)
+
+        # Variant QC summary
+        n_vars = rng.randint(600000, 650000)
+        text = f"""==================================================
+  Variant QC Summary ({anc}, autosomes)
+==================================================
+
+  Input variants:         {n_vars:,}
+  After call-rate filter: {int(n_vars * 0.985):,} (≥ 0.98)
+  After HWE filter:       {int(n_vars * 0.978):,} (p ≥ 1e-6)
+  After MAF filter:       {int(n_vars * 0.82):,} (≥ 0.01)
+
+  Ti/Tv ratio:            {round(rng.uniform(2.0, 2.15), 2)}
+  Mean inbreeding F:      {round(rng.uniform(-0.005, 0.005), 4)}
+"""
+        with open(os.path.join(anc_dir, 'variant_qc', 'variant_qc_summary.txt'),
+                  'w') as f:
+            f.write(text)
+
+        # Write mock .vmiss file
+        vmiss_path = os.path.join(anc_dir, 'variant_qc', 'variant_qc.vmiss')
+        with open(vmiss_path, 'w') as f:
+            f.write('#CHROM\tID\tMISSING_CT\tOBS_CT\tF_MISS\n')
+            n_count = ancestry_counts.get(anc, 10)
+            for v in range(min(200, n_vars)):
+                miss_ct = rng.randint(0, max(1, n_count // 5))
+                f_miss = round(miss_ct / n_count, 6)
+                f.write(f'chr1\trs{100000 + v}\t{miss_ct}\t{n_count}\t{f_miss}\n')
+
+        # Write mock .hardy file
+        hardy_path = os.path.join(anc_dir, 'variant_qc', 'variant_qc.hardy')
+        with open(hardy_path, 'w') as f:
+            f.write('#CHROM\tID\tA1\tA2\tCT\tP\n')
+            for v in range(min(200, n_vars)):
+                p = 10 ** rng.uniform(-12, 0)
+                f.write(f'chr1\trs{100000 + v}\tA\tG\t{n_count}\t{p:.6e}\n')
+
+        # Write mock .afreq file
+        afreq_path = os.path.join(anc_dir, 'variant_qc', 'variant_qc.afreq')
+        with open(afreq_path, 'w') as f:
+            f.write('#CHROM\tID\tREF\tALT\tALT_FREQS\tOBS_CT\n')
+            for v in range(min(200, n_vars)):
+                af = round(rng.uniform(0.0, 0.5), 6)
+                f.write(f'chr1\trs{100000 + v}\tA\tG\t{af}\t{n_count * 2}\n')
+
+    # Generate collated variant QC
+    collated_path = os.path.join(strat_dir, 'collated_variant_qc.tsv')
+    with open(collated_path, 'w') as f:
+        cols = ['variant_id', 'all_call_rate', 'all_hwe_p', 'all_maf']
+        for anc in sorted(mock_ancestries):
+            cols.extend([f'{anc}_call_rate', f'{anc}_hwe_p', f'{anc}_maf'])
+        f.write('\t'.join(cols) + '\n')
+        for v in range(200):
+            row = [f'rs{100000 + v}']
+            # all
+            cr = round(1 - rng.uniform(0, 0.05), 6)
+            hwe = f'{10 ** rng.uniform(-8, 0):.6e}'
+            maf = round(rng.uniform(0, 0.5), 6)
+            row.extend([str(cr), hwe, str(maf)])
+            for anc in sorted(mock_ancestries):
+                cr = round(1 - rng.uniform(0, 0.06), 6)
+                hwe = f'{10 ** rng.uniform(-10, 0):.6e}'
+                maf = round(rng.uniform(0, 0.5), 6)
+                row.extend([str(cr), hwe, str(maf)])
+            f.write('\t'.join(row) + '\n')
+
+    # Summary
+    summary_path = os.path.join(strat_dir, 'ancestry_stratified_summary.txt')
+    with open(summary_path, 'w') as f:
+        f.write("======================================================\n")
+        f.write("  Ancestry-Stratified QC Summary\n")
+        f.write("======================================================\n\n")
+        f.write("Ancestry Groups Analyzed:\n")
+        for anc in sorted(mock_ancestries):
+            f.write(f"  {anc}: {ancestry_counts[anc]} samples\n")
+        f.write("\n")
+        f.write(f"Collated variant QC: {collated_path}\n")
+
+    return summary_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate deterministic mock pipeline output for testing"
@@ -488,6 +603,9 @@ def main():
 
     note = generate_mock_notice(args.output_dir)
     print(f"  Mock notice:      {note}")
+
+    ancestry_strat = generate_ancestry_stratified_qc(args.output_dir, n)
+    print(f"  Ancestry strat:   {ancestry_strat}")
 
     print("\nDone. Run generate_report.py --output-dir to build the HTML report.")
 
