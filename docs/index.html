@@ -272,7 +272,7 @@ section h2 {
 
     <div class="header">
         <h1>🧬 Illumina IDAT Processing Pipeline Report</h1>
-        <p class="subtitle">Generated: 2026-03-11 15:13:34</p>
+        <p class="subtitle">Generated: 2026-03-11 15:30:37</p>
     </div>
 
     <nav class="nav-bar">
@@ -283,8 +283,8 @@ section h2 {
         <a href="#comparison">Stage Comparison</a>
         <a href="#variant-qc">Variant QC</a>
         <a href="#sex-check">Sex Check</a>
-        <a href="#pca">Ancestry PCA</a>
         <a href="#peddy">Peddy QC</a>
+        <a href="#pca">Ancestry PCA</a>
         <a href="#realignment">Realignment</a>
         <a href="#diagnostics">Diagnostics</a>
         <a href="#citations">Citations</a>
@@ -611,6 +611,26 @@ Collated variant QC: /tmp/mock_output/ancestry_stratified_qc/collated_variant_qc
         </noscript>
     </section>
 
+    <section id="peddy">
+        <h2>🔬 Peddy QC (Pedigree/Sex/Ancestry)</h2>
+        <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.75rem">
+            Peddy validates sex, ancestry, and relatedness from VCF genotypes.
+            Ancestry predictions are colored by predicted population (EUR, AFR, EAS, AMR, SAS).
+            <strong>Note:</strong> Peddy PCs are projected onto the 1000 Genomes reference panel
+            and are in a separate coordinate space from the pipeline&rsquo;s own PCA &mdash;
+            the two are not directly comparable.
+        </p>
+        <div class="plot-grid">
+            <div class="card"><div id="plot-peddy-pca12" class="plot-box"></div></div>
+            <div class="card"><div id="plot-peddy-pca34" class="plot-box"></div></div>
+        </div>
+        <div class="plot-controls-note">
+            Peddy ancestry PCA projections colored by predicted population (peddy&rsquo;s own coordinate space).
+            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section to recolor
+            the pipeline&rsquo;s own samples by their peddy ancestry predictions without mixing coordinate spaces.
+        </div>
+    </section>
+
     <section id="pca">
         <h2>🌍 Ancestry PCA</h2>
         <div class="plot-controls">
@@ -666,26 +686,6 @@ Collated variant QC: /tmp/mock_output/ancestry_stratified_qc/collated_variant_qc
   PCs computed: 20
   Eigenvalues: 12.34, 8.56, 5.23, 3.89, 2.67, ...
 </pre></div>
-    </section>
-
-    <section id="peddy">
-        <h2>🔬 Peddy QC (Pedigree/Sex/Ancestry)</h2>
-        <p style="font-size:0.85rem;color:#64748b;margin-bottom:0.75rem">
-            Peddy validates sex, ancestry, and relatedness from VCF genotypes.
-            Ancestry predictions are colored by predicted population (EUR, AFR, EAS, AMR, SAS).
-            <strong>Note:</strong> Peddy PCs are projected onto the 1000 Genomes reference panel
-            and are in a separate coordinate space from the pipeline&rsquo;s own PCA &mdash;
-            the two are not directly comparable.
-        </p>
-        <div class="plot-grid">
-            <div class="card"><div id="plot-peddy-pca12" class="plot-box"></div></div>
-            <div class="card"><div id="plot-peddy-pca34" class="plot-box"></div></div>
-        </div>
-        <div class="plot-controls-note">
-            Peddy ancestry PCA projections colored by predicted population (peddy&rsquo;s own coordinate space).
-            Use &ldquo;Color by peddy ancestry&rdquo; in the Ancestry PCA section above to recolor
-            the pipeline&rsquo;s own samples by their peddy ancestry predictions without mixing coordinate spaces.
-        </div>
     </section>
 
     <section id="realignment">
@@ -751,7 +751,7 @@ Collated variant QC: /tmp/mock_output/ancestry_stratified_qc/collated_variant_qc
     <section id="methods">
         <h2>📝 Methods Text (for publications)</h2>
         <div class="methods-text">
-            <p>Genotyping intensity data (IDAT files) were processed using the Illumina IDAT Processing Pipeline. Raw IDAT files were converted to GTC format using the GenCall algorithm (bcftools +idat2gtc), then to VCF format with B Allele Frequency (BAF) and Log R Ratio (LRR) intensities (bcftools +gtc2vcf). Probe coordinates were validated by realigning CSV manifest flank sequences against the CHM13 reference genome using BWA-MEM. </p><p>A two-stage genotyping approach was employed. Stage 1 genotype calls were generated using manufacturer-provided EGT cluster definitions. Per-sample QC metrics (call rate, LRR standard deviation, BAF standard deviation at heterozygous sites, and heterozygosity rate) were computed on autosomal variants. Following common GWAS QC guidance (Anderson et al., 2010; Marees et al., 2018; Turner et al., 2011), high-quality samples (call rate ≥ 0.97 and LRR SD ≤ 0.35; n = 24 of 30) were used to recompute study-specific genotype cluster definitions (EGT file) in Stage 2. All samples were then re-genotyped using the study-specific clusters, with additional BAF/LRR median adjustment (--adjust-clusters). </p><p>Variant-level QC included per-variant missingness, Hardy-Weinberg equilibrium tests (mid-p adjustment), allele frequency estimation, per-sample inbreeding coefficients (F statistic), and transition/transversion ratio computation (plink2). Ancestry principal components were computed using stringent variant QC (missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning (window = 1000 kb, step = 1, r² < 0.1), and flashpca2. This stricter PCA MAF threshold was used to improve loading stability. </p><p>Sample ancestry was predicted using peddy (Pedersen and Quinlan, 2017), which projects samples onto 1000 Genomes principal components for ancestry classification. For each ancestry group with sufficient sample size (≥ 100 by default), ancestry-stratified variant QC (missingness, HWE, allele frequency) was performed to avoid inflated HWE deviation due to the Wahlund effect in mixed-ancestry samples (Anderson et al., 2010). Within-ancestry PCA was also computed to resolve finer population structure masked in multi-ancestry PCA (Peterson et al., 2019). Ancestry-specific PCs and variant QC metrics are collated alongside the full-cohort results. After processing, the mean call rate was 0.9806 and the mean LRR SD was 0.1933.</p>
+            <p>Genotyping intensity data (IDAT files) were processed using the Illumina IDAT Processing Pipeline. Raw IDAT files were converted to GTC format using the GenCall algorithm (bcftools +idat2gtc), then to VCF format with B Allele Frequency (BAF) and Log R Ratio (LRR) intensities (bcftools +gtc2vcf). Probe coordinates were validated by realigning CSV manifest flank sequences against the CHM13 reference genome using BWA-MEM. </p><p>A two-stage genotyping approach was employed. Stage 1 genotype calls were generated using manufacturer-provided EGT cluster definitions. Per-sample QC metrics (call rate, LRR standard deviation, BAF standard deviation at heterozygous sites, and heterozygosity rate) were computed on autosomal variants. Following common GWAS QC guidance (Anderson et al., 2010; Marees et al., 2018; Turner et al., 2011), high-quality samples (call rate ≥ 0.97 and LRR SD ≤ 0.35; n = 24 of 30) were used to recompute study-specific genotype cluster definitions (EGT file) in Stage 2. All samples were then re-genotyped using the study-specific clusters, with additional BAF/LRR median adjustment (--adjust-clusters). </p><p>Sample ancestry was predicted using peddy (Pedersen and Quinlan, 2017), which projects samples onto 1000 Genomes principal components for ancestry classification. Ancestry principal components were computed using stringent variant QC (missingness < 2%, HWE p ≥ 1e-6, MAF ≥ 5%), LD pruning (window = 1000 kb, step = 1, r² < 0.1), and flashpca2. This stricter PCA MAF threshold was used to improve loading stability. For each ancestry group with sufficient sample size (≥ 100 by default), ancestry-stratified variant QC (missingness, HWE, allele frequency) was performed to avoid inflated HWE deviation due to the Wahlund effect in mixed-ancestry samples (Anderson et al., 2010). Within-ancestry PCA was also computed to resolve finer population structure masked in multi-ancestry PCA (Peterson et al., 2019). Ancestry-specific PCs and variant QC metrics are collated alongside the full-cohort results. Variant-level QC included per-variant missingness, Hardy-Weinberg equilibrium tests (mid-p adjustment), allele frequency estimation, per-sample inbreeding coefficients (F statistic), and transition/transversion ratio computation (plink2). After processing, the mean call rate was 0.9806 and the mean LRR SD was 0.1933.</p>
         </div>
     </section>
 
