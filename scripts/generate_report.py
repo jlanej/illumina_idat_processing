@@ -2260,7 +2260,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         var vqcToggles = Array.prototype.slice.call(document.querySelectorAll('.vqc-toggle'));
-        var vqcColors = ['#2563eb', '#059669', '#7c3aed', '#dc2626', '#d97706', '#0ea5e9', '#9333ea', '#e11d48'];
+        var vqcColors = ['#0072B2', '#E69F00', '#009E73', '#CC79A7', '#56B4E9', '#D55E00', '#F0E442', '#000000'];
         function selectedVqcGroups() {
             return vqcToggles.filter(function(toggle) { return toggle.checked; })
                 .map(function(toggle) { return toggle.value; });
@@ -2275,6 +2275,10 @@ document.addEventListener('DOMContentLoaded', function() {
             var div = document.getElementById(targetId);
             if (!div) return;
             var groups = selectedVqcGroups();
+            if (!groups.length) {
+                setVqcPlotPlaceholder(div, 'Please select at least one ancestry group to view plots.');
+                return;
+            }
             var traces = [];
             groups.forEach(function(group, idx) {
                 var gd = vqcData[group];
@@ -2284,7 +2288,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 var color = groupColor(group, idx);
                 traces.push({
                     x: values, type: 'histogram', name: groupLabel(group),
-                    marker: {color: color, opacity: 0.45, line: {color: 'white', width: 0.5}},
+                    marker: {color: color, opacity: 0.6, line: {color: 'white', width: 0.5}},
                     hovertemplate: hoverPrefix + ': %{x}<br>Count: %{y}<extra>' + groupLabel(group) + '</extra>'
                 });
             });
@@ -2452,18 +2456,19 @@ def _build_html(stats, stage1_stats, figures, realign_text,
         missing_summaries = sorted(set(vqc_data_groups) - set(ancestry_vqc_texts.keys()))
         if missing_summaries:
             print(
-                "[diag] Variant QC plots: rendering ancestry plot tabs without text summary for: "
+                "[diag] Variant QC plots: rendering ancestry plot toggles without text summary for: "
                 + ", ".join(missing_summaries),
                 file=sys.stderr
             )
 
     vqc_toggle_groups = ['all'] + merged_vqc_groups
     vqc_toggle_controls = ''.join(
-        '<label class="vqc-toggle-item">'
-        f'<input class="vqc-toggle" type="checkbox" value="{group}" checked> '
+        f'<label class="vqc-toggle-item" for="vqc-toggle-{idx}">'
+        f'<input id="vqc-toggle-{idx}" class="vqc-toggle" type="checkbox" value="{group}" '
+        f'aria-label="Show {("All" if group == "all" else group)} ancestry in variant QC plots" checked> '
         f'{("All" if group == "all" else group)}'
         '</label>'
-        for group in vqc_toggle_groups
+        for idx, group in enumerate(vqc_toggle_groups)
     )
     vqc_strat_summary = (
         _pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary')

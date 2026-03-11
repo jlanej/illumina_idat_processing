@@ -726,6 +726,7 @@ from generate_report import _prepare_collated_vqc_json  # noqa: E402
 test_file = os.path.join(tmp_dir, 'collated_bias_test.tsv')
 with open(test_file, 'w') as f:
     f.write('variant_id\tall_call_rate\tall_hwe_p\tall_maf\n')
+    # Bimodal distribution verifies the payload retains every row (no subsampling).
     for i in range(10000):
         maf = 0.0 if i < 5000 else 0.5
         f.write(f'rs{i:06d}\t0.99\t0.5\t{maf}\n')
@@ -757,7 +758,7 @@ fi
 # --- Test 19ja: Cross-ancestry missing-data explanation text ---
 echo "--- Test 19ja: Cross-ancestry missing-data explanations present ---"
 if grep -q 'cross-ancestry pass flags were not found in collated variant QC' "${TMP_DIR}/pipeline_report.html" && \
-   grep -q 'No call-rate values available for this group' "${TMP_DIR}/pipeline_report.html" && \
+   grep -q 'No values available for the selected ancestry group' "${TMP_DIR}/pipeline_report.html" && \
    grep -q 'need at least two groups in ancestry_stratified_qc/collated_variant_qc.tsv' "${TMP_DIR}/pipeline_report.html"; then
     echo "  PASS: Report includes explicit missing-data explanations for variant QC plots"
     (( PASS++ )) || true
