@@ -2244,7 +2244,24 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 f'<img src="data:image/png;base64,{figures[key]}" '
                 f'alt="{title}"></div>')
 
-    # Build stats rows
+    # Build variant QC tab buttons and panels for each ancestry group
+    vqc_tab_buttons = ''.join(
+        f'<button class="vqc-tab" data-tab="vqc-{anc}" type="button">{anc}</button>'
+        for anc in sorted(ancestry_vqc_texts.keys())
+    )
+    vqc_ancestry_panels = ''.join(
+        f'<div id="vqc-{anc}" class="vqc-panel" style="display:none">'
+        f'{_pre_block(text, f"Variant QC Summary ({anc})")}'
+        f'<div class="plot-grid">'
+        f'<div class="card"><div id="plot-vqc-cr-{anc}" class="plot-box"></div></div>'
+        f'<div class="card"><div id="plot-vqc-maf-{anc}" class="plot-box"></div></div>'
+        f'</div></div>'
+        for anc, text in sorted(ancestry_vqc_texts.items())
+    )
+    vqc_strat_summary = (
+        _pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary')
+        if ancestry_strat_summary else ''
+    )
     stats_rows = ''
     for label, metric in [
         ('Call Rate', 'call_rate'), ('LRR SD', 'lrr_sd'),
@@ -2520,7 +2537,7 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             </p>
             <div class="vqc-tabs" id="vqc-tab-bar">
                 <button class="vqc-tab active" data-tab="vqc-all" type="button">All</button>
-                {''.join(f'<button class="vqc-tab" data-tab="vqc-{anc}" type="button">{anc}</button>' for anc in sorted(ancestry_vqc_texts.keys()))}
+                {vqc_tab_buttons}
             </div>
         </div>
         <div id="vqc-all" class="vqc-panel" style="display:block">
@@ -2530,17 +2547,8 @@ def _build_html(stats, stage1_stats, figures, realign_text,
                 <div class="card"><div id="plot-vqc-maf-all" class="plot-box"></div></div>
             </div>
         </div>
-        {''.join(
-            f"""<div id="vqc-{anc}" class="vqc-panel" style="display:none">
-            {_pre_block(text, f'Variant QC Summary ({anc})')}
-            <div class="plot-grid">
-                <div class="card"><div id="plot-vqc-cr-{anc}" class="plot-box"></div></div>
-                <div class="card"><div id="plot-vqc-maf-{anc}" class="plot-box"></div></div>
-            </div>
-        </div>"""
-            for anc, text in sorted(ancestry_vqc_texts.items())
-        )}
-        {_pre_block(ancestry_strat_summary, 'Ancestry-Stratified QC Summary') if ancestry_strat_summary else ''}
+        {vqc_ancestry_panels}
+        {vqc_strat_summary}
     </section>
 
     <section id="sex-check">
