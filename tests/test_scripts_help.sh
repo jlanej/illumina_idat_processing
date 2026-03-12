@@ -196,6 +196,7 @@ if [[ -f "${RUN_PEDDY}" ]]; then
        ! grep -q 'bcftools sort' <<< "${GRCH38_SUBSET_BLOCK}" && \
        grep -q -- '--sites hg38' "${RUN_PEDDY}" && \
        grep -q 'verify manifest realignment to GRCh38 completed' "${RUN_PEDDY}" && \
+       ! grep -q -- '--no-tags-update' "${RUN_PEDDY}" && \
        ! grep -q 'strip_chr.txt' "${RUN_PEDDY}" && \
        ! grep -q 'lifted_grch38.vcf.gz' "${RUN_PEDDY}"; then
         echo "  PASS: run_peddy.sh reports overlap and keeps liftover filtering inline"

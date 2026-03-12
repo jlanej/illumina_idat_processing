@@ -474,12 +474,11 @@ _prepare_liftover_subset() {
     local peddy_vcf="${TMP_DIR}/peddy_input.vcf.gz"
     local lifted_count_file="${TMP_DIR}/lifted_variants.count"
     rm -f "${lifted_count_file}"
-    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" --no-tags-update 2>\"${TMP_DIR}/liftover.log\" | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.\" -Oz -o \"${peddy_vcf}\""
+    _debug_log_command "bcftools +liftover \"${liftover_vcf}\" -- -s \"${liftover_src_fasta}\" -f \"${target_fasta}\" -c \"${RESOURCE_DIR}/liftover_chain.gz\" 2>\"${TMP_DIR}/liftover.log\" | bcftools norm -f \"${target_fasta}\" -c s -Ou 2>\"${TMP_DIR}/liftover.norm.log\" | tee >(bcftools view -H | wc -l > \"${lifted_count_file}\") | bcftools view -T \"${RESOURCE_DIR}/GRCH38.sites.windows\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.\" -Oz -o \"${peddy_vcf}\""
     bcftools +liftover "${liftover_vcf}" -- \
         -s "${liftover_src_fasta}" \
         -f "${target_fasta}" \
-        -c "${RESOURCE_DIR}/liftover_chain.gz" \
-        --no-tags-update 2>"${TMP_DIR}/liftover.log" | \
+        -c "${RESOURCE_DIR}/liftover_chain.gz" 2>"${TMP_DIR}/liftover.log" | \
     # -c s: fix REF mismatches against GRCh38 target FASTA after coordinate liftover.
     bcftools norm -f "${target_fasta}" -c s -Ou 2>"${TMP_DIR}/liftover.norm.log" | \
     tee >(bcftools view -H | wc -l > "${lifted_count_file}") | \
