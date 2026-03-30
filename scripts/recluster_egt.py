@@ -967,14 +967,19 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
 
         # Compute means and stds using masked operations
         # Use NaN-based approach: set non-matching to NaN, then nanmean/nanstd
+        # ddof=1 gives sample (Bessel-corrected) standard deviation, which is
+        # the unbiased estimator appropriate for cluster spread estimation in
+        # EGT files.  Using ddof=0 (population variance) underestimates spread
+        # for small-N clusters; Illumina GenTrain and field best practice use
+        # sample standard deviation.
         theta_masked = np.where(mask, all_theta, np.nan)
         r_masked = np.where(mask, all_r, np.nan)
 
         with np.errstate(all="ignore"):
             geno_theta_mean[geno_code] = np.nanmean(theta_masked, axis=1)
-            geno_theta_std[geno_code] = np.nanstd(theta_masked, axis=1, ddof=0)
+            geno_theta_std[geno_code] = np.nanstd(theta_masked, axis=1, ddof=1)
             geno_r_mean[geno_code] = np.nanmean(r_masked, axis=1)
-            geno_r_std[geno_code] = np.nanstd(r_masked, axis=1, ddof=0)
+            geno_r_std[geno_code] = np.nanstd(r_masked, axis=1, ddof=1)
 
         # Replace NaN results (from all-NaN slices) with 0
         geno_theta_mean[geno_code] = np.nan_to_num(geno_theta_mean[geno_code], nan=0.0)
