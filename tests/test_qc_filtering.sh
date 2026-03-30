@@ -393,7 +393,6 @@ var = sum((x - mean)**2 for x in vals) / (len(vals) - 1)
 print(f'{math.sqrt(var):.4f}')
 ")
 assert_eq "${DDOF1_RESULT}" "1.4142" "ddof=1 std([1,3]) = √2 ≈ 1.4142"
-assert_eq "${DDOF1_RESULT}" "1.4142" "ddof=1 std([1,3]) = √2 ≈ 1.4142"
 
 echo ""
 

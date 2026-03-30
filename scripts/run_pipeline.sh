@@ -530,7 +530,10 @@ if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.ped_check.csv" ]]; the
         RELAT_ARGS+=(--sample-qc "${FINAL_QC}")
     fi
 
-    python3 "${SCRIPT_DIR}/filter_related_samples.py" "${RELAT_ARGS[@]}" 2>&1 || true
+    python3 "${SCRIPT_DIR}/filter_related_samples.py" "${RELAT_ARGS[@]}" 2>&1 || {
+        echo "Warning: Relatedness filtering failed. Continuing without relatedness exclusions." >&2
+        true > "${RELATEDNESS_EXCLUDED}"
+    }
     echo ""
 else
     true > "${RELATEDNESS_EXCLUDED}"
@@ -547,7 +550,10 @@ if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.het_check.csv" && -f "
         --peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv" \
         --output-excluded "${HET_OUTLIER_EXCLUDED}" \
         --output-log "${OUTPUT_DIR}/het_outlier_details.tsv" \
-        --sd-threshold 3 2>&1 || true
+        --sd-threshold 3 2>&1 || {
+        echo "Warning: Heterozygosity outlier filtering failed. Continuing without het exclusions." >&2
+        true > "${HET_OUTLIER_EXCLUDED}"
+    }
     echo ""
 else
     true > "${HET_OUTLIER_EXCLUDED}"
