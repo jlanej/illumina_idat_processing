@@ -290,9 +290,12 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
         if peddy_sex in ('M', 'F'):
             methods.append(peddy_sex)
 
+        # Check raw f_sex for ambiguous classification
+        raw_f_sex = f_info.get('f_sex', '')
+
         if len(methods) >= 2 and len(set(methods)) > 1:
             status = 'DISCORDANT'
-        elif f_sex == 'ambiguous':
+        elif raw_f_sex == 'ambiguous':
             status = 'AMBIGUOUS'
         elif peddy_error:
             status = 'PEDDY_ERROR'
