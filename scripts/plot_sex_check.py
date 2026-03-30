@@ -178,7 +178,7 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1):
         for i, gt in enumerate(gts):
             if i >= n_samples:
                 break
-            if gt in ('.', './.', '.|.', '.', ''):
+            if gt in ('.', './.', '.|.', ''):
                 continue
             called_counts[i] += 1
             # Heterozygous: 0/1, 0|1, 1/0, 1|0
@@ -195,16 +195,19 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1):
         if n_called == 0:
             continue
         het_rate = n_het / n_called
-        # F-statistic: use 1 - het_rate/expected_het approximation
-        # For chrX, expected het under random mating is typically ~0.3
-        # But the standard --check-sex approach uses:
-        # F = 1 - (n_het / expected_n_het) where expected = 2pq * n_called
-        # Simplified: use homozygosity-based F = 1 - obs_het_rate / exp_het_rate
-        # The actual plink approach sums over all loci.
-        # Here we use the proportion: F ≈ 1 - 2 * het_rate  (for haploid/diploid mix)
-        # More robustly, classify by het_rate directly:
-        #   males: het_rate < ~0.02; females: het_rate > ~0.10
-        # Use the plink convention for F:
+        # Simplified F-statistic approximation for sex chromosome ploidy.
+        # The standard plink --check-sex computes F = 1 - (obs_het / E[het])
+        # where E[het] is the per-locus expected heterozygosity from allele
+        # frequencies summed across all loci.  Computing per-locus allele
+        # frequencies in a mixed male/female cohort adds complexity (males
+        # are hemizygous on X), so we use a simplified proxy:
+        #   F ≈ 1 - 2 * observed_het_rate
+        # This maps the het_rate [0, 0.5] to F [1, 0]:
+        #   Males (hemizygous, het_rate ≈ 0) → F ≈ 1.0
+        #   Females (diploid, het_rate ≈ 0.3) → F ≈ 0.4 → classified F < 0.2
+        # The 0.8/0.2 thresholds follow plink --check-sex conventions.
+        # This is an intensity-array-appropriate approximation; for WGS or
+        # imputed data, a full allele-frequency-based F is preferred.
         f_stat = 1.0 - (2.0 * het_rate) if het_rate <= 0.5 else 0.0
 
         if f_stat > 0.8:

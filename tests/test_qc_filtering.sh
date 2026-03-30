@@ -556,7 +556,7 @@ echo "--- Test 17: HWE-passing variant list intersection logic ---"
 HWE_TEST_DIR="${TMP_DIR}/hwe_intersection"
 mkdir -p "${HWE_TEST_DIR}/EUR/variant_qc" "${HWE_TEST_DIR}/AFR/variant_qc"
 
-# EUR hardy: variants v1, v2, v3 all pass HWE (p > 1e-6)
+# EUR hardy: variants v1, v2 pass HWE (p >> 1e-6); v3 borderline (p = 0.001, still passes)
 cat > "${HWE_TEST_DIR}/EUR/variant_qc/variant_qc.hardy" <<EOF
 #CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
 1	v1	A	T	100	200	100	0.5	0.5	0.95

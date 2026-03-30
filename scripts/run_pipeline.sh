@@ -647,7 +647,7 @@ if [[ -f "${FINAL_VCF}" ]]; then
     if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
         PCA_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
     fi
-    if [[ -s "${HWE_PASSING_VARIANTS}" ]]; then
+    if [[ -f "${HWE_PASSING_VARIANTS}" && -s "${HWE_PASSING_VARIANTS}" ]]; then
         PCA_ARGS+=(--include-variants "${HWE_PASSING_VARIANTS}")
         echo "Using ancestry-stratified HWE-passing variant set for PCA"
         echo "  (${HWE_PASSING_VARIANTS})"
