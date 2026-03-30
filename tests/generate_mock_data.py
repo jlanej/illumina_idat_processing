@@ -285,14 +285,17 @@ def generate_pca_data(output_dir, n_samples=30):
 
 
 def generate_sex_check_data(output_dir, n_samples=30):
-    """Write mock sex-check chrX/chrY median LRR table for interactive plotting."""
+    """Write mock sex-check chrX/chrY median LRR table with F-statistic and
+    cross-tabulation columns for interactive plotting."""
     sex_dir = os.path.join(output_dir, 'sex_check')
     os.makedirs(sex_dir, exist_ok=True)
     rng = _rng()
 
     filepath = os.path.join(sex_dir, 'sex_check_chrXY_lrr.tsv')
     with open(filepath, 'w') as f:
-        f.write('sample_id\tchrx_lrr_median\tchry_lrr_median\tcomputed_gender\n')
+        f.write('sample_id\tchrx_lrr_median\tchry_lrr_median\t'
+                'computed_gender\tchrx_f_stat\tf_sex\t'
+                'peddy_sex\tsex_status\n')
         for i in range(n_samples):
             sid = f"SAMPLE_{i + 1:03d}"
             male = (i % 2 == 0)
@@ -300,11 +303,35 @@ def generate_sex_check_data(output_dir, n_samples=30):
                 chrx = -0.11 + rng.gauss(0, 0.012)
                 chry = 0.08 + rng.gauss(0, 0.012)
                 sex = 'M'
+                f_stat = 0.95 + rng.gauss(0, 0.02)
+                f_sex = 'M'
+                peddy_sex = 'M'
+                status = 'CONCORDANT'
             else:
                 chrx = 0.03 + rng.gauss(0, 0.012)
                 chry = -0.07 + rng.gauss(0, 0.012)
                 sex = 'F'
-            f.write(f'{sid}\t{chrx:.4f}\t{chry:.4f}\t{sex}\n')
+                f_stat = 0.02 + rng.gauss(0, 0.02)
+                f_sex = 'F'
+                peddy_sex = 'F'
+                status = 'CONCORDANT'
+            f_stat = max(0.0, min(1.0, f_stat))
+            f.write(f'{sid}\t{chrx:.4f}\t{chry:.4f}\t{sex}\t'
+                    f'{f_stat:.6f}\t{f_sex}\t{peddy_sex}\t{status}\n')
+
+    # Write sex check summary
+    summary_path = os.path.join(sex_dir, 'sex_check_summary.txt')
+    with open(summary_path, 'w') as f:
+        f.write("Sex Check Cross-Tabulation Summary\n")
+        f.write("=" * 50 + "\n\n")
+        f.write(f"Total samples evaluated:  {n_samples}\n")
+        f.write(f"Concordant (all agree):   {n_samples}\n")
+        f.write("Discordant (methods disagree): 0\n")
+        f.write("Ambiguous (F-stat 0.2-0.8):    0\n\n")
+        f.write("Methods used:\n")
+        f.write("  1. LRR-based: Median chrX/chrY LRR intensity separation\n")
+        f.write("  2. F-statistic: chrX genotype heterozygosity (F>0.8=M, F<0.2=F)\n")
+        f.write("  3. Peddy: Genotype-based sex prediction via peddy\n")
 
     return filepath
 

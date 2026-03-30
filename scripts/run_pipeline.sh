@@ -429,10 +429,10 @@ fi
 echo ""
 
 # ---------------------------------------------------------------
-# Sex check plot
+# Sex check (LRR-based + X-chromosome F-statistic)
 # ---------------------------------------------------------------
 echo "======================================================"
-echo "  Generating Sex Check Plot"
+echo "  Generating Sex Check (LRR + F-statistic)"
 echo "======================================================"
 echo ""
 
@@ -497,6 +497,21 @@ else
     fi
 fi
 echo ""
+
+# ---------------------------------------------------------------
+# Integrate peddy sex check into sex check cross-tabulation
+# ---------------------------------------------------------------
+PEDDY_SEX_CHECK="${PEDDY_DIR}/peddy.sex_check.csv"
+if command -v python3 &>/dev/null && [[ -f "${PEDDY_SEX_CHECK}" && -f "${FINAL_VCF}" && -f "${FINAL_QC}" ]]; then
+    echo "Updating sex check with peddy cross-tabulation..."
+    python3 "${SCRIPT_DIR}/plot_sex_check.py" \
+        --vcf "${FINAL_VCF}" \
+        --sample-qc "${FINAL_QC}" \
+        --output-dir "${SEX_CHECK_DIR}" \
+        --peddy-sex-check "${PEDDY_SEX_CHECK}" \
+        --threads "${THREADS}" 2>&1 || true
+    echo ""
+fi
 
 # ---------------------------------------------------------------
 # Pre-PCA sample exclusions: relatedness and het outliers
@@ -571,38 +586,14 @@ if [[ "${N_EXCLUDED}" -gt 0 ]]; then
 fi
 
 # ---------------------------------------------------------------
-# Ancestry PCA: stringent QC + PCA computation
-# ---------------------------------------------------------------
-PCA_DIR="${OUTPUT_DIR}/ancestry_pca"
-
-echo "======================================================"
-echo "  Running Ancestry PCA"
-echo "======================================================"
-echo ""
-
-if [[ -f "${FINAL_VCF}" ]]; then
-    PCA_ARGS=(
-        --vcf "${FINAL_VCF}"
-        --output-dir "${PCA_DIR}"
-        --threads "${THREADS}"
-    )
-    if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
-        PCA_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
-    fi
-    if [[ "${FORCE}" == "true" ]]; then
-        PCA_ARGS+=(--force)
-    fi
-
-    bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
-else
-    echo "Note: Skipping ancestry PCA (final VCF not available)."
-fi
-echo ""
-
-# ---------------------------------------------------------------
 # Ancestry-Stratified QC (variant QC and PCA per ancestry)
 # ---------------------------------------------------------------
+# Run BEFORE full-cohort PCA so that the HWE-passing variant list from
+# per-ancestry QC can be used as the variant set for PCA.  This avoids the
+# chicken-and-egg problem of filtering on HWE in mixed-ancestry groups
+# (Price et al. 2006; Anderson et al. 2010).
 ANCESTRY_QC_DIR="${OUTPUT_DIR}/ancestry_stratified_qc"
+HWE_PASSING_VARIANTS="${ANCESTRY_QC_DIR}/hwe_passing_variants.txt"
 
 if [[ "${SKIP_PEDDY}" == "true" ]]; then
     echo "Skipping ancestry-stratified QC (peddy was skipped — ancestry predictions required)"
@@ -631,6 +622,44 @@ else
     else
         echo "Note: Skipping ancestry-stratified QC (final VCF or peddy output not available)."
     fi
+fi
+echo ""
+
+# ---------------------------------------------------------------
+# Ancestry PCA: stringent QC + PCA computation
+# ---------------------------------------------------------------
+# Uses HWE-passing variants from ancestry-stratified QC (when available)
+# to ensure the variant set for PCA is free of HWE-failing variants in
+# any ancestry group (Price et al. 2006; Anderson et al. 2010).
+PCA_DIR="${OUTPUT_DIR}/ancestry_pca"
+
+echo "======================================================"
+echo "  Running Ancestry PCA"
+echo "======================================================"
+echo ""
+
+if [[ -f "${FINAL_VCF}" ]]; then
+    PCA_ARGS=(
+        --vcf "${FINAL_VCF}"
+        --output-dir "${PCA_DIR}"
+        --threads "${THREADS}"
+    )
+    if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
+        PCA_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
+    fi
+    if [[ -s "${HWE_PASSING_VARIANTS}" ]]; then
+        PCA_ARGS+=(--include-variants "${HWE_PASSING_VARIANTS}")
+        echo "Using ancestry-stratified HWE-passing variant set for PCA"
+        echo "  (${HWE_PASSING_VARIANTS})"
+        echo ""
+    fi
+    if [[ "${FORCE}" == "true" ]]; then
+        PCA_ARGS+=(--force)
+    fi
+
+    bash "${SCRIPT_DIR}/ancestry_pca.sh" "${PCA_ARGS[@]}" 2>&1 || true
+else
+    echo "Note: Skipping ancestry PCA (final VCF not available)."
 fi
 echo ""
 
@@ -766,6 +795,9 @@ if [[ -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.png" ]]; then
 fi
 if [[ -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.tsv" ]]; then
     cp -f "${OUTPUT_DIR}/sex_check/sex_check_chrXY_lrr.tsv" "${OUTPUT_DIR}/summary/sex_check_chrXY_lrr.tsv"
+fi
+if [[ -f "${OUTPUT_DIR}/sex_check/sex_check_summary.txt" ]]; then
+    cp -f "${OUTPUT_DIR}/sex_check/sex_check_summary.txt" "${OUTPUT_DIR}/summary/sex_check_summary.txt"
 fi
 # Copy peddy outputs to summary
 for pf in peddy.het_check.csv peddy.sex_check.csv peddy.ped_check.csv peddy.peddy.ped peddy_final.ped; do
