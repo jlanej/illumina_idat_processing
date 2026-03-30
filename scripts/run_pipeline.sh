@@ -499,6 +499,78 @@ fi
 echo ""
 
 # ---------------------------------------------------------------
+# Pre-PCA sample exclusions: relatedness and het outliers
+# ---------------------------------------------------------------
+# GWAS best practice (Anderson et al. 2010; Marees et al. 2018):
+#   - Remove one sample per related pair (relatedness >= 0.125)
+#   - Remove heterozygosity outliers (> 3 SD from ancestry-group mean)
+# prior to PCA computation and HWE testing.  Excluded samples are
+# still projected onto PCs via flashpca2 --project.
+# ---------------------------------------------------------------
+PRE_PCA_EXCLUDE="${OUTPUT_DIR}/pre_pca_excluded_samples.txt"
+RELATEDNESS_EXCLUDED="${OUTPUT_DIR}/relatedness_excluded_samples.txt"
+HET_OUTLIER_EXCLUDED="${OUTPUT_DIR}/het_outlier_excluded_samples.txt"
+
+# Clear any previous combined exclusion list
+true > "${PRE_PCA_EXCLUDE}"
+
+if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.ped_check.csv" ]]; then
+    echo "======================================================"
+    echo "  Relatedness Filtering (pre-PCA/HWE)"
+    echo "======================================================"
+    echo ""
+
+    RELAT_ARGS=(
+        --ped-check "${PEDDY_DIR}/peddy.ped_check.csv"
+        --output-excluded "${RELATEDNESS_EXCLUDED}"
+        --output-log "${OUTPUT_DIR}/relatedness_exclusions.tsv"
+        --min-relatedness 0.125
+    )
+    if [[ -f "${FINAL_QC}" ]]; then
+        RELAT_ARGS+=(--sample-qc "${FINAL_QC}")
+    fi
+
+    python3 "${SCRIPT_DIR}/filter_related_samples.py" "${RELAT_ARGS[@]}" 2>&1 || {
+        echo "Warning: Relatedness filtering failed. Continuing without relatedness exclusions." >&2
+        true > "${RELATEDNESS_EXCLUDED}"
+    }
+    echo ""
+else
+    true > "${RELATEDNESS_EXCLUDED}"
+fi
+
+if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.het_check.csv" && -f "${FINAL_QC}" ]]; then
+    echo "======================================================"
+    echo "  Heterozygosity Outlier Filtering (pre-PCA/HWE)"
+    echo "======================================================"
+    echo ""
+
+    python3 "${SCRIPT_DIR}/filter_het_outliers.py" \
+        --sample-qc "${FINAL_QC}" \
+        --peddy-het-check "${PEDDY_DIR}/peddy.het_check.csv" \
+        --output-excluded "${HET_OUTLIER_EXCLUDED}" \
+        --output-log "${OUTPUT_DIR}/het_outlier_details.tsv" \
+        --sd-threshold 3 2>&1 || {
+        echo "Warning: Heterozygosity outlier filtering failed. Continuing without het exclusions." >&2
+        true > "${HET_OUTLIER_EXCLUDED}"
+    }
+    echo ""
+else
+    true > "${HET_OUTLIER_EXCLUDED}"
+fi
+
+# Combine exclusion lists (unique IDs, dropping empty lines)
+cat "${RELATEDNESS_EXCLUDED}" "${HET_OUTLIER_EXCLUDED}" 2>/dev/null \
+    | sed '/^$/d' | sort -u > "${PRE_PCA_EXCLUDE}" || true
+
+N_EXCLUDED=$(wc -l < "${PRE_PCA_EXCLUDE}" 2>/dev/null | tr -d ' ' || echo 0)
+if [[ "${N_EXCLUDED}" -gt 0 ]]; then
+    echo "  Combined pre-PCA exclusions: ${N_EXCLUDED} sample(s)"
+    echo "  Exclusion list: ${PRE_PCA_EXCLUDE}"
+    echo ""
+fi
+
+# ---------------------------------------------------------------
 # Ancestry PCA: stringent QC + PCA computation
 # ---------------------------------------------------------------
 PCA_DIR="${OUTPUT_DIR}/ancestry_pca"
@@ -514,6 +586,9 @@ if [[ -f "${FINAL_VCF}" ]]; then
         --output-dir "${PCA_DIR}"
         --threads "${THREADS}"
     )
+    if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
+        PCA_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
+    fi
     if [[ "${FORCE}" == "true" ]]; then
         PCA_ARGS+=(--force)
     fi
@@ -545,6 +620,9 @@ else
             --min-samples "${MIN_ANCESTRY_SAMPLES}"
             --threads "${THREADS}"
         )
+        if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
+            STRAT_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
+        fi
         if [[ "${FORCE}" == "true" ]]; then
             STRAT_ARGS+=(--force)
         fi
@@ -693,6 +771,14 @@ fi
 for pf in peddy.het_check.csv peddy.sex_check.csv peddy.ped_check.csv peddy.peddy.ped peddy_final.ped; do
     if [[ -f "${OUTPUT_DIR}/peddy/${pf}" ]]; then
         cp -f "${OUTPUT_DIR}/peddy/${pf}" "${OUTPUT_DIR}/summary/${pf}"
+    fi
+done
+# Copy pre-PCA exclusion lists to summary
+for ef in pre_pca_excluded_samples.txt relatedness_excluded_samples.txt \
+          relatedness_exclusions.tsv het_outlier_excluded_samples.txt \
+          het_outlier_details.tsv; do
+    if [[ -f "${OUTPUT_DIR}/${ef}" ]]; then
+        cp -f "${OUTPUT_DIR}/${ef}" "${OUTPUT_DIR}/summary/${ef}"
     fi
 done
 # Copy ancestry-stratified QC outputs to summary

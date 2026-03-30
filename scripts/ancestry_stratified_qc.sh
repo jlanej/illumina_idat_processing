@@ -43,6 +43,10 @@ Required:
 
 Options:
   --min-samples INT       Minimum samples per ancestry group (default: 100)
+  --exclude-samples FILE  File of sample IDs (one per line) to exclude from
+                          HWE testing and PCA training sets.  These samples
+                          are removed prior to variant QC and within-ancestry
+                          PCA.  Used for related and het-outlier samples.
   --threads INT           Number of threads (default: all available)
   --force                 Re-run even if outputs exist
   --help                  Show this help message
@@ -60,6 +64,7 @@ VCF=""
 PEDDY_HET_CHECK=""
 OUTPUT_DIR=""
 MIN_SAMPLES=100
+EXCLUDE_SAMPLES=""
 THREADS=$(nproc 2>/dev/null || echo 1)
 FORCE="false"
 
@@ -69,6 +74,7 @@ while [[ $# -gt 0 ]]; do
         --peddy-het-check)  PEDDY_HET_CHECK="$2"; shift 2 ;;
         --output-dir)       OUTPUT_DIR="$2"; shift 2 ;;
         --min-samples)      MIN_SAMPLES="$2"; shift 2 ;;
+        --exclude-samples)  EXCLUDE_SAMPLES="$2"; shift 2 ;;
         --threads)          THREADS="$2"; shift 2 ;;
         --force)            FORCE="true"; shift ;;
         --help)             usage ;;
@@ -124,6 +130,10 @@ echo "  Peddy het_check:  ${PEDDY_HET_CHECK}"
 echo "  Output:           ${OUTPUT_DIR}"
 echo "  Min samples:      ${MIN_SAMPLES}"
 echo "  Threads:          ${THREADS}"
+if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
+    N_PRE_EXCLUDE=$(wc -l < "${EXCLUDE_SAMPLES}" | tr -d ' ')
+    echo "  Pre-QC excluded:  ${N_PRE_EXCLUDE} samples (${EXCLUDE_SAMPLES})"
+fi
 echo ""
 
 # -----------------------------------------------------------------
@@ -191,11 +201,30 @@ for ANCESTRY in "${ANCESTRIES[@]}"; do
     N_SAMPLES=$(wc -l < "${SAMPLE_LIST}" | tr -d ' ')
     echo "  Samples: ${N_SAMPLES}"
 
-    # Subset VCF to this ancestry group
+    # Create unrelated sample list (excluding pre-QC samples)
+    UNRELATED_SAMPLE_LIST="${ANC_DIR}/unrelated_samples.txt"
+    if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
+        grep -vxFf "${EXCLUDE_SAMPLES}" "${SAMPLE_LIST}" > "${UNRELATED_SAMPLE_LIST}" || true
+        N_UNRELATED=$(wc -l < "${UNRELATED_SAMPLE_LIST}" | tr -d ' ')
+        echo "  Unrelated samples (after exclusions): ${N_UNRELATED}"
+    else
+        cp "${SAMPLE_LIST}" "${UNRELATED_SAMPLE_LIST}"
+        N_UNRELATED="${N_SAMPLES}"
+    fi
+
+    # Skip this ancestry if all samples were excluded
+    if [[ "${N_UNRELATED}" -eq 0 ]]; then
+        echo "  WARNING: All ${N_SAMPLES} samples in ${ANCESTRY} were excluded."
+        echo "           Skipping variant QC and PCA for this group."
+        echo ""
+        continue
+    fi
+
+    # Subset VCF to unrelated samples of this ancestry for variant QC
     ANC_VCF="${ANC_DIR}/${ANCESTRY}_subset.bcf"
     if [[ "${FORCE}" == "true" || ! -f "${ANC_VCF}" ]]; then
-        echo "  Subsetting VCF to ${ANCESTRY} samples..."
-        bcftools view -S "${SAMPLE_LIST}" --threads "${THREADS}" \
+        echo "  Subsetting VCF to ${ANCESTRY} unrelated samples..."
+        bcftools view -S "${UNRELATED_SAMPLE_LIST}" --threads "${THREADS}" \
             -Ob -o "${ANC_VCF}" "${VCF}" 2>/dev/null
         bcftools index --threads "${THREADS}" "${ANC_VCF}" 2>/dev/null
     else
@@ -215,13 +244,28 @@ for ANCESTRY in "${ANCESTRIES[@]}"; do
     fi
 
     # ----- Ancestry-specific PCA -----
+    # PCA training is on unrelated samples; all ancestry samples are projected
     ANC_PCA_DIR="${ANC_DIR}/pca"
+    ANC_PCA_VCF="${ANC_DIR}/${ANCESTRY}_all_subset.bcf"
     if [[ "${FORCE}" == "true" || ! -f "${ANC_PCA_DIR}/pca_projections.tsv" ]]; then
+        # Create full-ancestry VCF (including excluded samples) for projection
+        if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
+            bcftools view -S "${SAMPLE_LIST}" --threads "${THREADS}" \
+                -Ob -o "${ANC_PCA_VCF}" "${VCF}" 2>/dev/null
+            bcftools index --threads "${THREADS}" "${ANC_PCA_VCF}" 2>/dev/null
+        else
+            ANC_PCA_VCF="${ANC_VCF}"
+        fi
         echo "  Running ancestry-specific PCA for ${ANCESTRY}..."
-        bash "${SCRIPT_DIR}/ancestry_pca.sh" \
-            --vcf "${ANC_VCF}" \
-            --output-dir "${ANC_PCA_DIR}" \
-            --threads "${THREADS}" 2>&1 | sed 's/^/    /' || true
+        ANC_PCA_ARGS=(
+            --vcf "${ANC_PCA_VCF}"
+            --output-dir "${ANC_PCA_DIR}"
+            --threads "${THREADS}"
+        )
+        if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
+            ANC_PCA_ARGS+=(--exclude-samples "${EXCLUDE_SAMPLES}")
+        fi
+        bash "${SCRIPT_DIR}/ancestry_pca.sh" "${ANC_PCA_ARGS[@]}" 2>&1 | sed 's/^/    /' || true
     else
         echo "  ${ANCESTRY} PCA already exists."
     fi

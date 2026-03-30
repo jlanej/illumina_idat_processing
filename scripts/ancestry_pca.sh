@@ -37,6 +37,10 @@ Options:
   --ld-window INT     LD pruning window in kb (default: 1000)
   --ld-step INT       LD pruning step size (must be 1 for kb windows; default: 1)
   --ld-r2 FLOAT       LD pruning r-squared threshold (default: 0.1)
+  --exclude-samples FILE
+                      File of sample IDs (one per line) to exclude from PCA
+                      training set.  These samples are still projected onto
+                      the computed PCs.  Use for related or het-outlier samples.
   --threads INT       Number of threads (default: all available)
   --force             Re-run even if expected outputs already exist
   --help              Show this help message
@@ -60,6 +64,7 @@ MIN_CALL_RATE=0.98
 LD_WINDOW=1000
 LD_STEP=1
 LD_R2=0.1
+EXCLUDE_SAMPLES=""
 THREADS=$(nproc 2>/dev/null || echo 1)
 FORCE="false"
 
@@ -75,6 +80,7 @@ while [[ $# -gt 0 ]]; do
         --ld-window)      LD_WINDOW="$2"; shift 2 ;;
         --ld-step)        LD_STEP="$2"; shift 2 ;;
         --ld-r2)          LD_R2="$2"; shift 2 ;;
+        --exclude-samples) EXCLUDE_SAMPLES="$2"; shift 2 ;;
         --threads)        THREADS="$2"; shift 2 ;;
         --force)          FORCE="true"; shift ;;
         --help)           usage ;;
@@ -147,6 +153,12 @@ echo "  Min MAF:        ${MIN_MAF}"
 echo "  Min call rate:  ${MIN_CALL_RATE}"
 echo "  LD pruning:     window=${LD_WINDOW}kb step=${LD_STEP} r2=${LD_R2}"
 echo "  Threads:        ${THREADS}"
+if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
+    N_PRE_PCA_EXCLUDE=$(wc -l < "${EXCLUDE_SAMPLES}" | tr -d ' ')
+    echo "  Pre-PCA excluded samples: ${N_PRE_PCA_EXCLUDE} (${EXCLUDE_SAMPLES})"
+else
+    N_PRE_PCA_EXCLUDE=0
+fi
 echo ""
 
 # -----------------------------------------------------------------
@@ -171,6 +183,15 @@ echo "  Intensity-only removed:  ${N_INTENSITY_REMOVED}"
 echo "  Multiallelic variants:   ${N_MULTIALLELIC}"
 
 # -----------------------------------------------------------------
+# Step 1b: Prepare exclude-samples file for plink2 (FID IID format)
+# -----------------------------------------------------------------
+PLINK_REMOVE_FILE=""
+if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
+    PLINK_REMOVE_FILE="${TMP_DIR}/plink_remove_samples.txt"
+    awk '{print $1, $1}' "${EXCLUDE_SAMPLES}" > "${PLINK_REMOVE_FILE}"
+fi
+
+# -----------------------------------------------------------------
 # Step 2: Stringent variant and sample QC with plink2
 # -----------------------------------------------------------------
 echo "Step 2: Applying stringent variant and sample QC..."
@@ -178,19 +199,27 @@ echo "Step 2: Applying stringent variant and sample QC..."
 # First pass: variant QC
 # Convert min call rate to max missingness (e.g., 0.98 -> 0.02)
 MAX_SAMPLE_MISSING=$(awk -v cr="${MIN_CALL_RATE}" 'BEGIN{printf "%.4f", 1-cr}')
-plink2 \
-    --bcf "${FILTERED_VCF}" \
-    --autosome \
-    --allow-extra-chr \
-    --snps-only \
-    --max-alleles 2 \
-    --threads "${THREADS}" \
-    --geno "${MAX_MISSING}" \
-    --hwe "${HWE_P}" \
-    --maf "${MIN_MAF}" \
-    --mind "${MAX_SAMPLE_MISSING}" \
-    --make-bed \
-    --out "${PREFIX}_qc" 2>&1 | tail -10
+
+# Build plink2 arguments; add --remove if pre-PCA exclusion list is provided
+PLINK_QC_ARGS=(
+    --bcf "${FILTERED_VCF}"
+    --autosome
+    --allow-extra-chr
+    --snps-only
+    --max-alleles 2
+    --threads "${THREADS}"
+    --geno "${MAX_MISSING}"
+    --hwe "${HWE_P}"
+    --maf "${MIN_MAF}"
+    --mind "${MAX_SAMPLE_MISSING}"
+    --make-bed
+    --out "${PREFIX}_qc"
+)
+if [[ -n "${PLINK_REMOVE_FILE}" && -s "${PLINK_REMOVE_FILE}" ]]; then
+    PLINK_QC_ARGS+=(--remove "${PLINK_REMOVE_FILE}")
+fi
+
+plink2 "${PLINK_QC_ARGS[@]}" 2>&1 | tail -10
 
 N_VARIANTS_QC=0
 N_SAMPLES_QC=0
@@ -356,6 +385,9 @@ RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
     echo ""
     echo "Sample Filtering:"
     echo "  Input samples:           ${N_INPUT_SAMPLES}"
+    if [[ "${N_PRE_PCA_EXCLUDE}" -gt 0 ]]; then
+        echo "  Pre-PCA excluded (related/het outlier): ${N_PRE_PCA_EXCLUDE}"
+    fi
     echo "  Samples after QC:        ${N_SAMPLES_QC}"
     echo ""
     echo "PCA:"

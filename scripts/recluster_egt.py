@@ -9,6 +9,11 @@ Reads the original EGT as a template, extracts normalized intensity data
 statistics (mean/stdev of theta and R for each genotype class AA/AB/BB)
 per probe, and writes a new EGT cluster file.
 
+Cluster standard deviations use the Bessel-corrected sample standard
+deviation (ddof=1) to provide unbiased spread estimates, matching
+Illumina GenTrain and field best practice.  Using population standard
+deviation (ddof=0) underestimates spread for small-N clusters.
+
 The new EGT can then be used with idat2gtc to re-call genotypes for all
 samples, producing more accurate genotype calls tailored to the study
 population rather than relying on Illumina's default training set.
@@ -27,6 +32,7 @@ References:
     - Illumina BeadArrayFiles: https://github.com/Illumina/BeadArrayFiles
     - EGT format: ClusterFile.py in BeadArrayFiles
     - GTC format: GenotypeCalls.py in BeadArrayFiles
+    - Anderson et al. 2010, Nat Protoc 5:1564-73
 """
 
 import argparse
@@ -967,14 +973,19 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
 
         # Compute means and stds using masked operations
         # Use NaN-based approach: set non-matching to NaN, then nanmean/nanstd
+        # ddof=1 gives sample (Bessel-corrected) standard deviation, which is
+        # the unbiased estimator appropriate for cluster spread estimation in
+        # EGT files.  Using ddof=0 (population variance) underestimates spread
+        # for small-N clusters; Illumina GenTrain and field best practice use
+        # sample standard deviation.
         theta_masked = np.where(mask, all_theta, np.nan)
         r_masked = np.where(mask, all_r, np.nan)
 
         with np.errstate(all="ignore"):
             geno_theta_mean[geno_code] = np.nanmean(theta_masked, axis=1)
-            geno_theta_std[geno_code] = np.nanstd(theta_masked, axis=1, ddof=0)
+            geno_theta_std[geno_code] = np.nanstd(theta_masked, axis=1, ddof=1)
             geno_r_mean[geno_code] = np.nanmean(r_masked, axis=1)
-            geno_r_std[geno_code] = np.nanstd(r_masked, axis=1, ddof=0)
+            geno_r_std[geno_code] = np.nanstd(r_masked, axis=1, ddof=1)
 
         # Replace NaN results (from all-NaN slices) with 0
         geno_theta_mean[geno_code] = np.nan_to_num(geno_theta_mean[geno_code], nan=0.0)
@@ -985,10 +996,16 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     vectorized_elapsed = time.time() - cluster_start
     print(f"    Bulk statistics computed in {vectorized_elapsed:.1f}s", file=sys.stderr)
 
+    # With ddof=1, np.nanstd requires n >= 2 to produce a defined result
+    # (n=1 yields NaN from division by zero in Bessel correction, which
+    # nan_to_num maps to 0.0 — an infinitely tight cluster).  Enforce
+    # at least 2 samples per cluster so the 0.0-std never leaks through.
+    effective_min = max(min_samples_per_cluster, 2)
+
     # Determine which probes have at least one genotype class with enough samples
     probe_has_update = np.zeros(num_probes, dtype=bool)
     for geno_code in (1, 2, 3):
-        probe_has_update |= geno_counts[geno_code] >= min_samples_per_cluster
+        probe_has_update |= geno_counts[geno_code] >= effective_min
 
     # --- Build cluster records (still a loop, but now only simple assignments) ---
     record_start = time.time()
@@ -1025,7 +1042,7 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
             (3, old_rec.bb, "bb"),
         ]:
             n = int(geno_counts[geno_code][pidx])
-            if n >= min_samples_per_cluster:
+            if n >= effective_min:
                 new_stats = ClusterStats(
                     theta_mean=float(geno_theta_mean[geno_code][pidx]),
                     theta_dev=float(geno_theta_std[geno_code][pidx]),
