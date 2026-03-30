@@ -295,6 +295,7 @@ def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
                          os.path.join(output_dir, 'plink2_sexcheck.tsv'))
 
         # Parse .sexcheck: columns are #FID IID PEDSEX SNPSEX STATUS F
+        # plink2 may also provide OBS_CT (non-missing genotype count).
         results = {}
         sample_set = set(sample_names)
         with open(sexcheck_file) as f:
@@ -302,6 +303,7 @@ def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
             col_map = {col.lstrip('#'): i for i, col in enumerate(header)}
             iid_idx = col_map.get('IID', 1)
             f_idx = col_map.get('F', len(header) - 1)
+            obs_ct_idx = col_map.get('OBS_CT')
             for line in f:
                 fields = line.strip().split()
                 if len(fields) <= max(iid_idx, f_idx):
@@ -319,9 +321,19 @@ def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
                     f_sex = 'F'
                 else:
                     f_sex = 'ambiguous'
+
+                # Extract OBS_CT if present in the header
+                n_called = None
+                if obs_ct_idx is not None and obs_ct_idx < len(fields):
+                    try:
+                        n_called = int(fields[obs_ct_idx])
+                    except ValueError:
+                        pass
+
                 results[name] = {
                     'f_stat': round(f_stat, 6),
-                    'n_het': None, 'n_called': None,  # plink2 doesn't expose per-sample counts
+                    'n_het': None,
+                    'n_called': n_called,
                     'f_sex': f_sex,
                 }
         return results
@@ -399,16 +411,15 @@ def _compute_f_stat_bcftools(vcf_file, sample_names, threads, genome,
     # Simplified F-statistic approximation for sex chromosome ploidy.
     # The standard plink --check-sex computes F = 1 - (obs_het / E[het])
     # where E[het] is the per-locus expected heterozygosity from allele
-    # frequencies summed across all loci.  Computing per-locus allele
-    # frequencies in a mixed male/female cohort adds complexity (males
-    # are hemizygous on X), so we use a simplified proxy:
+    # frequencies summed across all loci.  This fallback uses a proxy:
     #   F ≈ 1 - 2 * observed_het_rate
-    # This maps the het_rate [0, 0.5] to F [1, 0]:
-    #   Males (hemizygous, het_rate ≈ 0) → F ≈ 1.0
-    #   Females (diploid, het_rate ≈ 0.15) → F ≈ 0.7 — close to the 0.2/0.8 range
-    # The 0.8/0.2 thresholds follow plink --check-sex conventions.
-    # This is an intensity-array-appropriate approximation; for WGS or
-    # imputed data, a full allele-frequency-based F is preferred.
+    # which maps het_rate ∈ [0, 0.5] → F ∈ [1, 0].
+    #   Males (hemizygous, het_rate ≈ 0)    → F ≈ 1.0  (classified M)
+    #   Females (diploid, het_rate ≈ 0.4+)  → F ≈ 0.2  (classified F)
+    # Note: this approximation is less accurate than plink2's allele-
+    # frequency-aware F, particularly for datasets with many low-MAF
+    # variants where expected heterozygosity differs from the uniform
+    # assumption.  Prefer plink2 --check-sex when available.
     results = {}
     for i, name in enumerate(sample_names):
         n_called = called_counts[i]
