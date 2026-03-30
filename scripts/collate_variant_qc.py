@@ -128,24 +128,23 @@ def load_variant_qc(qc_dir, prefix='variant_qc'):
     data = {}
     for vid in all_variants:
         vmiss_row = vmiss.get(vid, {})
-        fmiss = vmiss_row.get('F_MISS', 'NA') if isinstance(vmiss_row, dict) else 'NA'
+        fmiss = vmiss_row.get('F_MISS', 'NA')
         try:
             cr = f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
         except ValueError:
             cr = 'NA'
 
         hardy_row = hardy.get(vid, {})
-        hwe_p = hardy_row.get('P', 'NA') if isinstance(hardy_row, dict) else 'NA'
 
         data[vid] = {
             'call_rate': cr,
-            'hwe_p': hwe_p,
+            'hwe_p': hardy_row.get('P', 'NA'),
             'maf': afreq.get(vid, 'NA'),
-            'obs_ct': vmiss_row.get('OBS_CT', 'NA') if isinstance(vmiss_row, dict) else 'NA',
-            'missing_ct': vmiss_row.get('MISSING_CT', 'NA') if isinstance(vmiss_row, dict) else 'NA',
-            'hom_a1_ct': hardy_row.get('HOM_A1_CT', 'NA') if isinstance(hardy_row, dict) else 'NA',
-            'het_ct': hardy_row.get('HET_A1_AX_CT', 'NA') if isinstance(hardy_row, dict) else 'NA',
-            'hom_a2_ct': hardy_row.get('TWO_AX_CT', 'NA') if isinstance(hardy_row, dict) else 'NA',
+            'obs_ct': vmiss_row.get('OBS_CT', 'NA'),
+            'missing_ct': vmiss_row.get('MISSING_CT', 'NA'),
+            'hom_a1_ct': hardy_row.get('HOM_A1_CT', 'NA'),
+            'het_ct': hardy_row.get('HET_A1_AX_CT', 'NA'),
+            'hom_a2_ct': hardy_row.get('TWO_AX_CT', 'NA'),
         }
     return data
 
