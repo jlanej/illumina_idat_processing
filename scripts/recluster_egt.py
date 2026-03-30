@@ -9,6 +9,11 @@ Reads the original EGT as a template, extracts normalized intensity data
 statistics (mean/stdev of theta and R for each genotype class AA/AB/BB)
 per probe, and writes a new EGT cluster file.
 
+Cluster standard deviations use the Bessel-corrected sample standard
+deviation (ddof=1) to provide unbiased spread estimates, matching
+Illumina GenTrain and field best practice.  Using population standard
+deviation (ddof=0) underestimates spread for small-N clusters.
+
 The new EGT can then be used with idat2gtc to re-call genotypes for all
 samples, producing more accurate genotype calls tailored to the study
 population rather than relying on Illumina's default training set.
@@ -27,6 +32,7 @@ References:
     - Illumina BeadArrayFiles: https://github.com/Illumina/BeadArrayFiles
     - EGT format: ClusterFile.py in BeadArrayFiles
     - GTC format: GenotypeCalls.py in BeadArrayFiles
+    - Anderson et al. 2010, Nat Protoc 5:1564-73
 """
 
 import argparse

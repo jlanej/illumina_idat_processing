@@ -512,7 +512,7 @@ RELATEDNESS_EXCLUDED="${OUTPUT_DIR}/relatedness_excluded_samples.txt"
 HET_OUTLIER_EXCLUDED="${OUTPUT_DIR}/het_outlier_excluded_samples.txt"
 
 # Clear any previous combined exclusion list
-> "${PRE_PCA_EXCLUDE}"
+true > "${PRE_PCA_EXCLUDE}"
 
 if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.ped_check.csv" ]]; then
     echo "======================================================"
@@ -533,7 +533,7 @@ if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.ped_check.csv" ]]; the
     python3 "${SCRIPT_DIR}/filter_related_samples.py" "${RELAT_ARGS[@]}" 2>&1 || true
     echo ""
 else
-    > "${RELATEDNESS_EXCLUDED}"
+    true > "${RELATEDNESS_EXCLUDED}"
 fi
 
 if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.het_check.csv" && -f "${FINAL_QC}" ]]; then
@@ -550,7 +550,7 @@ if [[ "${SKIP_PEDDY}" != "true" && -f "${PEDDY_DIR}/peddy.het_check.csv" && -f "
         --sd-threshold 3 2>&1 || true
     echo ""
 else
-    > "${HET_OUTLIER_EXCLUDED}"
+    true > "${HET_OUTLIER_EXCLUDED}"
 fi
 
 # Combine exclusion lists (unique IDs)
