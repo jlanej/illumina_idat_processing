@@ -835,6 +835,43 @@ def _read_single_gtc(args):
         return sidx, None, None, None, str(e)
 
 
+def _welford_update_pair(counts, theta_mean, theta_m2, r_mean, r_m2,
+                         mask, theta_vals, r_vals):
+    """Apply Welford's online update for both theta and R in one pass.
+
+    Increments per-probe running count once and updates both theta and R
+    accumulators using the same count.  float64 accumulators avoid
+    precision loss during streaming accumulation.
+
+    Args:
+        counts:     (num_probes,) int64 — running sample count per probe
+        theta_mean: (num_probes,) float64 — running theta mean
+        theta_m2:   (num_probes,) float64 — running theta M2
+        r_mean:     (num_probes,) float64 — running R mean
+        r_m2:       (num_probes,) float64 — running R M2
+        mask:       (num_probes,) bool — which probes have data this sample
+        theta_vals: (num_probes,) float — observed theta values
+        r_vals:     (num_probes,) float — observed R values
+    """
+    idx = np.flatnonzero(mask)
+    if idx.size == 0:
+        return
+    counts[idx] += 1
+    n = counts[idx].astype(np.float64)
+    # Theta
+    tv = theta_vals[idx].astype(np.float64)
+    delta_t = tv - theta_mean[idx]
+    theta_mean[idx] += delta_t / n
+    delta2_t = tv - theta_mean[idx]
+    theta_m2[idx] += delta_t * delta2_t
+    # R
+    rv = r_vals[idx].astype(np.float64)
+    delta_r = rv - r_mean[idx]
+    r_mean[idx] += delta_r / n
+    delta2_r = rv - r_mean[idx]
+    r_m2[idx] += delta_r * delta2_r
+
+
 def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     """
     Recompute cluster statistics from high-quality GTC samples.
@@ -842,6 +879,10 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     For each probe, aggregates theta and R values across HQ samples
     grouped by genotype, then computes new cluster means and stdevs.
     Falls back to original clusters if insufficient samples per genotype.
+
+    Uses Welford's online algorithm so memory is O(probes) regardless
+    of sample count, instead of materializing full num_probes × num_samples
+    arrays.
 
     Args:
         egt: Original EGTFile (used as template and fallback)
@@ -851,6 +892,7 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
                   directly into the normalization transforms array stored
                   in each GTC file.
         min_samples_per_cluster: Minimum samples needed to recompute a cluster
+        n_workers: Number of parallel workers for GTC reading (0 = auto)
 
     Returns:
         EGTFile: New EGT with updated cluster statistics
@@ -859,17 +901,26 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     num_samples = len(gtc_files)
 
     print(f"  Reclustering {num_probes} probes using {num_samples} samples...", file=sys.stderr)
-    print(f"  Allocating intensity arrays ({num_probes} x {num_samples})...", file=sys.stderr)
+    print(f"  Using streaming O(probes) memory algorithm (Welford's)...", file=sys.stderr)
 
-    # Collect per-probe data across all HQ samples
-    # Arrays: [num_probes, num_samples]
-    # float32 is sufficient (Illumina intensities are single-precision origin)
-    # and halves memory vs float64 — critical for thousands of samples.
-    all_theta = np.zeros((num_probes, num_samples), dtype=np.float32)
-    all_r = np.zeros((num_probes, num_samples), dtype=np.float32)
-    all_geno = np.zeros((num_probes, num_samples), dtype=np.uint8)
+    # --- Streaming accumulators: O(probes) memory ---
+    # For each of 3 genotype classes (AA=1, AB=2, BB=3), maintain per-probe:
+    #   count, theta_mean, theta_m2, r_mean, r_m2
+    # float64 accumulators for numerical stability during streaming.
+    geno_counts = {}
+    geno_theta_mean = {}
+    geno_theta_m2 = {}
+    geno_r_mean = {}
+    geno_r_m2 = {}
+    for gc in (1, 2, 3):
+        geno_counts[gc] = np.zeros(num_probes, dtype=np.int64)
+        geno_theta_mean[gc] = np.zeros(num_probes, dtype=np.float64)
+        geno_theta_m2[gc] = np.zeros(num_probes, dtype=np.float64)
+        geno_r_mean[gc] = np.zeros(num_probes, dtype=np.float64)
+        geno_r_m2[gc] = np.zeros(num_probes, dtype=np.float64)
 
-    print(f"  Reading intensities from {num_samples} GTC files...", file=sys.stderr)
+    print(f"  Reading intensities from {num_samples} GTC files "
+          f"and accumulating statistics...", file=sys.stderr)
     read_start = time.time()
 
     # Determine number of workers for parallel GTC reading
@@ -877,6 +928,17 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     if n_workers <= 0:
         n_workers = min(multiprocessing.cpu_count(), num_samples, 24)
     n_workers = max(1, n_workers)
+
+    def _accumulate_sample(theta, r, geno, n_probes):
+        """Update Welford accumulators for one sample's probe data."""
+        n = min(n_probes, len(theta))
+        for gc in (1, 2, 3):
+            mask = geno[:n] == gc
+            _welford_update_pair(
+                geno_counts[gc], geno_theta_mean[gc], geno_theta_m2[gc],
+                geno_r_mean[gc], geno_r_m2[gc],
+                mask, theta[:n], r[:n],
+            )
 
     if n_workers > 1 and num_samples >= 4:
         print(f"  Using {n_workers} parallel workers for GTC reading", file=sys.stderr)
@@ -896,10 +958,7 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
                 if error:
                     print(f"    WARNING: Failed to read GTC {sidx}: {error}", file=sys.stderr)
                     continue
-                n = min(num_probes, len(theta))
-                all_theta[:n, sidx] = theta
-                all_r[:n, sidx] = r
-                all_geno[:n, sidx] = geno
+                _accumulate_sample(theta, r, geno, num_probes)
                 completed += 1
                 if completed % 50 == 0 or completed == num_samples:
                     elapsed = time.time() - read_start
@@ -917,10 +976,7 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
 
             _, _, theta, r = normalize_intensities(raw_x, raw_y, genotypes, norm_ids, transforms)
 
-            n = min(num_probes, len(theta))
-            all_theta[:n, sidx] = theta[:n]
-            all_r[:n, sidx] = r[:n]
-            all_geno[:n, sidx] = genotypes[:n]
+            _accumulate_sample(theta, r, genotypes, num_probes)
 
             sample_elapsed = time.time() - sample_start
             total_elapsed = time.time() - read_start
@@ -955,51 +1011,29 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     print(f"  Computing new cluster statistics for {num_probes} probes...", file=sys.stderr)
     cluster_start = time.time()
 
-    # --- Vectorized cluster statistics computation ---
-    # Precompute per-probe, per-genotype counts, means, and stdevs in bulk
-    # instead of looping probe-by-probe with NumPy calls on tiny arrays.
-
-    # Per-genotype masks: (num_probes, num_samples) bool arrays
-    geno_counts = {}  # geno_code -> (num_probes,) int array
-    geno_theta_mean = {}
+    # --- Finalize Welford statistics into mean / sample-std arrays ---
+    # Bessel-corrected sample standard deviation (ddof=1): std = sqrt(M2 / (n-1))
+    # For n<2, M2/(n-1) is undefined; map to 0.0 (matches previous NaN→0 behavior).
     geno_theta_std = {}
-    geno_r_mean = {}
     geno_r_std = {}
 
-    for geno_code in (1, 2, 3):
-        mask = all_geno == geno_code  # (num_probes, num_samples)
-        counts = mask.sum(axis=1)     # (num_probes,)
-        geno_counts[geno_code] = counts
+    for gc in (1, 2, 3):
+        n = geno_counts[gc].astype(np.float64)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            geno_theta_std[gc] = np.where(
+                n > 1, np.sqrt(geno_theta_m2[gc] / (n - 1)), 0.0
+            )
+            geno_r_std[gc] = np.where(
+                n > 1, np.sqrt(geno_r_m2[gc] / (n - 1)), 0.0
+            )
+        # Probes with zero samples get mean=0 from initialization; leave as-is.
 
-        # Compute means and stds using masked operations
-        # Use NaN-based approach: set non-matching to NaN, then nanmean/nanstd
-        # ddof=1 gives sample (Bessel-corrected) standard deviation, which is
-        # the unbiased estimator appropriate for cluster spread estimation in
-        # EGT files.  Using ddof=0 (population variance) underestimates spread
-        # for small-N clusters; Illumina GenTrain and field best practice use
-        # sample standard deviation.
-        theta_masked = np.where(mask, all_theta, np.nan)
-        r_masked = np.where(mask, all_r, np.nan)
+    welford_elapsed = time.time() - cluster_start
+    print(f"    Streaming statistics finalized in {welford_elapsed:.1f}s", file=sys.stderr)
 
-        with np.errstate(all="ignore"):
-            geno_theta_mean[geno_code] = np.nanmean(theta_masked, axis=1)
-            geno_theta_std[geno_code] = np.nanstd(theta_masked, axis=1, ddof=1)
-            geno_r_mean[geno_code] = np.nanmean(r_masked, axis=1)
-            geno_r_std[geno_code] = np.nanstd(r_masked, axis=1, ddof=1)
-
-        # Replace NaN results (from all-NaN slices) with 0
-        geno_theta_mean[geno_code] = np.nan_to_num(geno_theta_mean[geno_code], nan=0.0)
-        geno_theta_std[geno_code] = np.nan_to_num(geno_theta_std[geno_code], nan=0.0)
-        geno_r_mean[geno_code] = np.nan_to_num(geno_r_mean[geno_code], nan=0.0)
-        geno_r_std[geno_code] = np.nan_to_num(geno_r_std[geno_code], nan=0.0)
-
-    vectorized_elapsed = time.time() - cluster_start
-    print(f"    Bulk statistics computed in {vectorized_elapsed:.1f}s", file=sys.stderr)
-
-    # With ddof=1, np.nanstd requires n >= 2 to produce a defined result
-    # (n=1 yields NaN from division by zero in Bessel correction, which
-    # nan_to_num maps to 0.0 — an infinitely tight cluster).  Enforce
-    # at least 2 samples per cluster so the 0.0-std never leaks through.
+    # With Welford's ddof=1 variance, n < 2 yields undefined variance.
+    # We map those to std=0.0 above.  Enforce at least 2 samples per
+    # cluster so a 0.0-std never leaks past the fallback logic.
     effective_min = max(min_samples_per_cluster, 2)
 
     # Determine which probes have at least one genotype class with enough samples

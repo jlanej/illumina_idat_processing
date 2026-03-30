@@ -361,17 +361,19 @@ echo ""
 # ===============================================================
 echo "--- Test 7: recluster_egt.py uses ddof=1 ---"
 
-# Check that all np.nanstd calls use ddof=1 (not ddof=0)
-DDOF1_CODE=$(grep -c 'np.nanstd.*ddof=1' "${REPO_DIR}/scripts/recluster_egt.py" || true)
+# Check that recluster_egt.py uses Bessel-corrected (ddof=1 equivalent) std.
+# The streaming Welford implementation divides M2 by (n-1), which is
+# equivalent to ddof=1.  Also verify no ddof=0 pattern leaks in.
+DDOF1_CODE=$(grep -c 'ddof=1\|/ (n - 1)' "${REPO_DIR}/scripts/recluster_egt.py" || true)
 DDOF0_CODE=$(grep -c 'np.nanstd.*ddof=0' "${REPO_DIR}/scripts/recluster_egt.py" || true)
 
 assert_eq "${DDOF0_CODE}" "0" "no np.nanstd with ddof=0 in recluster_egt.py"
 
 if [[ "${DDOF1_CODE}" -ge 2 ]]; then
-    echo "  PASS: np.nanstd with ddof=1 used ${DDOF1_CODE} times (theta + R)"
+    echo "  PASS: Bessel correction (ddof=1 / n-1) used ${DDOF1_CODE} times"
     (( PASS++ )) || true
 else
-    echo "  FAIL: np.nanstd with ddof=1 found ${DDOF1_CODE} times, expected >= 2"
+    echo "  FAIL: Bessel correction (ddof=1 / n-1) found ${DDOF1_CODE} times, expected >= 2"
     (( FAIL++ )) || true
 fi
 

@@ -153,6 +153,16 @@ if [[ -f "${DOCKERFILE}" ]]; then
         echo "  FAIL: Dockerfile missing numpy<1.25 pin for peddy compatibility"
         (( FAIL++ )) || true
     fi
+
+    # Verify all external dependencies are pinned (no /master/ or _latest)
+    if ! grep -qE 'raw\.githubusercontent\.com/.*/master/' "${DOCKERFILE}" && \
+       ! grep -q 'plink2_linux_x86_64_latest' "${DOCKERFILE}"; then
+        echo "  PASS: Dockerfile pins all dependency versions (no master/latest)"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: Dockerfile still references unpinned master/latest URLs"
+        (( FAIL++ )) || true
+    fi
 else
     echo "  SKIP: Dockerfile not found"
 fi

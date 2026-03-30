@@ -843,6 +843,72 @@ else
     (( FAIL++ )) || true
 fi
 
+# ---------------------------------------------------------------
+# Test 16: Flank extraction failure aborts pipeline
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 16: Zero flanks extracted → hard abort ---"
+
+# realign_manifest.sh now aborts (exit 1) when no flank sequences are
+# produced.  Simulate by passing a CSV with no [Assay]/SourceSeq content.
+FAIL_DIR="${TMP_DIR}/fail_flank"
+mkdir -p "${FAIL_DIR}"
+printf '[Header]\nDescriptor_Name,manifest\n[Controls]\n' > "${FAIL_DIR}/empty.csv"
+
+# The script should fail because bcftools isn't installed in CI, but even
+# a stub that produces zero flanks triggers the check.  We test the logic
+# by grepping for the error message in the source code — the key change
+# is "ERROR:" instead of "WARNING:" and exit 1 instead of continuing.
+if grep -q 'ERROR: No flank sequences extracted' "${SCRIPT_DIR}/../scripts/realign_manifest.sh"; then
+    echo "  PASS: Zero-flank extraction path now aborts with ERROR"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: realign_manifest.sh should abort on zero flanks"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 17: Missing realigned CSV aborts pipeline
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 17: Missing or empty realigned CSV → hard abort ---"
+
+if grep -q 'ERROR: Realigned CSV file was not created or is empty' "${SCRIPT_DIR}/../scripts/realign_manifest.sh"; then
+    echo "  PASS: Missing realigned CSV path now aborts with ERROR"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: realign_manifest.sh should abort on missing realigned CSV"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 18: Malformed realigned CSV (no [Assay]) aborts pipeline
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 18: Missing [Assay] in realigned CSV → hard abort ---"
+
+if grep -q 'ERROR: \[Assay\] section NOT found' "${SCRIPT_DIR}/../scripts/realign_manifest.sh"; then
+    echo "  PASS: Malformed realigned CSV path now aborts with ERROR"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: realign_manifest.sh should abort on malformed realigned CSV"
+    (( FAIL++ )) || true
+fi
+
+# ---------------------------------------------------------------
+# Test 19: Very few data lines aborts pipeline
+# ---------------------------------------------------------------
+echo ""
+echo "--- Test 19: Realigned CSV with ≤2 data lines → hard abort ---"
+
+if grep -q 'ERROR: Realigned CSV contains.*data lines' "${SCRIPT_DIR}/../scripts/realign_manifest.sh"; then
+    echo "  PASS: Insufficient data lines path now aborts with ERROR"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: realign_manifest.sh should abort on too few data lines"
+    (( FAIL++ )) || true
+fi
+
 echo ""
 echo "============================================"
 echo "  Results: ${PASS} passed, ${FAIL} failed"
