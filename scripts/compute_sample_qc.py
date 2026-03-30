@@ -179,7 +179,7 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
 
     # Compute final statistics
     with open(output_path, 'w') as out:
-        out.write("idx\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_sd\thet_rate\n")
+        out.write("idx\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_mean\tbaf_sd\thet_rate\n")
 
         for i in range(num_samples):
             # Call rate
@@ -216,9 +216,12 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
             else:
                 median_val = float('nan')
 
-            # BAF SD (population variance)
-            if baf_n[i] > 1:
+            # BAF mean and SD (population variance)
+            if baf_n[i] > 0:
                 baf_mean_val = baf_sum[i] / baf_n[i]
+            else:
+                baf_mean_val = float('nan')
+            if baf_n[i] > 1:
                 baf_var = baf_sum_sq[i] / baf_n[i] - baf_mean_val ** 2
                 if baf_var < 0:
                     baf_var = 0
@@ -236,7 +239,8 @@ def compute_metrics(num_samples, output_path, chunk_size=10000):
                 return f"{v:.{decimals}f}"
 
             out.write(f"{i}\t{fmt(cr, 6)}\t{fmt(lrr_sd, 6)}\t{fmt(mean_val, 6)}"
-                      f"\t{fmt(median_val, 6)}\t{fmt(baf_sd_val, 6)}\t{fmt(het_rate, 6)}\n")
+                      f"\t{fmt(median_val, 6)}\t{fmt(baf_mean_val, 6)}"
+                      f"\t{fmt(baf_sd_val, 6)}\t{fmt(het_rate, 6)}\n")
 
     print(f"  Metrics written to {output_path}", file=sys.stderr)
 

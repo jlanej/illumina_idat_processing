@@ -6,13 +6,22 @@ Compile a unified sample sheet combining all QC metrics and ancestry PCs
 from the Illumina IDAT processing pipeline.
 
 Merges:
-  - Sample QC metrics (call rate, LRR SD, LRR mean, LRR median, predicted sex)
+  - Sample QC metrics (call rate, LRR SD/mean/median, BAF mean/SD, het rate)
+  - Sex check cross-tabulation (chrX/Y LRR medians, F-stat, peddy sex,
+    concordance status)
+  - Pre-PCA exclusion flags (relatedness, het outlier, combined)
+  - Inbreeding coefficient (F) from plink2 .het
   - Ancestry PCA projections (default 20 PCs)
+  - Peddy het_check and sex_check metrics
 
 Usage:
     python3 compile_sample_sheet.py \\
         --sample-qc stage2/qc/stage2_sample_qc.tsv \\
         --pca-projections pca/pca_projections.tsv \\
+        --sex-check sex_check/sex_check_chrXY_lrr.tsv \\
+        --relatedness-excluded relatedness_excluded_samples.txt \\
+        --het-outlier-excluded het_outlier_excluded_samples.txt \\
+        --pre-pca-excluded pre_pca_excluded_samples.txt \\
         --output compiled_sample_sheet.tsv
 """
 
@@ -112,6 +121,22 @@ def read_peddy_csv(filepath):
     return columns, data
 
 
+def read_exclusion_list(filepath):
+    """Read a sample exclusion list (one sample ID per line).
+
+    Returns a set of excluded sample IDs.
+    """
+    excluded = set()
+    if not filepath or not os.path.exists(filepath):
+        return excluded
+    with open(filepath) as f:
+        for line in f:
+            sid = line.strip()
+            if sid:
+                excluded.add(sid)
+    return excluded
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Compile unified sample sheet with QC metrics and PCs"
@@ -126,6 +151,18 @@ def main():
                         help="Peddy het_check.csv with ancestry/het QC metrics")
     parser.add_argument("--peddy-sex-check", default=None,
                         help="Peddy sex_check.csv with sex prediction metrics")
+    parser.add_argument("--sex-check", default=None,
+                        help="Sex check cross-tabulation TSV "
+                             "(sex_check_chrXY_lrr.tsv from plot_sex_check.py)")
+    parser.add_argument("--relatedness-excluded", default=None,
+                        help="Relatedness-excluded samples list "
+                             "(relatedness_excluded_samples.txt)")
+    parser.add_argument("--het-outlier-excluded", default=None,
+                        help="Het-outlier-excluded samples list "
+                             "(het_outlier_excluded_samples.txt)")
+    parser.add_argument("--pre-pca-excluded", default=None,
+                        help="Combined pre-PCA excluded samples list "
+                             "(pre_pca_excluded_samples.txt)")
     parser.add_argument("--ancestry-pca", action='append', default=[],
                         help="Ancestry-specific PCA projections in format "
                              "ANCESTRY:FILE (repeatable). Samples not of a "
@@ -166,6 +203,31 @@ def main():
                 fields = line.strip().split()
                 if len(fields) > f_idx:
                     het_data[fields[iid_idx]] = fields[f_idx]
+
+    # Read sex check cross-tabulation if available
+    SEX_CHECK_FIELDS = [
+        'chrx_lrr_median', 'chry_lrr_median', 'chrx_f_stat',
+        'f_sex', 'peddy_sex', 'sex_status',
+    ]
+    sex_check_cols = []
+    sex_check_data = {}
+    if args.sex_check and os.path.exists(args.sex_check):
+        _sc_header, _sc_data = read_tsv(args.sex_check)
+        for field in SEX_CHECK_FIELDS:
+            if field in _sc_header:
+                sex_check_cols.append(field)
+        for sid, row in _sc_data.items():
+            sex_check_data[sid] = {col: row.get(col, 'NA')
+                                   for col in sex_check_cols}
+
+    # Read pre-PCA exclusion lists if available
+    rel_excluded = read_exclusion_list(args.relatedness_excluded)
+    het_excluded = read_exclusion_list(args.het_outlier_excluded)
+    pca_excluded = read_exclusion_list(args.pre_pca_excluded)
+    has_exclusion_flags = bool(
+        args.relatedness_excluded or args.het_outlier_excluded
+        or args.pre_pca_excluded
+    )
 
     # Read peddy sample-level metrics if available
     # Columns are prefixed with 'peddy_' to denote their source.
@@ -231,6 +293,11 @@ def main():
     output_cols = list(qc_header)
     if het_data:
         output_cols.append('inbreeding_F')
+    output_cols.extend(sex_check_cols)
+    if has_exclusion_flags:
+        output_cols.extend([
+            'excluded_relatedness', 'excluded_het_outlier', 'pre_pca_excluded',
+        ])
     output_cols.extend(pc_cols)
     # Add ancestry-specific PC columns
     for anc in ancestry_pca_order:
@@ -261,6 +328,15 @@ def main():
             # Inbreeding coefficient
             if het_data:
                 row.append(het_data.get(sample_id, 'NA'))
+            # Sex check cross-tabulation columns
+            sc_row = sex_check_data.get(sample_id, {})
+            for col in sex_check_cols:
+                row.append(sc_row.get(col, 'NA'))
+            # Pre-PCA exclusion flags
+            if has_exclusion_flags:
+                row.append('1' if sample_id in rel_excluded else '0')
+                row.append('1' if sample_id in het_excluded else '0')
+                row.append('1' if sample_id in pca_excluded else '0')
             # PC columns (full-cohort)
             pc_row = pc_data.get(sample_id, {})
             for col in pc_cols:
@@ -284,11 +360,21 @@ def main():
     n_samples = len(all_samples)
     n_with_pcs = sum(1 for s in all_samples if s in pc_data)
     n_with_peddy = sum(1 for s in all_samples if s in peddy_het_data)
+    n_with_sex_check = sum(1 for s in all_samples if s in sex_check_data)
     print(f"Compiled sample sheet: {args.output}")
     print(f"  Total samples:     {n_samples}")
     print(f"  QC columns:        {len(qc_header)}")
     print(f"  PC columns:        {len(pc_cols)}")
     print(f"  Samples with PCs:  {n_with_pcs}")
+    if sex_check_cols:
+        print(f"  Sex check columns: {len(sex_check_cols)}"
+              f" ({n_with_sex_check} samples)")
+    if has_exclusion_flags:
+        print(f"  Exclusion flags:   excluded_relatedness,"
+              f" excluded_het_outlier, pre_pca_excluded")
+        print(f"    Relatedness excluded: {len(rel_excluded)}")
+        print(f"    Het outlier excluded: {len(het_excluded)}")
+        print(f"    Pre-PCA excluded:     {len(pca_excluded)}")
     if ancestry_pca_order:
         for anc in ancestry_pca_order:
             anc_cols, anc_data_dict = ancestry_pca_data[anc]

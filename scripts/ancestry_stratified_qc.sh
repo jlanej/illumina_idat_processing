@@ -301,6 +301,11 @@ done
 
 if [[ -n "${FULL_VQC_DIR}" ]]; then
     COLLATE_ARGS+=(--all-variant-qc-dir "${FULL_VQC_DIR}")
+    # Include Ti/Tv stats if available alongside the variant QC directory
+    TSTV_CANDIDATE="${FULL_VQC_DIR}/../tstv_stats.txt"
+    if [[ -f "${TSTV_CANDIDATE}" ]]; then
+        COLLATE_ARGS+=(--tstv-file "${TSTV_CANDIDATE}")
+    fi
 fi
 
 # Add per-ancestry variant QC directories

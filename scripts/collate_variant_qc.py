@@ -38,36 +38,57 @@ def _safe_float(val):
 
 
 def read_plink2_vmiss(filepath):
-    """Read plink2 .vmiss file. Returns dict of variant_id -> missingness."""
+    """Read plink2 .vmiss file. Returns dict of variant_id -> row dict.
+
+    Returned fields per variant: F_MISS, OBS_CT, MISSING_CT.
+    """
     data = {}
     if not os.path.exists(filepath):
         return data
     with open(filepath) as f:
         header = f.readline().strip().split()
-        # plink2 .vmiss columns: #CHROM  ID  MISSING_CT  OBS_CT  F_MISS
         id_idx = header.index('ID') if 'ID' in header else 1
         fmiss_idx = header.index('F_MISS') if 'F_MISS' in header else len(header) - 1
+        obs_idx = header.index('OBS_CT') if 'OBS_CT' in header else None
+        miss_idx = header.index('MISSING_CT') if 'MISSING_CT' in header else None
         for line in f:
             fields = line.strip().split()
             if len(fields) > max(id_idx, fmiss_idx):
-                data[fields[id_idx]] = fields[fmiss_idx]
+                row = {'F_MISS': fields[fmiss_idx]}
+                if obs_idx is not None and obs_idx < len(fields):
+                    row['OBS_CT'] = fields[obs_idx]
+                if miss_idx is not None and miss_idx < len(fields):
+                    row['MISSING_CT'] = fields[miss_idx]
+                data[fields[id_idx]] = row
     return data
 
 
 def read_plink2_hardy(filepath):
-    """Read plink2 .hardy file. Returns dict of variant_id -> HWE p-value."""
+    """Read plink2 .hardy file. Returns dict of variant_id -> row dict.
+
+    Returned fields per variant: P, HOM_A1_CT, HET_A1_AX_CT, TWO_AX_CT.
+    """
     data = {}
     if not os.path.exists(filepath):
         return data
     with open(filepath) as f:
         header = f.readline().strip().split()
         id_idx = header.index('ID') if 'ID' in header else 1
-        # P column is typically the last one
         p_idx = header.index('P') if 'P' in header else len(header) - 1
+        hom_a1_idx = header.index('HOM_A1_CT') if 'HOM_A1_CT' in header else None
+        het_idx = header.index('HET_A1_AX_CT') if 'HET_A1_AX_CT' in header else None
+        two_ax_idx = header.index('TWO_AX_CT') if 'TWO_AX_CT' in header else None
         for line in f:
             fields = line.strip().split()
             if len(fields) > max(id_idx, p_idx):
-                data[fields[id_idx]] = fields[p_idx]
+                row = {'P': fields[p_idx]}
+                if hom_a1_idx is not None and hom_a1_idx < len(fields):
+                    row['HOM_A1_CT'] = fields[hom_a1_idx]
+                if het_idx is not None and het_idx < len(fields):
+                    row['HET_A1_AX_CT'] = fields[het_idx]
+                if two_ax_idx is not None and two_ax_idx < len(fields):
+                    row['TWO_AX_CT'] = fields[two_ax_idx]
+                data[fields[id_idx]] = row
     return data
 
 
@@ -95,7 +116,8 @@ def read_plink2_afreq(filepath):
 def load_variant_qc(qc_dir, prefix='variant_qc'):
     """Load all variant QC metrics from a plink2 output directory.
 
-    Returns dict of variant_id -> {call_rate, hwe_p, maf}.
+    Returns dict of variant_id -> {call_rate, hwe_p, maf, obs_ct, missing_ct,
+                                    hom_a1_ct, het_ct, hom_a2_ct}.
     """
     vmiss = read_plink2_vmiss(os.path.join(qc_dir, f'{prefix}.vmiss'))
     hardy = read_plink2_hardy(os.path.join(qc_dir, f'{prefix}.hardy'))
@@ -105,17 +127,44 @@ def load_variant_qc(qc_dir, prefix='variant_qc'):
 
     data = {}
     for vid in all_variants:
-        fmiss = vmiss.get(vid, 'NA')
+        vmiss_row = vmiss.get(vid, {})
+        fmiss = vmiss_row.get('F_MISS', 'NA') if isinstance(vmiss_row, dict) else 'NA'
         try:
             cr = f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
         except ValueError:
             cr = 'NA'
+
+        hardy_row = hardy.get(vid, {})
+        hwe_p = hardy_row.get('P', 'NA') if isinstance(hardy_row, dict) else 'NA'
+
         data[vid] = {
             'call_rate': cr,
-            'hwe_p': hardy.get(vid, 'NA'),
+            'hwe_p': hwe_p,
             'maf': afreq.get(vid, 'NA'),
+            'obs_ct': vmiss_row.get('OBS_CT', 'NA') if isinstance(vmiss_row, dict) else 'NA',
+            'missing_ct': vmiss_row.get('MISSING_CT', 'NA') if isinstance(vmiss_row, dict) else 'NA',
+            'hom_a1_ct': hardy_row.get('HOM_A1_CT', 'NA') if isinstance(hardy_row, dict) else 'NA',
+            'het_ct': hardy_row.get('HET_A1_AX_CT', 'NA') if isinstance(hardy_row, dict) else 'NA',
+            'hom_a2_ct': hardy_row.get('TWO_AX_CT', 'NA') if isinstance(hardy_row, dict) else 'NA',
         }
     return data
+
+
+def parse_tstv_file(filepath):
+    """Parse bcftools stats tstv output for project-level Ti/Tv ratio.
+
+    Returns the Ti/Tv ratio as a string, or 'NA' if not available.
+    """
+    if not filepath or not os.path.exists(filepath):
+        return 'NA'
+    with open(filepath) as f:
+        for line in f:
+            # TSTV line format: TSTV\t0\tts\ttv\tts/tv\t...
+            if line.startswith('TSTV\t'):
+                fields = line.strip().split('\t')
+                if len(fields) >= 5:
+                    return fields[4]
+    return 'NA'
 
 
 def main():
@@ -126,6 +175,9 @@ def main():
                         help="Directory with full-cohort variant QC files")
     parser.add_argument("--ancestry-variant-qc", action='append', default=[],
                         help="Ancestry-specific QC in format ANCESTRY:DIR (repeatable)")
+    parser.add_argument("--tstv-file", default=None,
+                        help="bcftools stats tstv output file for project-level "
+                             "Ti/Tv ratio (tstv_stats.txt)")
     parser.add_argument("--output", required=True,
                         help="Output collated TSV file")
     args = parser.parse_args()
@@ -153,6 +205,9 @@ def main():
             ancestry_data[anc] = load_variant_qc(qc_dir)
             print(f"  {anc} variant QC: {len(ancestry_data[anc])} variants")
 
+    # Parse project-level Ti/Tv ratio
+    tstv_ratio = parse_tstv_file(args.tstv_file)
+
     # Collect all variant IDs
     all_variants = set(all_data.keys())
     for anc_data in ancestry_data.values():
@@ -169,13 +224,22 @@ def main():
     # Build output columns
     columns = ['variant_id']
     if all_data:
-        columns.extend(['all_call_rate', 'all_hwe_p', 'all_maf'])
+        columns.extend([
+            'all_call_rate', 'all_hwe_p', 'all_maf',
+            'all_obs_ct', 'all_missing_ct',
+            'all_hom_a1_ct', 'all_het_ct', 'all_hom_a2_ct',
+        ])
     ancestries_sorted = sorted(ancestry_data.keys())
     for anc in ancestries_sorted:
         columns.extend([
             f'{anc}_call_rate',
             f'{anc}_hwe_p',
             f'{anc}_maf',
+            f'{anc}_obs_ct',
+            f'{anc}_missing_ct',
+            f'{anc}_hom_a1_ct',
+            f'{anc}_het_ct',
+            f'{anc}_hom_a2_ct',
         ])
     columns.extend([
         'all_ancestries_call_rate_pass',
@@ -187,6 +251,9 @@ def main():
     # Write collated output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, 'w') as f:
+        # Write project-level Ti/Tv as a header comment if available
+        if tstv_ratio != 'NA':
+            f.write(f'#tstv_ratio={tstv_ratio}\n')
         f.write('\t'.join(columns) + '\n')
         for vid in all_variants:
             row = [vid]
@@ -196,6 +263,11 @@ def main():
                     vd.get('call_rate', 'NA'),
                     vd.get('hwe_p', 'NA'),
                     vd.get('maf', 'NA'),
+                    vd.get('obs_ct', 'NA'),
+                    vd.get('missing_ct', 'NA'),
+                    vd.get('hom_a1_ct', 'NA'),
+                    vd.get('het_ct', 'NA'),
+                    vd.get('hom_a2_ct', 'NA'),
                 ])
             for anc in ancestries_sorted:
                 vd = ancestry_data.get(anc, {}).get(vid, {})
@@ -203,6 +275,11 @@ def main():
                     vd.get('call_rate', 'NA'),
                     vd.get('hwe_p', 'NA'),
                     vd.get('maf', 'NA'),
+                    vd.get('obs_ct', 'NA'),
+                    vd.get('missing_ct', 'NA'),
+                    vd.get('hom_a1_ct', 'NA'),
+                    vd.get('het_ct', 'NA'),
+                    vd.get('hom_a2_ct', 'NA'),
                 ])
 
             if ancestries_sorted:
@@ -231,6 +308,8 @@ def main():
     print(f"Collated variant QC: {args.output}")
     print(f"  Total variants: {len(all_variants)}")
     print(f"  Columns: {', '.join(columns)}")
+    if tstv_ratio != 'NA':
+        print(f"  Project Ti/Tv ratio: {tstv_ratio}")
 
 
 if __name__ == "__main__":
