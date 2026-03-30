@@ -59,7 +59,7 @@ _PAR_XTR_REGIONS = {
         ('chrX', 155701383, 156030895, 'PAR2'),
         # chrY (NCBI GRCh38 assembly report)
         ('chrY', 10001, 2781479, 'PAR1'),
-        # XTR on chrY is not well-defined for GRCh38; omitted.
+        # XTR on chrY is not well-defined for GRCh38 and is omitted.
         ('chrY', 56887903, 57217415, 'PAR2'),
     ],
     'GRCh37': [

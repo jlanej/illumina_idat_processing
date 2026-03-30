@@ -748,14 +748,14 @@ assert chm13_y[2] == ('chrY', 62122809, 62460029, 'PAR2'), f'CHM13 chrY PAR2: {c
 # Verify GRCh38 has chrY PAR entries (no XTR on Y for this build)
 grch38 = get_par_xtr_regions('GRCh38')
 grch38_y = [r for r in grch38 if r[0] == 'chrY']
-assert len(grch38_y) >= 2, f'Expected >= 2 chrY regions for GRCh38, got {len(grch38_y)}'
+assert len(grch38_y) == 2, f'Expected 2 chrY regions for GRCh38 (PAR1+PAR2, XTR omitted), got {len(grch38_y)}'
 
 # Verify GRCh37 uses non-chr-prefixed chromosomes for both X and Y
 grch37 = get_par_xtr_regions('GRCh37')
 grch37_x = [r for r in grch37 if r[0] == 'X']
 grch37_y = [r for r in grch37 if r[0] == 'Y']
-assert len(grch37_x) >= 3, f'GRCh37 should have >= 3 X regions: {grch37_x}'
-assert len(grch37_y) >= 2, f'GRCh37 should have >= 2 Y regions: {grch37_y}'
+assert len(grch37_x) == 3, f'GRCh37 should have 3 X regions (PAR1+XTR+PAR2): {grch37_x}'
+assert len(grch37_y) == 2, f'GRCh37 should have 2 Y regions (PAR1+PAR2): {grch37_y}'
 assert grch37_x[0][0] == 'X', f'GRCh37 should use X not chrX: {grch37_x[0][0]}'
 assert grch37_y[0][0] == 'Y', f'GRCh37 should use Y not chrY: {grch37_y[0][0]}'
 

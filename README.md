@@ -79,7 +79,7 @@ Region boundaries per genome build are defined in `scripts/par_xtr_regions.py` (
 | GRCh37 | PAR1 | Y | 10,001 | 2,649,520 |
 | GRCh37 | PAR2 | Y | 59,034,050 | 59,363,566 |
 
-XTR on chrY is well-defined for CHM13 (from [GIAB genome-stratifications v3.1](https://github.com/genome-in-a-bottle/genome-stratifications)) but not clearly delineated for GRCh38/GRCh37 — only PAR1/PAR2 are excluded for those builds.
+XTR on chrY is well-defined for CHM13 (from [GIAB genome-stratifications v3.1](https://github.com/genome-in-a-bottle/genome-stratifications)) but not clearly delineated in the reference assemblies for GRCh38/GRCh37 — only PAR1/PAR2 regions are excluded on chrY for those builds.
 
 To add support for a new genome build, add an entry to `_PAR_XTR_REGIONS` in `scripts/par_xtr_regions.py` and a new `case` clause in `get_par_xtr_bed()` in `scripts/utils.sh`. See [CHM13-annotations](https://github.com/marbl/CHM13-annotations) and [GIAB genome stratifications](https://github.com/genome-in-a-bottle/genome-stratifications) for updated boundaries.
 

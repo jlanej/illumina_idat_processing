@@ -299,9 +299,12 @@ def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
             sexcheck_file = prefix + '.sexcheck'
             if proc.returncode == 0 and os.path.exists(sexcheck_file):
                 break
-            # If the error indicates an unrecognized flag, try the next one
-            if 'unrecognized' in proc.stderr.lower() or \
-               'invalid' in proc.stderr.lower():
+            # If the error is specifically about an unrecognized flag name,
+            # try the next flag variant.  plink2 uses phrases like
+            # "Unrecognized flag" or "Invalid flag" in its error output.
+            stderr_lower = proc.stderr.lower()
+            if 'unrecognized flag' in stderr_lower or \
+               'invalid flag' in stderr_lower:
                 continue
             # Other error — report and return empty
             if proc.stderr:
