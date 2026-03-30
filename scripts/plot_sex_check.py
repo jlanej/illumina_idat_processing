@@ -61,8 +61,8 @@ def extract_chrXY_lrr_medians(vcf_file, threads=1, genome='CHM13',
     extracts both chromosomes in one bcftools view -r chrX,chrY call,
     then splits by chromosome in Python. Halves I/O.
 
-    PAR1, PAR2, and XTR regions on chrX are excluded via ``-T ^bed`` so
-    that the chrX median reflects only non-PAR/XTR loci.
+    PAR1, PAR2, and XTR regions are excluded from both chrX and chrY via
+    ``-T ^bed`` so that the medians reflect only non-PAR/XTR loci.
 
     If a cached result exists at ``output_dir/chrXY_lrr_cache.tsv`` it is
     returned directly, avoiding the expensive BCF scan on the second
@@ -107,10 +107,10 @@ def extract_chrXY_lrr_medians(vcf_file, threads=1, genome='CHM13',
     # Build region string for both chromosomes
     regions = ','.join(c for c in [chrom_x, chrom_y] if c is not None)
 
-    # Write PAR/XTR exclusion BED — always generated so that chrX LRR
-    # reflects only non-PAR/XTR loci.  The BED only contains chrX entries,
-    # so ``-T ^bed`` with ``-r chrX,chrY`` correctly excludes PAR/XTR on
-    # chrX while leaving chrY unfiltered (the BED has no chrY lines).
+    # Write PAR/XTR exclusion BED — always generated so that chrX and chrY
+    # LRR medians reflect only non-PAR/XTR loci.  The BED contains both
+    # chrX and chrY entries, so ``-T ^bed`` with ``-r chrX,chrY`` correctly
+    # excludes PAR/XTR from both chromosomes in a single pass.
     bed_path = _get_par_xtr_bed_path(genome, output_dir)
     par_xtr_arg = f' -T ^"{bed_path}"'
 
@@ -269,21 +269,47 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
 
 def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
                            output_dir):
-    """Compute chrX F-statistic via plink2 --check-sex."""
+    """Compute chrX F-statistic via plink2 --check-sex.
+
+    PAR/XTR regions are excluded via ``--exclude-range``.  An alternative
+    approach would be plink2's ``--split-par`` flag, which reclassifies PAR
+    variants as autosomal — but ``--exclude-range`` is more explicit and
+    also handles XTR, which ``--split-par`` does not cover.
+
+    Note: some newer plink2 alpha builds renamed ``--check-sex`` to
+    ``--sex-check``.  We try ``--check-sex`` first (compatible with the
+    Dockerfile-pinned v2.00a6.33 and most stable builds) and fall back to
+    ``--sex-check`` if the first attempt fails with an unrecognized-flag
+    error.
+    """
     work_dir = tempfile.mkdtemp(prefix='plink2_sexcheck_')
     try:
         prefix = os.path.join(work_dir, 'sexcheck')
         bed_path = _get_par_xtr_bed_path(genome, output_dir)
-        cmd = [
+        base_cmd = [
             'plink2', '--bcf', vcf_file,
             '--allow-extra-chr', '--threads', str(threads),
             '--exclude-range', bed_path,
-            '--check-sex', '0.2', '0.8',
-            '--out', prefix,
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        sexcheck_file = prefix + '.sexcheck'
-        if proc.returncode != 0 or not os.path.exists(sexcheck_file):
+
+        # Try --check-sex first; fall back to --sex-check for newer alphas
+        for sex_flag in ['--check-sex', '--sex-check']:
+            cmd = base_cmd + [sex_flag, '0.2', '0.8', '--out', prefix]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            sexcheck_file = prefix + '.sexcheck'
+            if proc.returncode == 0 and os.path.exists(sexcheck_file):
+                break
+            # If the error indicates an unrecognized flag, try the next one
+            if 'unrecognized' in proc.stderr.lower() or \
+               'invalid' in proc.stderr.lower():
+                continue
+            # Other error — report and return empty
+            if proc.stderr:
+                print(f"  plink2 failed (rc={proc.returncode}): "
+                      f"{proc.stderr.strip()[:200]}", file=sys.stderr)
+            return {}
+        else:
+            # Neither flag worked
             if proc.stderr:
                 print(f"  plink2 failed (rc={proc.returncode}): "
                       f"{proc.stderr.strip()[:200]}", file=sys.stderr)

@@ -56,7 +56,7 @@ The pipeline defaults to the **T2T-CHM13v2.0** reference genome — the first co
 
 #### PAR/XTR Region Handling
 
-Pseudoautosomal regions (PAR1, PAR2) and the X-transposed region (XTR) on chrX are automatically excluded from all sex-determination analyses. These regions are homologous between chrX and chrY (PAR) or have high X-Y sequence identity (XTR), causing males to appear diploid at these loci. Including them inflates observed heterozygosity in males and biases the F-statistic toward 0, leading to incorrect sex calls.
+Pseudoautosomal regions (PAR1, PAR2) and the X-transposed region (XTR) on chrX and chrY are automatically excluded from all sex-determination analyses. These regions are homologous between chrX and chrY (PAR) or have high X-Y sequence identity (XTR), causing males to appear diploid at these loci. Including them inflates observed heterozygosity in males on chrX (biasing the F-statistic toward 0) and biases the chrY LRR median by including diploid-behaving loci.
 
 Region boundaries per genome build are defined in `scripts/par_xtr_regions.py` (Python) and `scripts/utils.sh` (Bash):
 
@@ -65,12 +65,21 @@ Region boundaries per genome build are defined in `scripts/par_xtr_regions.py` (
 | CHM13 | PAR1 | chrX | 0 | 2,781,479 |
 | CHM13 | XTR | chrX | 2,781,479 | 6,400,875 |
 | CHM13 | PAR2 | chrX | 155,701,382 | 156,040,895 |
+| CHM13 | PAR1 | chrY | 0 | 2,458,320 |
+| CHM13 | XTR | chrY | 2,458,320 | 6,400,875 |
+| CHM13 | PAR2 | chrY | 62,122,809 | 62,460,029 |
 | GRCh38 | PAR1 | chrX | 10,001 | 2,781,479 |
 | GRCh38 | XTR | chrX | 2,781,479 | 6,400,000 |
 | GRCh38 | PAR2 | chrX | 155,701,383 | 156,030,895 |
+| GRCh38 | PAR1 | chrY | 10,001 | 2,781,479 |
+| GRCh38 | PAR2 | chrY | 56,887,903 | 57,217,415 |
 | GRCh37 | PAR1 | X | 60,001 | 2,699,520 |
 | GRCh37 | XTR | X | 2,699,520 | 6,100,000 |
 | GRCh37 | PAR2 | X | 154,931,044 | 155,260,560 |
+| GRCh37 | PAR1 | Y | 10,001 | 2,649,520 |
+| GRCh37 | PAR2 | Y | 59,034,050 | 59,363,566 |
+
+XTR on chrY is well-defined for CHM13 (from [GIAB genome-stratifications v3.1](https://github.com/genome-in-a-bottle/genome-stratifications)) but not clearly delineated for GRCh38/GRCh37 — only PAR1/PAR2 are excluded for those builds.
 
 To add support for a new genome build, add an entry to `_PAR_XTR_REGIONS` in `scripts/par_xtr_regions.py` and a new `case` clause in `get_par_xtr_bed()` in `scripts/utils.sh`. See [CHM13-annotations](https://github.com/marbl/CHM13-annotations) and [GIAB genome stratifications](https://github.com/genome-in-a-bottle/genome-stratifications) for updated boundaries.
 

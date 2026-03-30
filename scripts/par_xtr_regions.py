@@ -3,10 +3,10 @@
 par_xtr_regions.py
 
 Centralized PAR (pseudoautosomal region) and XTR (X-transposed region)
-definitions for chrX per reference genome build.
+definitions for chrX and chrY per reference genome build.
 
-These regions must be excluded from chrX-based sex determination analyses
-(both LRR-based and genotype-based F-statistic) because they behave as
+These regions must be excluded from sex determination analyses (both
+LRR-based and genotype-based F-statistic) because they behave as
 autosomal loci:
 
   - PAR1/PAR2: homologous between chrX and chrY; males are diploid here.
@@ -15,6 +15,8 @@ autosomal loci:
 
 Including PAR/XTR sites inflates male heterozygosity on chrX, biasing
 the F-statistic toward 0 and causing false female or ambiguous calls.
+On chrY, PAR/XTR sites bias the LRR median by including diploid-behaving
+loci.
 
 Supported genome builds:
   - CHM13 (T2T-CHM13v2.0)
@@ -26,6 +28,7 @@ build name as key and a list of (chrom, start, end, label) tuples.
 
 References:
   - T2T CHM13v2.0: https://github.com/marbl/CHM13-annotations
+  - T2T chrY PAR/XTR: chm13v2.0_PAR.bed, GIAB genome-stratifications v3.1
   - GRCh38: https://www.ncbi.nlm.nih.gov/grc/human
   - GRCh37: Ensembl GRCh37 assembly report
 """
@@ -36,21 +39,37 @@ import tempfile
 
 # Region definitions: {build: [(chrom, start, end, label), ...]}
 # Coordinates are 0-based half-open (BED format).
+# Both chrX and chrY PAR/XTR regions are included so that a single BED
+# file can exclude diploid-behaving loci from both chromosomes.
 _PAR_XTR_REGIONS = {
     'CHM13': [
+        # chrX (T2T-CHM13v2.0)
         ('chrX', 0, 2781479, 'PAR1'),
         ('chrX', 2781479, 6400875, 'XTR'),
         ('chrX', 155701382, 156040895, 'PAR2'),
+        # chrY (chm13v2.0_PAR.bed; GIAB genome-stratifications v3.1)
+        ('chrY', 0, 2458320, 'PAR1'),
+        ('chrY', 2458320, 6400875, 'XTR'),
+        ('chrY', 62122809, 62460029, 'PAR2'),
     ],
     'GRCh38': [
+        # chrX
         ('chrX', 10001, 2781479, 'PAR1'),
         ('chrX', 2781479, 6400000, 'XTR'),
         ('chrX', 155701383, 156030895, 'PAR2'),
+        # chrY (NCBI GRCh38 assembly report)
+        ('chrY', 10001, 2781479, 'PAR1'),
+        # XTR on chrY is not well-defined for GRCh38; omitted.
+        ('chrY', 56887903, 57217415, 'PAR2'),
     ],
     'GRCh37': [
+        # chrX (note: GRCh37 uses non-chr-prefixed contig names)
         ('X', 60001, 2699520, 'PAR1'),
         ('X', 2699520, 6100000, 'XTR'),
         ('X', 154931044, 155260560, 'PAR2'),
+        # chrY (Ensembl GRCh37; XTR on Y not clearly defined for this build)
+        ('Y', 10001, 2649520, 'PAR1'),
+        ('Y', 59034050, 59363566, 'PAR2'),
     ],
 }
 
@@ -111,8 +130,9 @@ def get_par_xtr_bed(genome='CHM13', output_path=None):
 def get_nonpar_chrx_regions(genome='CHM13'):
     """Return bcftools-compatible region strings for non-PAR/XTR chrX.
 
-    Computes the complement of PAR/XTR on chrX, returning a list of
-    'chrom:start-end' region strings (1-based inclusive, for bcftools -r).
+    Computes the complement of PAR/XTR on chrX only (chrY entries in the
+    region table are ignored), returning a list of 'chrom:start-end'
+    region strings (1-based inclusive, for bcftools -r).
 
     Args:
         genome: Genome build name.
@@ -120,7 +140,9 @@ def get_nonpar_chrx_regions(genome='CHM13'):
     Returns:
         List of region strings suitable for bcftools -r.
     """
-    regions = get_par_xtr_regions(genome)
+    all_regions = get_par_xtr_regions(genome)
+    # Filter to chrX entries only
+    regions = [r for r in all_regions if r[0] in ('chrX', 'X')]
     if not regions:
         return []
 

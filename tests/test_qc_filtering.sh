@@ -732,28 +732,50 @@ assert 'CHM13' in builds, f'CHM13 not in supported builds: {builds}'
 assert 'GRCh38' in builds, f'GRCh38 not in supported builds: {builds}'
 assert 'GRCh37' in builds, f'GRCh37 not in supported builds: {builds}'
 
-# Verify CHM13 regions match the reference values from the issue
+# Verify CHM13 regions include both chrX and chrY entries
 chm13 = get_par_xtr_regions('CHM13')
-assert len(chm13) == 3, f'Expected 3 regions for CHM13, got {len(chm13)}'
-assert chm13[0] == ('chrX', 0, 2781479, 'PAR1'), f'CHM13 PAR1: {chm13[0]}'
-assert chm13[1] == ('chrX', 2781479, 6400875, 'XTR'), f'CHM13 XTR: {chm13[1]}'
-assert chm13[2] == ('chrX', 155701382, 156040895, 'PAR2'), f'CHM13 PAR2: {chm13[2]}'
+chm13_x = [r for r in chm13 if r[0] == 'chrX']
+chm13_y = [r for r in chm13 if r[0] == 'chrY']
+assert len(chm13_x) == 3, f'Expected 3 chrX regions for CHM13, got {len(chm13_x)}'
+assert len(chm13_y) == 3, f'Expected 3 chrY regions for CHM13, got {len(chm13_y)}'
+assert chm13_x[0] == ('chrX', 0, 2781479, 'PAR1'), f'CHM13 chrX PAR1: {chm13_x[0]}'
+assert chm13_x[1] == ('chrX', 2781479, 6400875, 'XTR'), f'CHM13 chrX XTR: {chm13_x[1]}'
+assert chm13_x[2] == ('chrX', 155701382, 156040895, 'PAR2'), f'CHM13 chrX PAR2: {chm13_x[2]}'
+assert chm13_y[0] == ('chrY', 0, 2458320, 'PAR1'), f'CHM13 chrY PAR1: {chm13_y[0]}'
+assert chm13_y[1] == ('chrY', 2458320, 6400875, 'XTR'), f'CHM13 chrY XTR: {chm13_y[1]}'
+assert chm13_y[2] == ('chrY', 62122809, 62460029, 'PAR2'), f'CHM13 chrY PAR2: {chm13_y[2]}'
 
-# Verify GRCh37 uses non-chr-prefixed chromosomes
+# Verify GRCh38 has chrY PAR entries (no XTR on Y for this build)
+grch38 = get_par_xtr_regions('GRCh38')
+grch38_y = [r for r in grch38 if r[0] == 'chrY']
+assert len(grch38_y) >= 2, f'Expected >= 2 chrY regions for GRCh38, got {len(grch38_y)}'
+
+# Verify GRCh37 uses non-chr-prefixed chromosomes for both X and Y
 grch37 = get_par_xtr_regions('GRCh37')
-assert grch37[0][0] == 'X', f'GRCh37 should use X not chrX: {grch37[0][0]}'
+grch37_x = [r for r in grch37 if r[0] == 'X']
+grch37_y = [r for r in grch37 if r[0] == 'Y']
+assert len(grch37_x) >= 3, f'GRCh37 should have >= 3 X regions: {grch37_x}'
+assert len(grch37_y) >= 2, f'GRCh37 should have >= 2 Y regions: {grch37_y}'
+assert grch37_x[0][0] == 'X', f'GRCh37 should use X not chrX: {grch37_x[0][0]}'
+assert grch37_y[0][0] == 'Y', f'GRCh37 should use Y not chrY: {grch37_y[0][0]}'
 
-# Verify BED output
+# Verify BED output includes both chrX and chrY lines
 with tempfile.TemporaryDirectory() as td:
     bed_path = get_par_xtr_bed('CHM13', os.path.join(td, 'test.bed'))
     with open(bed_path) as f:
         lines = f.readlines()
-    assert len(lines) == 3, f'Expected 3 BED lines, got {len(lines)}'
-    assert lines[0].startswith('chrX\t0\t2781479'), f'Line 0: {lines[0]}'
+    assert len(lines) == 6, f'Expected 6 BED lines (3 chrX + 3 chrY), got {len(lines)}'
+    chrx_lines = [l for l in lines if l.startswith('chrX')]
+    chry_lines = [l for l in lines if l.startswith('chrY')]
+    assert len(chrx_lines) == 3, f'Expected 3 chrX BED lines, got {len(chrx_lines)}'
+    assert len(chry_lines) == 3, f'Expected 3 chrY BED lines, got {len(chry_lines)}'
 
-# Verify non-PAR region computation returns chrX regions
+# Verify non-PAR region computation still returns chrX-only regions
 nonpar = get_nonpar_chrx_regions('CHM13')
 assert len(nonpar) >= 1, f'Expected at least 1 nonPAR region, got {len(nonpar)}'
+# All nonpar regions should be chrX, not chrY
+for region in nonpar:
+    assert 'chrX' in region or 'X:' in region, f'nonPAR region should be chrX: {region}'
 
 # Verify build aliases work
 assert get_par_xtr_regions('hg38') == get_par_xtr_regions('GRCh38')
@@ -767,7 +789,7 @@ try:
 except ValueError:
     pass
 
-print('All PAR/XTR region assertions passed')
+print('All PAR/XTR region assertions passed (chrX + chrY)')
 " 2>&1
 
 if [[ $? -eq 0 ]]; then
@@ -913,8 +935,9 @@ echo "--- Test 26: utils.sh get_par_xtr_bed function ---"
 if grep -q 'get_par_xtr_bed()' "${REPO_DIR}/scripts/utils.sh" && \
    grep -q 'PAR1' "${REPO_DIR}/scripts/utils.sh" && \
    grep -q 'XTR' "${REPO_DIR}/scripts/utils.sh" && \
-   grep -q 'PAR2' "${REPO_DIR}/scripts/utils.sh"; then
-    echo "  PASS: utils.sh contains get_par_xtr_bed with PAR/XTR regions"
+   grep -q 'PAR2' "${REPO_DIR}/scripts/utils.sh" && \
+   grep -q 'chrY' "${REPO_DIR}/scripts/utils.sh"; then
+    echo "  PASS: utils.sh contains get_par_xtr_bed with chrX + chrY PAR/XTR regions"
     (( PASS++ )) || true
 else
     echo "  FAIL: utils.sh missing get_par_xtr_bed function"
@@ -936,12 +959,14 @@ import plot_sex_check as ps
 assert hasattr(ps, '_compute_f_stat_plink2'), 'Missing _compute_f_stat_plink2'
 assert hasattr(ps, '_compute_f_stat_bcftools'), 'Missing _compute_f_stat_bcftools'
 
-# Verify plink2 function references --check-sex
+# Verify plink2 function references --check-sex and --sex-check fallback
 import inspect
 src = inspect.getsource(ps._compute_f_stat_plink2)
 assert '--check-sex' in src, 'plink2 function should use --check-sex'
+assert '--sex-check' in src, 'plink2 function should handle --sex-check fallback'
 assert '--exclude-range' in src, 'plink2 function should use --exclude-range'
 assert '.sexcheck' in src, 'plink2 function should parse .sexcheck output'
+assert '--split-par' in src, 'plink2 function should mention --split-par alternative'
 
 # Verify bcftools fallback has a docstring indicating it's a fallback
 assert 'fallback' in ps._compute_f_stat_bcftools.__doc__.lower(), \
