@@ -996,10 +996,16 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     vectorized_elapsed = time.time() - cluster_start
     print(f"    Bulk statistics computed in {vectorized_elapsed:.1f}s", file=sys.stderr)
 
+    # With ddof=1, np.nanstd requires n >= 2 to produce a defined result
+    # (n=1 yields NaN from division by zero in Bessel correction, which
+    # nan_to_num maps to 0.0 — an infinitely tight cluster).  Enforce
+    # at least 2 samples per cluster so the 0.0-std never leaks through.
+    effective_min = max(min_samples_per_cluster, 2)
+
     # Determine which probes have at least one genotype class with enough samples
     probe_has_update = np.zeros(num_probes, dtype=bool)
     for geno_code in (1, 2, 3):
-        probe_has_update |= geno_counts[geno_code] >= min_samples_per_cluster
+        probe_has_update |= geno_counts[geno_code] >= effective_min
 
     # --- Build cluster records (still a loop, but now only simple assignments) ---
     record_start = time.time()
@@ -1036,7 +1042,7 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
             (3, old_rec.bb, "bb"),
         ]:
             n = int(geno_counts[geno_code][pidx])
-            if n >= min_samples_per_cluster:
+            if n >= effective_min:
                 new_stats = ClusterStats(
                     theta_mean=float(geno_theta_mean[geno_code][pidx]),
                     theta_dev=float(geno_theta_std[geno_code][pidx]),

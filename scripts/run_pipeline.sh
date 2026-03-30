@@ -559,9 +559,9 @@ else
     true > "${HET_OUTLIER_EXCLUDED}"
 fi
 
-# Combine exclusion lists (unique IDs)
+# Combine exclusion lists (unique IDs, dropping empty lines)
 cat "${RELATEDNESS_EXCLUDED}" "${HET_OUTLIER_EXCLUDED}" 2>/dev/null \
-    | sort -u > "${PRE_PCA_EXCLUDE}" || true
+    | sed '/^$/d' | sort -u > "${PRE_PCA_EXCLUDE}" || true
 
 N_EXCLUDED=$(wc -l < "${PRE_PCA_EXCLUDE}" 2>/dev/null | tr -d ' ' || echo 0)
 if [[ "${N_EXCLUDED}" -gt 0 ]]; then

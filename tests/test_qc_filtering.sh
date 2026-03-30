@@ -479,6 +479,52 @@ assert_contains "$(cat "${TMP_DIR}/rel_chain_excluded.txt")" "C2" "C2 excluded i
 
 echo ""
 
+# ===============================================================
+# Test 13: Combined exclusion list deduplication and empty-line filtering
+# ===============================================================
+echo "--- Test 13: Combined exclusion list deduplication ---"
+
+# A sample excluded by BOTH filters should appear only once in the merged list.
+# Empty files should not produce empty-line entries.
+cat > "${TMP_DIR}/rel_combined.txt" <<EOF
+SAMP_A
+SAMP_B
+EOF
+
+cat > "${TMP_DIR}/het_combined.txt" <<EOF
+SAMP_B
+SAMP_C
+EOF
+
+# Simulate the pipeline's combine step (with sed '/^$/d' fix)
+cat "${TMP_DIR}/rel_combined.txt" "${TMP_DIR}/het_combined.txt" \
+    | sed '/^$/d' | sort -u > "${TMP_DIR}/combined_exclude.txt"
+
+N_COMBINED=$(wc -l < "${TMP_DIR}/combined_exclude.txt" | tr -d ' ')
+assert_eq "${N_COMBINED}" "3" "combined: 3 unique samples (SAMP_A, SAMP_B, SAMP_C)"
+
+# Verify SAMP_B appears exactly once
+SAMP_B_COUNT=$(grep -c "SAMP_B" "${TMP_DIR}/combined_exclude.txt" || true)
+assert_eq "${SAMP_B_COUNT}" "1" "SAMP_B appears exactly once in merged list"
+
+echo ""
+
+# ===============================================================
+# Test 14: Empty exclusion files produce no empty-line entries
+# ===============================================================
+echo "--- Test 14: Empty exclusion files produce no empty lines ---"
+
+true > "${TMP_DIR}/empty_rel.txt"
+true > "${TMP_DIR}/empty_het.txt"
+
+cat "${TMP_DIR}/empty_rel.txt" "${TMP_DIR}/empty_het.txt" \
+    | sed '/^$/d' | sort -u > "${TMP_DIR}/combined_empty.txt"
+
+N_EMPTY=$(wc -l < "${TMP_DIR}/combined_empty.txt" | tr -d ' ')
+assert_eq "${N_EMPTY}" "0" "empty inputs → 0 lines in combined list (no blank entries)"
+
+echo ""
+
 # ---------------------------------------------------------------
 # Final summary
 # ---------------------------------------------------------------

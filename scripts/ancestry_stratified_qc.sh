@@ -209,6 +209,15 @@ for ANCESTRY in "${ANCESTRIES[@]}"; do
         echo "  Unrelated samples (after exclusions): ${N_UNRELATED}"
     else
         cp "${SAMPLE_LIST}" "${UNRELATED_SAMPLE_LIST}"
+        N_UNRELATED="${N_SAMPLES}"
+    fi
+
+    # Skip this ancestry if all samples were excluded
+    if [[ "${N_UNRELATED}" -eq 0 ]]; then
+        echo "  WARNING: All ${N_SAMPLES} samples in ${ANCESTRY} were excluded."
+        echo "           Skipping variant QC and PCA for this group."
+        echo ""
+        continue
     fi
 
     # Subset VCF to unrelated samples of this ancestry for variant QC
