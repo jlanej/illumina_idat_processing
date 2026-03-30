@@ -582,8 +582,7 @@ def generate_ancestry_stratified_qc(output_dir, n_samples=30):
             hwe_pass = True
             maf_pass = True
             for anc in sorted(mock_ancestries):
-                n_count = len([s for s in ancestry_assign
-                               if ancestry_assign[s] == anc])
+                n_count = ancestry_counts.get(anc, 0)
                 cr = round(1 - rng.uniform(0, 0.06), 6)
                 hwe = f'{10 ** rng.uniform(-10, 0):.6e}'
                 maf = round(rng.uniform(0, 0.5), 6)
