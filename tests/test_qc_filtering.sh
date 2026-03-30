@@ -799,7 +799,9 @@ python3 -c "
 import sys, os, tempfile
 sys.path.insert(0, '${REPO_DIR}/scripts')
 from plot_sex_check import _write_f_stat_cache, _read_f_stat_cache
+from plot_sex_check import _write_lrr_cache, _read_lrr_cache
 
+# --- F-stat cache: integer n_het/n_called (bcftools fallback) ---
 original = {
     'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
     'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
@@ -824,11 +826,42 @@ with tempfile.TemporaryDirectory() as td:
     mismatched = _read_f_stat_cache(cache, expected_genome='GRCh38')
     assert mismatched is None, 'Cache should return None for genome mismatch'
 
-print('Cache round-trip and invalidation verified')
+# --- F-stat cache: None n_het/n_called (plink2 mode) ---
+plink2_data = {
+    'P1': {'f_stat': 0.98, 'n_het': None, 'n_called': None, 'f_sex': 'M'},
+    'P2': {'f_stat': 0.02, 'n_het': None, 'n_called': None, 'f_sex': 'F'},
+}
+with tempfile.TemporaryDirectory() as td:
+    cache = os.path.join(td, 'cache.tsv')
+    _write_f_stat_cache(cache, plink2_data, 'GRCh38')
+    loaded = _read_f_stat_cache(cache, expected_genome='GRCh38')
+    assert loaded is not None
+    assert loaded['P1']['n_het'] is None, 'plink2 n_het should round-trip as None'
+    assert loaded['P1']['n_called'] is None, 'plink2 n_called should round-trip as None'
+
+# --- LRR cache round-trip ---
+medx = {0: -0.1, 1: 0.03, 2: -0.15}
+medy = {0: 0.08, 1: -0.07}
+with tempfile.TemporaryDirectory() as td:
+    cache = os.path.join(td, 'lrr.tsv')
+    _write_lrr_cache(cache, medx, medy, 'CHM13')
+    loaded = _read_lrr_cache(cache, expected_genome='CHM13')
+    assert loaded is not None, 'LRR cache should load'
+    lx, ly = loaded
+    assert abs(lx[0] - (-0.1)) < 1e-5, f'chrX idx 0 mismatch: {lx[0]}'
+    assert abs(ly[0] - 0.08) < 1e-5, f'chrY idx 0 mismatch: {ly[0]}'
+    assert 2 in lx, 'idx 2 should be in chrX'
+    assert 2 not in ly, 'idx 2 should not be in chrY'
+
+    # LRR genome mismatch
+    bad = _read_lrr_cache(cache, expected_genome='GRCh37')
+    assert bad is None, 'LRR cache should return None on genome mismatch'
+
+print('F-stat and LRR cache round-trip verified')
 " 2>&1
 
 if [[ $? -eq 0 ]]; then
-    echo "  PASS: F-stat cache writes, reads, and invalidates correctly"
+    echo "  PASS: F-stat and LRR caches write, read, invalidate correctly"
     (( PASS++ )) || true
 else
     echo "  FAIL: F-stat cache round-trip error"
@@ -860,8 +893,10 @@ echo "--- Test 25: run_peddy.sh excludes PAR/XTR in chrX append ---"
 
 if grep -q 'par_xtr_exclusion.bed' "${REPO_DIR}/scripts/run_peddy.sh" && \
    grep -q 'PAR/XTR excluded' "${REPO_DIR}/scripts/run_peddy.sh" && \
+   grep -q 'get_par_xtr_bed' "${REPO_DIR}/scripts/run_peddy.sh" && \
+   grep -q 'source.*utils.sh' "${REPO_DIR}/scripts/run_peddy.sh" && \
    grep -q 'T \^' "${REPO_DIR}/scripts/run_peddy.sh"; then
-    echo "  PASS: run_peddy.sh excludes PAR/XTR when appending chrX"
+    echo "  PASS: run_peddy.sh excludes PAR/XTR when appending chrX via utils.sh"
     (( PASS++ )) || true
 else
     echo "  FAIL: run_peddy.sh missing PAR/XTR exclusion in chrX append"
@@ -883,6 +918,47 @@ if grep -q 'get_par_xtr_bed()' "${REPO_DIR}/scripts/utils.sh" && \
     (( PASS++ )) || true
 else
     echo "  FAIL: utils.sh missing get_par_xtr_bed function"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 27: compute_chrx_f_statistic dispatches to plink2 or bcftools
+# ===============================================================
+echo "--- Test 27: F-stat uses plink2 --check-sex when available ---"
+
+python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}/scripts')
+# Verify the plink2 function and bcftools fallback exist in module
+import plot_sex_check as ps
+assert hasattr(ps, '_compute_f_stat_plink2'), 'Missing _compute_f_stat_plink2'
+assert hasattr(ps, '_compute_f_stat_bcftools'), 'Missing _compute_f_stat_bcftools'
+
+# Verify plink2 function references --check-sex
+import inspect
+src = inspect.getsource(ps._compute_f_stat_plink2)
+assert '--check-sex' in src, 'plink2 function should use --check-sex'
+assert '--exclude-range' in src, 'plink2 function should use --exclude-range'
+assert '.sexcheck' in src, 'plink2 function should parse .sexcheck output'
+
+# Verify bcftools fallback has a docstring indicating it's a fallback
+assert 'fallback' in ps._compute_f_stat_bcftools.__doc__.lower(), \
+    'bcftools function should be documented as fallback'
+
+# Verify dispatcher checks shutil.which
+src_main = inspect.getsource(ps.compute_chrx_f_statistic)
+assert 'shutil.which' in src_main, 'Should check shutil.which for plink2'
+
+print('plink2/bcftools dispatch structure verified')
+" 2>&1
+
+if [[ $? -eq 0 ]]; then
+    echo "  PASS: F-stat computation dispatches to plink2 with bcftools fallback"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: F-stat computation dispatch structure incorrect"
     (( FAIL++ )) || true
 fi
 

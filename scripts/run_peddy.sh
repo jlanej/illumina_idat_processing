@@ -24,6 +24,10 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=utils.sh
+source "${SCRIPT_DIR}/utils.sh"
+
 # --- Resource URLs ---
 CHAIN_URL_CHM13="https://hgdownload.soe.ucsc.edu/goldenPath/hs1/liftOver/hs1ToHg38.over.chain.gz"
 CHAIN_URL_GRCh37="https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz"
@@ -349,38 +353,9 @@ _append_source_chrx() {
 
     # Generate PAR/XTR exclusion BED for the current genome build so that
     # only non-PAR/XTR chrX variants are appended for peddy sex prediction.
+    # Uses centralized get_par_xtr_bed from utils.sh (single source of truth).
     local par_xtr_bed="${TMP_DIR}/par_xtr_exclusion.bed"
-    case "${GENOME}" in
-        CHM13)
-            cat > "${par_xtr_bed}" <<'BED'
-chrX	0	2781479	PAR1
-chrX	2781479	6400875	XTR
-chrX	155701382	156040895	PAR2
-BED
-            ;;
-        GRCh38)
-            cat > "${par_xtr_bed}" <<'BED'
-chrX	10001	2781479	PAR1
-chrX	2781479	6400000	XTR
-chrX	155701383	156030895	PAR2
-BED
-            ;;
-        GRCh37)
-            cat > "${par_xtr_bed}" <<'BED'
-X	60001	2699520	PAR1
-X	2699520	6100000	XTR
-X	154931044	155260560	PAR2
-BED
-            ;;
-        *)
-            # Default to CHM13 PAR/XTR
-            cat > "${par_xtr_bed}" <<'BED'
-chrX	0	2781479	PAR1
-chrX	2781479	6400875	XTR
-chrX	155701382	156040895	PAR2
-BED
-            ;;
-    esac
+    get_par_xtr_bed "${GENOME}" "${par_xtr_bed}"
 
     local source_chrx_vcf="${TMP_DIR}/source_chrx.vcf.gz"
     _debug_log_command "bcftools view \"${source_vcf}\" --threads \"${THREADS}\" -r \"${source_chrx_region}\" -T ^\"${par_xtr_bed}\" -Oz -o \"${source_chrx_vcf}\""
