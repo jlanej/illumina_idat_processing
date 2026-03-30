@@ -14,10 +14,10 @@ The pipeline runs in eleven phases:
 
 3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics (call rate ≥ 0.97, LRR SD ≤ 0.35 by default), recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. Cluster standard deviations are computed using the Bessel-corrected sample standard deviation (`ddof=1`) to provide unbiased estimates, matching Illumina GenTrain and field best practice. Probes where any genotype cluster has fewer than the minimum required samples (default 5) fall back to the original cluster definitions, producing a hybrid EGT that is study-specific where data permits and manufacturer-default elsewhere. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering. Can be skipped with `--skip-stage2`.
 
-4. **Sex Check**: Both intensity-based and genotype-based sex determination methods are applied and cross-tabulated:
-   - **LRR-based**: A scatter plot of median chrX vs chrY LRR per sample, colored by predicted sex. Males are expected to have lower chrX LRR (hemizygous) and higher chrY LRR.
-   - **X-chromosome F-statistic**: Genotype-based inbreeding coefficient on chrX. Males (hemizygous X) have F ≈ 1.0; females (diploid X) have F ≈ 0.0. Samples with 0.2 ≤ F ≤ 0.8 are flagged as ambiguous (potential aneuploidy or data issue).
-   - **Peddy sex check** *(when peddy is enabled)*: After peddy runs, its genotype-based sex prediction is integrated into the cross-tabulation.
+4. **Sex Check**: Both intensity-based and genotype-based sex determination methods are applied and cross-tabulated. **PAR1, PAR2, and XTR (X-transposed) regions are excluded** from all chrX-based analyses to avoid inflated male heterozygosity — these regions behave as autosomal loci and their inclusion biases the F-statistic toward 0 in males. Region definitions are centralized in `scripts/par_xtr_regions.py` and `scripts/utils.sh` per genome build (CHM13, GRCh38, GRCh37):
+   - **LRR-based**: A scatter plot of median chrX vs chrY LRR per sample, colored by predicted sex. Males are expected to have lower chrX LRR (hemizygous) and higher chrY LRR. PAR/XTR sites on chrX are excluded so that the median reflects only non-pseudoautosomal loci.
+   - **X-chromosome F-statistic**: Genotype-based inbreeding coefficient on chrX (non-PAR/XTR). Males (hemizygous X) have F ≈ 1.0; females (diploid X) have F ≈ 0.0. Samples with 0.2 ≤ F ≤ 0.8 are flagged as ambiguous (potential aneuploidy or data issue). Results are cached to `chrx_f_stat_cache.tsv` for reuse when the pipeline re-invokes sex check after peddy.
+   - **Peddy sex check** *(when peddy is enabled)*: After peddy runs, its genotype-based sex prediction is integrated into the cross-tabulation. chrX sites appended for peddy also exclude PAR/XTR regions.
    - All three methods are compared per sample. Discordances are flagged as `DISCORDANT`, ambiguous F-statistics as `AMBIGUOUS`, and full agreement as `CONCORDANT`. A summary report (`sex_check_summary.txt`) documents all findings and suggests potential causes (aneuploidy, sample swaps, contamination).
 
 5. **Peddy QC** *(optional — skip with `--skip-peddy`)*: Run [peddy](https://github.com/brentp/peddy) for automated pedigree/sex/ancestry quality control. Peddy validates sex from genotypes, predicts ancestry by projecting onto 1000 Genomes principal components, and checks relatedness between all sample pairs. If a pedigree file (`--ped-file`) is provided it is validated; otherwise a minimal PED (unrelated singletons) is generated. A final pedigree incorporating peddy's discovered relationships is produced. Peddy's sample-level metrics (ancestry prediction, predicted sex, heterozygosity, PCs) are merged into the compiled sample sheet with a `peddy_` prefix. **Genome-aware**: when the pipeline genome is not GRCh38 (e.g. T2T-CHM13), `bcftools +liftover` is used to convert variant coordinates to GRCh38, variant IDs are set to `CHROM:POS:REF:ALT` to match peddy's GRCH38 sites list, and only matching sites are retained — producing a small, correctly-coordinated VCF for peddy regardless of the source reference build.
@@ -53,6 +53,26 @@ The pipeline runs in eleven phases:
 ### Reference Genome
 
 The pipeline defaults to the **T2T-CHM13v2.0** reference genome — the first complete, telomere-to-telomere assembly of a human genome. CHM13 resolves gaps and errors present in GRCh38, providing improved probe mapping for Illumina arrays. GRCh38 and GRCh37 remain supported via `--genome GRCh38` or `--genome GRCh37`.
+
+#### PAR/XTR Region Handling
+
+Pseudoautosomal regions (PAR1, PAR2) and the X-transposed region (XTR) on chrX are automatically excluded from all sex-determination analyses. These regions are homologous between chrX and chrY (PAR) or have high X-Y sequence identity (XTR), causing males to appear diploid at these loci. Including them inflates observed heterozygosity in males and biases the F-statistic toward 0, leading to incorrect sex calls.
+
+Region boundaries per genome build are defined in `scripts/par_xtr_regions.py` (Python) and `scripts/utils.sh` (Bash):
+
+| Build | Region | Chrom | Start | End |
+|-------|--------|-------|-------|-----|
+| CHM13 | PAR1 | chrX | 0 | 2,781,479 |
+| CHM13 | XTR | chrX | 2,781,479 | 6,400,875 |
+| CHM13 | PAR2 | chrX | 155,701,382 | 156,040,895 |
+| GRCh38 | PAR1 | chrX | 10,001 | 2,781,479 |
+| GRCh38 | XTR | chrX | 2,781,479 | 6,400,000 |
+| GRCh38 | PAR2 | chrX | 155,701,383 | 156,030,895 |
+| GRCh37 | PAR1 | X | 60,001 | 2,699,520 |
+| GRCh37 | XTR | X | 2,699,520 | 6,100,000 |
+| GRCh37 | PAR2 | X | 154,931,044 | 155,260,560 |
+
+To add support for a new genome build, add an entry to `_PAR_XTR_REGIONS` in `scripts/par_xtr_regions.py` and a new `case` clause in `get_par_xtr_bed()` in `scripts/utils.sh`. See [CHM13-annotations](https://github.com/marbl/CHM13-annotations) and [GIAB genome stratifications](https://github.com/genome-in-a-bottle/genome-stratifications) for updated boundaries.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).
 

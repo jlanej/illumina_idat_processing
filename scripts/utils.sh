@@ -40,3 +40,51 @@ detect_sort_memory() {
     echo "${sort_mem}"
 }
 
+# ---------------------------------------------------------------
+# get_par_xtr_bed
+#
+# Write a BED file of PAR1, XTR, and PAR2 regions on chrX for a
+# given genome build.  Used to exclude pseudoautosomal and
+# X-transposed regions from sex determination analyses.
+#
+# Usage: get_par_xtr_bed GENOME OUTPUT_BED
+#   GENOME     - CHM13, GRCh38, or GRCh37
+#   OUTPUT_BED - Path to write the BED file
+# ---------------------------------------------------------------
+get_par_xtr_bed() {
+    local genome="${1:?Usage: get_par_xtr_bed GENOME OUTPUT_BED}"
+    local output_bed="${2:?Usage: get_par_xtr_bed GENOME OUTPUT_BED}"
+
+    case "${genome}" in
+        CHM13)
+            cat > "${output_bed}" <<'BED'
+chrX	0	2781479	PAR1
+chrX	2781479	6400875	XTR
+chrX	155701382	156040895	PAR2
+BED
+            ;;
+        GRCh38)
+            cat > "${output_bed}" <<'BED'
+chrX	10001	2781479	PAR1
+chrX	2781479	6400000	XTR
+chrX	155701383	156030895	PAR2
+BED
+            ;;
+        GRCh37)
+            cat > "${output_bed}" <<'BED'
+X	60001	2699520	PAR1
+X	2699520	6100000	XTR
+X	154931044	155260560	PAR2
+BED
+            ;;
+        *)
+            echo "Warning: Unknown genome '${genome}' for PAR/XTR regions; using CHM13 defaults." >&2
+            cat > "${output_bed}" <<'BED'
+chrX	0	2781479	PAR1
+chrX	2781479	6400875	XTR
+chrX	155701382	156040895	PAR2
+BED
+            ;;
+    esac
+}
+

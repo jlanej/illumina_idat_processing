@@ -30,13 +30,34 @@ import os
 import subprocess
 import sys
 
+# Allow importing par_xtr_regions from the same directory
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from par_xtr_regions import get_par_xtr_bed  # noqa: E402
 
-def extract_chrXY_lrr_medians(vcf_file, threads=1):
+
+def _write_par_xtr_bed(genome, output_dir):
+    """Write PAR/XTR BED for the given genome build and return its path.
+
+    The BED file is cached in output_dir so it is written once per run.
+    """
+    bed_path = os.path.join(output_dir, 'par_xtr_exclusion.bed')
+    if not os.path.exists(bed_path):
+        get_par_xtr_bed(genome, bed_path)
+    return bed_path
+
+
+def extract_chrXY_lrr_medians(vcf_file, threads=1, genome='CHM13',
+                               output_dir=None):
     """Extract median LRR per sample for chrX and chrY in a SINGLE VCF pass.
 
     Instead of two separate passes (one for chrX, one for chrY), this
     extracts both chromosomes in one bcftools view -r chrX,chrY call,
     then splits by chromosome in Python. Halves I/O.
+
+    PAR1, PAR2, and XTR regions on chrX are excluded via ``-T ^bed`` so
+    that the chrX median reflects only non-PAR/XTR loci. chrY is not
+    filtered (PAR regions on Y are not relevant to LRR-based sex calling
+    because the entire chrY signal separates males from females).
 
     Returns (dict of sample_index -> median_lrr_X, dict of sample_index -> median_lrr_Y).
     """
@@ -68,9 +89,16 @@ def extract_chrXY_lrr_medians(vcf_file, threads=1):
     # Build region string for both chromosomes
     regions = ','.join(c for c in [chrom_x, chrom_y] if c is not None)
 
+    # Write PAR/XTR exclusion BED
+    par_xtr_arg = ''
+    if output_dir:
+        bed_path = _write_par_xtr_bed(genome, output_dir)
+        par_xtr_arg = f' -T ^"{bed_path}"'
+
     # Single pass: extract CHROM and LRR per sample
     cmd = (
-        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {regions} '
+        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {regions}'
+        f'{par_xtr_arg} '
         f'--threads {threads} "{vcf_file}" 2>/dev/null | '
         f'bcftools query -f "%CHROM[\\t%LRR]\\n" 2>/dev/null'
     )
@@ -120,7 +148,8 @@ def extract_chrXY_lrr_medians(vcf_file, threads=1):
     return _compute_medians(data_x), _compute_medians(data_y)
 
 
-def compute_chrx_f_statistic(vcf_file, sample_names, threads=1):
+def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
+                             genome='CHM13', output_dir=None):
     """Compute X-chromosome inbreeding F-statistic per sample.
 
     F = 1 - (observed_het / expected_het).  For chrX:
@@ -132,9 +161,23 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1):
       - F < 0.2  → likely female
       - 0.2 ≤ F ≤ 0.8 → ambiguous (potential aneuploidy or data issue)
 
+    PAR1, PAR2, and XTR regions are excluded via ``-T ^bed`` so that the
+    F-statistic reflects only non-pseudoautosomal chrX genotypes.  Including
+    PAR/XTR would inflate male heterozygosity and bias F toward 0.
+
+    If a cached result file exists at ``output_dir/chrx_f_stat_cache.tsv``,
+    results are read from cache instead of recomputing.
+
     Returns dict of sample_name -> {'f_stat': float, 'n_het': int,
     'n_called': int, 'f_sex': str}.
     """
+    # Check for cached results
+    cache_path = None
+    if output_dir:
+        cache_path = os.path.join(output_dir, 'chrx_f_stat_cache.tsv')
+        if os.path.exists(cache_path):
+            return _read_f_stat_cache(cache_path)
+
     # Determine chrX contig name
     try:
         idx_output = subprocess.run(
@@ -154,9 +197,16 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1):
     if chrom_x is None:
         return {}
 
+    # Write PAR/XTR exclusion BED
+    par_xtr_arg = ''
+    if output_dir:
+        bed_path = _write_par_xtr_bed(genome, output_dir)
+        par_xtr_arg = f' -T ^"{bed_path}"'
+
     # Extract genotypes on chrX (biallelic SNPs only, non-intensity-only)
     cmd = (
-        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {chrom_x} '
+        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {chrom_x}'
+        f'{par_xtr_arg} '
         f'-v snps -m2 -M2 --threads {threads} "{vcf_file}" 2>/dev/null | '
         f'bcftools query -f "[%GT\\t]\\n" 2>/dev/null'
     )
@@ -224,6 +274,37 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1):
             'f_sex': f_sex,
         }
 
+    # Write cache for reuse within the same run
+    if cache_path and results:
+        _write_f_stat_cache(cache_path, results)
+
+    return results
+
+
+def _write_f_stat_cache(cache_path, results):
+    """Write F-statistic results to a TSV cache file."""
+    with open(cache_path, 'w') as f:
+        f.write('sample_id\tf_stat\tn_het\tn_called\tf_sex\n')
+        for name, info in results.items():
+            f.write(f"{name}\t{info['f_stat']}\t{info['n_het']}\t"
+                    f"{info['n_called']}\t{info['f_sex']}\n")
+
+
+def _read_f_stat_cache(cache_path):
+    """Read F-statistic results from a TSV cache file."""
+    results = {}
+    with open(cache_path) as f:
+        header = f.readline()
+        for line in f:
+            fields = line.strip().split('\t')
+            if len(fields) < 5:
+                continue
+            results[fields[0]] = {
+                'f_stat': float(fields[1]),
+                'n_het': int(fields[2]),
+                'n_called': int(fields[3]),
+                'f_sex': fields[4],
+            }
     return results
 
 
@@ -453,8 +534,10 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
         out.write(f"Discordant (methods disagree): {n_discordant}\n")
         out.write(f"Ambiguous (F-stat 0.2-0.8):    {n_ambiguous}\n\n")
         out.write("Methods used:\n")
-        out.write("  1. LRR-based: Median chrX/chrY LRR intensity separation\n")
-        out.write("  2. F-statistic: chrX genotype heterozygosity (F>0.8=M, F<0.2=F)\n")
+        out.write("  1. LRR-based: Median chrX/chrY LRR intensity separation "
+                  "(PAR/XTR excluded)\n")
+        out.write("  2. F-statistic: chrX genotype heterozygosity "
+                  "(F>0.8=M, F<0.2=F, PAR/XTR excluded)\n")
         if peddy_sex_results:
             out.write("  3. Peddy: Genotype-based sex prediction via peddy\n")
         out.write("\nDiscordant samples may indicate:\n")
@@ -479,6 +562,9 @@ def main():
     parser.add_argument("--peddy-sex-check", default=None,
                         help="Peddy sex_check.csv for cross-tabulation "
                              "(optional)")
+    parser.add_argument("--genome", default='CHM13',
+                        help="Genome build for PAR/XTR exclusion: "
+                             "CHM13, GRCh38, or GRCh37 (default: CHM13)")
     parser.add_argument("--threads", type=int, default=1,
                         help="Number of threads for bcftools (default: 1)")
     args = parser.parse_args()
@@ -494,6 +580,7 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     print("Generating sex check plot...")
+    print(f"  Genome build: {args.genome} (PAR/XTR regions excluded from chrX)")
 
     sample_names = read_sample_names(args.vcf)
     if not sample_names:
@@ -501,12 +588,16 @@ def main():
         sys.exit(1)
 
     print(f"  Extracting median chrX + chrY LRR ({len(sample_names)} samples, single pass)...")
-    chrx_medians, chry_medians = extract_chrXY_lrr_medians(args.vcf, args.threads)
+    chrx_medians, chry_medians = extract_chrXY_lrr_medians(
+        args.vcf, args.threads, genome=args.genome,
+        output_dir=args.output_dir)
 
     sex_map = read_predicted_sex(args.sample_qc)
 
     print("  Computing chrX F-statistic for genotype-based sex check...")
-    f_stat_results = compute_chrx_f_statistic(args.vcf, sample_names, args.threads)
+    f_stat_results = compute_chrx_f_statistic(
+        args.vcf, sample_names, args.threads,
+        genome=args.genome, output_dir=args.output_dir)
     if f_stat_results:
         n_m = sum(1 for v in f_stat_results.values() if v['f_sex'] == 'M')
         n_f = sum(1 for v in f_stat_results.values() if v['f_sex'] == 'F')

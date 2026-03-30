@@ -347,10 +347,46 @@ _append_source_chrx() {
         return
     fi
 
+    # Generate PAR/XTR exclusion BED for the current genome build so that
+    # only non-PAR/XTR chrX variants are appended for peddy sex prediction.
+    local par_xtr_bed="${TMP_DIR}/par_xtr_exclusion.bed"
+    case "${GENOME}" in
+        CHM13)
+            cat > "${par_xtr_bed}" <<'BED'
+chrX	0	2781479	PAR1
+chrX	2781479	6400875	XTR
+chrX	155701382	156040895	PAR2
+BED
+            ;;
+        GRCh38)
+            cat > "${par_xtr_bed}" <<'BED'
+chrX	10001	2781479	PAR1
+chrX	2781479	6400000	XTR
+chrX	155701383	156030895	PAR2
+BED
+            ;;
+        GRCh37)
+            cat > "${par_xtr_bed}" <<'BED'
+X	60001	2699520	PAR1
+X	2699520	6100000	XTR
+X	154931044	155260560	PAR2
+BED
+            ;;
+        *)
+            # Default to CHM13 PAR/XTR
+            cat > "${par_xtr_bed}" <<'BED'
+chrX	0	2781479	PAR1
+chrX	2781479	6400875	XTR
+chrX	155701382	156040895	PAR2
+BED
+            ;;
+    esac
+
     local source_chrx_vcf="${TMP_DIR}/source_chrx.vcf.gz"
-    _debug_log_command "bcftools view \"${source_vcf}\" --threads \"${THREADS}\" -r \"${source_chrx_region}\" -Oz -o \"${source_chrx_vcf}\""
+    _debug_log_command "bcftools view \"${source_vcf}\" --threads \"${THREADS}\" -r \"${source_chrx_region}\" -T ^\"${par_xtr_bed}\" -Oz -o \"${source_chrx_vcf}\""
     bcftools view "${source_vcf}" --threads "${THREADS}" \
         -r "${source_chrx_region}" \
+        -T ^"${par_xtr_bed}" \
         -Oz -o "${source_chrx_vcf}"
     bcftools index -t "${source_chrx_vcf}"
 
@@ -361,7 +397,7 @@ _append_source_chrx() {
         return
     fi
 
-    echo "  chrX append: adding ${source_chrx_count} source ${source_chrx_region} variants without liftover (peddy sex_check uses chrX genotypes, not coordinate-specific matching)."
+    echo "  chrX append: adding ${source_chrx_count} source nonPAR/XTR ${source_chrx_region} variants without liftover (peddy sex_check uses chrX genotypes, PAR/XTR excluded)."
     local merged_vcf="${TMP_DIR}/peddy_input.with_source_chrx.vcf.gz"
     _debug_log_command "bcftools concat -a \"${base_vcf}\" \"${source_chrx_vcf}\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.concat_sort\" -Ou | bcftools norm -d exact -Oz -o \"${merged_vcf}\""
     # -a allows overlapping positions/contigs across inputs; exact duplicates are removed with bcftools norm -d exact.
