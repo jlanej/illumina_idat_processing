@@ -116,6 +116,21 @@ When `--idat-dir` is provided, `process_1000g.sh` reuses that directory directly
 - [Apptainer](https://apptainer.org/) (formerly Singularity) for running the container
 - ~30 GB disk for CHM13 reference genome (auto-downloaded on first run)
 
+### Pinned Dependencies (Docker image)
+
+All external tools in the Docker image are pinned to specific versions for full reproducibility:
+
+| Tool | Version / Commit | Purpose |
+|------|-----------------|---------|
+| bcftools | 1.23 | VCF processing and plugins |
+| gtc2vcf plugins | [`cc48989`](https://github.com/freeseek/gtc2vcf/commit/cc4898976c11dda6c7bfb3473d13afea11c48a1c) (2026-02-26) | IDAT/GTC/VCF conversion |
+| mocha plugins | [`95686b7`](https://github.com/freeseek/mocha/commit/95686b7b65f53a490513be76bb120e5fc20a8bcf) (2025-08-22) | Mosaic chromosomal alteration detection |
+| liftover plugin | [`909d230`](https://github.com/freeseek/score/commit/909d23019e19aeadf3bf6fe1407fd6afc094592a) (2026-02-02) | Coordinate liftover between genome builds |
+| plink2 | [v2.0.0-a.6.33](https://github.com/chrchang/plink-ng/releases/tag/v2.0.0-a.6.33) | Variant-level QC |
+| flashpca2 | [`b8044f1`](https://github.com/gabraham/flashpca/commit/b8044f13607a072125828547684fde8b081d6191) | Fast PCA computation |
+| NumPy | < 1.25 | Numerical computation |
+| peddy | latest | Pedigree/sex/ancestry QC |
+
 ## Usage
 
 ### Full Pipeline (via Apptainer)
@@ -365,6 +380,12 @@ The pipeline outputs a detailed mapping summary (`realign_summary.txt`) reportin
 - Total probes, mapped/unmapped counts, mapping quality distribution
 - Coordinate changes: positions confirmed, changed, newly placed, or lost
 
+**Error handling**: The realignment step aborts the pipeline with a clear error if any of the following conditions occur:
+- Flank sequence extraction fails or produces zero sequences (malformed or missing `[Assay]`/`SourceSeq` in the CSV)
+- BWA alignment fails
+- Realigned CSV is not created, is empty, or lacks an `[Assay]` section
+- Realigned CSV contains fewer than 3 data lines (indicating a failed realignment)
+
 ### Two-Stage Genotyping
 
 Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a training set. However, batch effects, population differences, and varying sample quality can degrade genotype calls when the default clusters don't match the study population.
@@ -373,7 +394,7 @@ Standard Illumina genotyping uses pre-built cluster files (EGT) derived from a t
 
 **Stage 2** performs true reclustering in four steps:
 
-1. **Recompute EGT**: Using `scripts/recluster_egt.py`, extracts normalized intensity data (theta, R coordinates) from Stage 1 GTC files of high-quality samples, grouped by their genotype calls (AA/AB/BB). For each probe, recomputes the cluster means and standard deviations in (theta, R) space. Probes with insufficient data fall back to the original cluster definitions. The result is a new EGT file tailored to the study population.
+1. **Recompute EGT**: Using `scripts/recluster_egt.py`, extracts normalized intensity data (theta, R coordinates) from Stage 1 GTC files of high-quality samples, grouped by their genotype calls (AA/AB/BB). For each probe, recomputes the cluster means and standard deviations in (theta, R) space using a streaming algorithm (Welford's online method) that requires only O(probes) memory regardless of sample count. float64 accumulators ensure numerical stability. Probes with insufficient data fall back to the original cluster definitions. The result is a new EGT file tailored to the study population.
 
 2. **Re-call genotypes**: Runs `idat2gtc` with the new EGT file, producing improved genotype calls for ALL samples. Because the GenCall algorithm uses the EGT cluster definitions to assign each sample's intensities to the correct genotype, study-specific clusters yield more accurate genotype calls than the default Illumina training set.
 

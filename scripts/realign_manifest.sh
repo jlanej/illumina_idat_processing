@@ -138,14 +138,22 @@ echo ""
 # ---------------------------------------------------------------
 echo "--- Step 1/4: Extracting flank sequences from CSV manifest ---"
 
+FLANK_RC=0
 bcftools +gtc2vcf \
     --csv "${CSV}" \
     --fasta-flank \
-    -o "${FLANK_FASTA}" 2>"${FLANK_LOG}" || true
+    -o "${FLANK_FASTA}" 2>"${FLANK_LOG}" || FLANK_RC=$?
 
 # Show first few lines of plugin output for diagnostics
 if [[ -f "${FLANK_LOG}" ]]; then
     head -20 "${FLANK_LOG}" | sed 's/^/  /'
+fi
+
+if [[ "${FLANK_RC}" -ne 0 && ! -s "${FLANK_FASTA}" ]]; then
+    echo "ERROR: bcftools +gtc2vcf --fasta-flank failed (exit code ${FLANK_RC}) and produced no output." >&2
+    echo "  Check that the CSV file contains an [Assay] section with a SourceSeq column." >&2
+    echo "  Verify with: head -20 '${CSV}'" >&2
+    exit 1
 fi
 
 # Count sequence headers: FASTA uses '>' prefix, gtc2vcf --fasta-flank uses '@' prefix
@@ -160,9 +168,10 @@ if [[ -f "${FLANK_FASTA}" ]]; then
 fi
 
 if [[ "${N_FLANKS}" -eq 0 ]]; then
-    echo "  WARNING: No flank sequences extracted from CSV manifest." >&2
+    echo "ERROR: No flank sequences extracted from CSV manifest. Cannot realign." >&2
     echo "  Check that the CSV file contains an [Assay] section with a SourceSeq column." >&2
     echo "  Verify with: head -20 '${CSV}'" >&2
+    exit 1
 fi
 echo ""
 
@@ -261,28 +270,37 @@ bcftools +gtc2vcf \
 
 echo "  Realigned CSV: ${REALIGNED_CSV}"
 
-# Diagnostic: verify realigned CSV structure
-if [[ -f "${REALIGNED_CSV}" ]]; then
-    RCSV_SIZE=$(wc -c < "${REALIGNED_CSV}")
-    RCSV_LINES=$(wc -l < "${REALIGNED_CSV}")
-    echo "  Realigned CSV size: ${RCSV_SIZE} bytes, ${RCSV_LINES} lines"
-    if grep -q '^\[Assay\]' "${REALIGNED_CSV}"; then
-        echo "  [Assay] section: found"
-        ASSAY_HEADER=$(grep -A1 '^\[Assay\]' "${REALIGNED_CSV}" | tail -1)
-        echo "  Column header: ${ASSAY_HEADER:0:120}..."
-        DATA_LINES=$(awk '/^\[Assay\]/{found=1; next} found && !/^\[/{n++} found && /^\[/{exit} END{print n+0}' "${REALIGNED_CSV}")
-        echo "  Data lines after [Assay] header: ${DATA_LINES}"
-        if [[ "${DATA_LINES}" -le 2 ]]; then
-            echo "  WARNING: Very few data lines in realigned CSV. First lines after header:"
-            awk '/^\[Assay\]/{found=1; next} found{print "    " $0; if(++n>=5) exit}' "${REALIGNED_CSV}"
-        fi
-    else
-        echo "  WARNING: [Assay] section NOT found in realigned CSV"
-        echo "  First 10 lines of realigned CSV:"
-        head -10 "${REALIGNED_CSV}" | sed 's/^/    /'
-    fi
-else
-    echo "  ERROR: Realigned CSV file not created!" >&2
+# Strict validation: abort if realigned CSV is missing, empty, or malformed
+if [[ ! -f "${REALIGNED_CSV}" || ! -s "${REALIGNED_CSV}" ]]; then
+    echo "ERROR: Realigned CSV file was not created or is empty." >&2
+    echo "  The bcftools +gtc2vcf --sam-flank step may have failed." >&2
+    echo "  Check the SAM alignment file: ${FLANK_SAM}" >&2
+    exit 1
+fi
+
+RCSV_SIZE=$(wc -c < "${REALIGNED_CSV}")
+RCSV_LINES=$(wc -l < "${REALIGNED_CSV}")
+echo "  Realigned CSV size: ${RCSV_SIZE} bytes, ${RCSV_LINES} lines"
+
+if ! grep -q '^\[Assay\]' "${REALIGNED_CSV}"; then
+    echo "ERROR: [Assay] section NOT found in realigned CSV." >&2
+    echo "  The realigned manifest is malformed and cannot be used." >&2
+    echo "  First 10 lines of realigned CSV:" >&2
+    head -10 "${REALIGNED_CSV}" | sed 's/^/    /' >&2
+    exit 1
+fi
+
+echo "  [Assay] section: found"
+ASSAY_HEADER=$(grep -A1 '^\[Assay\]' "${REALIGNED_CSV}" | tail -1)
+echo "  Column header: ${ASSAY_HEADER:0:120}..."
+DATA_LINES=$(awk '/^\[Assay\]/{found=1; next} found && !/^\[/{n++} found && /^\[/{exit} END{print n+0}' "${REALIGNED_CSV}")
+echo "  Data lines after [Assay] header: ${DATA_LINES}"
+
+if [[ "${DATA_LINES}" -le 2 ]]; then
+    echo "ERROR: Realigned CSV contains ${DATA_LINES} data lines (expected thousands)." >&2
+    echo "  The realignment likely failed to produce valid probe coordinates." >&2
+    awk '/^\[Assay\]/{found=1; next} found{print "    " $0; if(++n>=5) exit}' "${REALIGNED_CSV}" >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------
