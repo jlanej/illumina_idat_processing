@@ -10,7 +10,7 @@ The pipeline runs in eleven phases:
 
 1. **Manifest Realignment**: Probe flank sequences from the CSV manifest are realigned against the reference genome using BWA, following the [MoChA/gtc2vcf](https://github.com/freeseek/gtc2vcf) best practice. This validates probe positions and enables correct coordinate mapping regardless of the original manifest build — **even if the CSV claims the same build as the reference**, this step catches discrepancies and ensures probes are placed correctly. A detailed mapping summary is output showing mapped, unmapped, multi-mapped, and coordinate-changed probes.
 
-2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, **LRR median**, **BAF standard deviation** (contamination indicator), and **heterozygosity rate**. Per-variant QC (missingness, HWE, MAF, Ti/Tv, inbreeding F) is also computed.
+2. **Stage 1 — Initial Genotyping**: Convert IDAT files to GTC (genotype calls) using the Illumina GenCall algorithm (via `idat2gtc`), then to VCF format. Compute per-sample QC metrics including **call rate**, **LRR standard deviation**, **LRR mean**, **LRR median**, **BAF mean**, **BAF standard deviation** (contamination indicator), and **heterozygosity rate**. Per-variant QC (missingness, HWE, MAF, Ti/Tv, inbreeding F) is also computed.
 
 3. **Stage 2 — Reclustering**: Identify high-quality samples from Stage 1 QC metrics (call rate ≥ 0.97, LRR SD ≤ 0.35 by default), recompute the EGT genotype cluster file from those samples' intensity data, then re-call genotypes for all samples using the new study-specific clusters. Cluster standard deviations are computed using the Bessel-corrected sample standard deviation (`ddof=1`) to provide unbiased estimates, matching Illumina GenTrain and field best practice. Probes where any genotype cluster has fewer than the minimum required samples (default 5) fall back to the original cluster definitions, producing a hybrid EGT that is study-specific where data permits and manufacturer-default elsewhere. The `--adjust-clusters` option is also applied during VCF conversion for additional BAF/LRR correction. A **QC comparison report and plots** are automatically generated comparing call rate, LRR SD, variant missingness, HWE, and MAF before and after reclustering. Can be skipped with `--skip-stage2`.
 
@@ -31,13 +31,13 @@ The pipeline runs in eleven phases:
    - The VCF is subset to samples of that ancestry
    - **Ancestry-specific variant QC** is computed (missingness, HWE, MAF), avoiding inflated HWE deviation from the Wahlund effect in mixed-ancestry samples (Anderson et al. 2010)
    - **Within-ancestry PCA** resolves finer population structure masked by multi-ancestry PCA (Peterson et al. 2019)
-   - All per-ancestry variant QC metrics are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf` alongside the full-cohort `all_call_rate`, `all_hwe_p`, `all_maf`; cross-ancestry summary flags (`all_ancestries_call_rate_pass`, `all_ancestries_hwe_pass`, `all_ancestries_maf_pass`, `all_ancestries_qc_pass`) indicate whether each variant passes each metric (and all metrics combined) across every ancestry subset analyzed
+   - All per-ancestry variant QC metrics are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf`, `EUR_obs_ct`, `EUR_missing_ct`, `EUR_hom_a1_ct`, `EUR_het_ct`, `EUR_hom_a2_ct` alongside the full-cohort equivalents; cross-ancestry summary flags (`all_ancestries_call_rate_pass`, `all_ancestries_hwe_pass`, `all_ancestries_maf_pass`, `all_ancestries_qc_pass`) indicate whether each variant passes each metric (and all metrics combined) across every ancestry subset analyzed. If a Ti/Tv statistics file is available, the project-level Ti/Tv ratio is included as a `#tstv_ratio=` header comment
    - A **HWE-passing variant list** (`hwe_passing_variants.txt`) is produced: the intersection of variants passing HWE (p ≥ 1e-6) across all ancestry groups. This list is used by the subsequent full-cohort PCA step (Price et al. 2006; Anderson et al. 2010)
    - Ancestry-specific PCs are included in the compiled sample sheet, with `NaN` for samples not of a given ancestry
 
 8. **Ancestry PCA** *(uses HWE-passing variants from ancestry-stratified QC)*: Perform stringent best-practice variant and sample QC filtering (using plink2), LD pruning, and compute ancestry principal components using [flashpca2](https://github.com/gabraham/flashpca) on the QC'd set of variants and unrelated, non-outlier samples. When ancestry-stratified QC is available, PCA is restricted to variants that pass HWE in all ancestry groups (`--include-variants hwe_passing_variants.txt`), avoiding the chicken-and-egg problem of filtering on HWE in mixed-ancestry groups. PCs are then projected to all samples (including those excluded for relatedness or heterozygosity outlier status). By default, 20 PCs are computed. The `--exclude-samples` option can be used to provide a custom exclusion list.
 
-9. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF SD, heterozygosity rate, predicted sex, inbreeding F), ancestry PCs (default 20), ancestry-specific PCs (e.g., `EUR_PC1`, `AFR_PC1`, with `NaN` for non-members), and peddy sample-level metrics (ancestry prediction, sex check, heterozygosity) for every sample.
+9. **Compiled Sample Sheet**: A unified sample sheet is produced combining all QC metrics (call rate, LRR SD, LRR mean, LRR median, BAF mean, BAF SD, heterozygosity rate, predicted sex, inbreeding F), sex check cross-tabulation (`chrx_lrr_median`, `chry_lrr_median`, `chrx_f_stat`, `f_sex`, `peddy_sex`, `sex_status`), pre-PCA exclusion flags (`excluded_relatedness`, `excluded_het_outlier`, `pre_pca_excluded`), ancestry PCs (default 20), ancestry-specific PCs (e.g., `EUR_PC1`, `AFR_PC1`, with `NaN` for non-members), and peddy sample-level metrics (ancestry prediction, sex check, heterozygosity) for every sample.
 
 10. **QC Diagnostics & Report**: Automated QC diagnostics (`scripts/diagnose_qc.py`) identify potential issues (deflated call rates, inflated LRR SD, build mismatches) using intentionally wider diagnostic thresholds (call rate ≥ 0.95, LRR SD ≤ 0.40) than the standard GWAS QC thresholds to surface warnings early. The diagnostic report can also be run standalone: `python3 scripts/diagnose_qc.py --output-dir /path/to/output`. A comprehensive **interactive HTML pipeline report** is generated featuring:
    - **Interactive Plotly.js charts** — Call Rate vs LRR SD scatter plot and metric distribution histograms with hover tooltips, zoom, and pan
@@ -351,6 +351,8 @@ output/
 ├── ancestry_stratified_qc/          # Ancestry-stratified QC (if peddy ran)
 │   ├── ancestry_assignments.tsv     # Sample-to-ancestry mapping from peddy
 │   ├── collated_variant_qc.tsv      # Unified variant QC across all ancestries
+│   │                                 # (includes genotype counts, missingness,
+│   │                                 #  HWE stats, and Ti/Tv ratio)
 │   ├── ancestry_stratified_summary.txt # Summary of stratified analyses
 │   ├── EUR/                         # Per-ancestry analysis (example: EUR)
 │   │   ├── samples.txt              # Sample list for this ancestry
@@ -363,7 +365,8 @@ output/
 │   │       ├── pca_projections.tsv  # EUR PCs for EUR samples
 │   │       └── qc_summary.txt      # EUR PCA QC summary
 │   └── AFR/                         # (repeat for each qualifying ancestry)
-├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + PCs + ancestry PCs + peddy)
+├── compiled_sample_sheet.tsv        # Unified sample sheet (QC + sex check +
+│                                     # exclusion flags + PCs + ancestry PCs + peddy)
 ├── qc_diagnostic_report.txt         # Automated QC diagnostic report
 ├── pipeline_report.html             # Comprehensive HTML report with figures
 ├── summary_statistics.tsv           # Publication-ready summary statistics table
@@ -388,6 +391,7 @@ The `*_sample_qc.tsv` files contain per-sample metrics:
 | `lrr_sd` | Standard deviation of Log R Ratio (autosomes only; lower is better) |
 | `lrr_mean` | Mean of Log R Ratio (autosomes only) |
 | `lrr_median` | Median of Log R Ratio (autosomes only) |
+| `baf_mean` | Mean of B Allele Frequency at heterozygous sites |
 | `baf_sd` | Standard deviation of B Allele Frequency at heterozygous sites (contamination/mosaicism indicator) |
 | `het_rate` | Fraction of heterozygous genotype calls (autosomes only) |
 | `computed_gender` | Inferred gender (1=male, 2=female) |
@@ -399,6 +403,42 @@ The `comparison/` subdirectory (Stage 2 only) contains:
 | `qc_comparison_report.txt` | Text summary of all QC metric changes pre/post reclustering |
 | `qc_comparison_samples.png` | Plots of per-sample call rate and LRR SD distributions before/after |
 | `qc_comparison_variants.png` | Plots of variant missingness, HWE, and MAF distributions before/after |
+
+### Compiled Sample Sheet Columns
+
+The `compiled_sample_sheet.tsv` merges all per-sample QC metrics into a single table. The columns are:
+
+| Column(s) | Source | Description |
+|-----------|--------|-------------|
+| `sample_id`, `call_rate`, `lrr_sd`, `lrr_mean`, `lrr_median`, `baf_mean`, `baf_sd`, `het_rate`, `computed_gender` | `*_sample_qc.tsv` | Core QC metrics from collect_qc_metrics.sh |
+| `inbreeding_F` | plink2 `.het` file | Inbreeding coefficient (if variant QC .het available) |
+| `chrx_lrr_median`, `chry_lrr_median`, `chrx_f_stat`, `f_sex`, `peddy_sex`, `sex_status` | `sex_check_chrXY_lrr.tsv` | Sex check cross-tabulation (LRR-based, F-stat, peddy, concordance) |
+| `excluded_relatedness`, `excluded_het_outlier`, `pre_pca_excluded` | Exclusion lists | Pre-PCA exclusion flags (1=excluded, 0=not excluded) |
+| `PC1`–`PC20` | `pca_projections.tsv` | Full-cohort ancestry PCA projections |
+| `EUR_PC1`–`EUR_PC20`, `AFR_PC1`–… | Ancestry-specific PCA | Within-ancestry PCs (NaN for non-members) |
+| `peddy_het_ratio`, `peddy_mean_depth`, `peddy_ancestry-prediction`, `peddy_ancestry-prob`, `peddy_PC1`–`peddy_PC4` | peddy `het_check.csv` | Peddy heterozygosity and ancestry metrics |
+| `peddy_sex_predicted_sex`, `peddy_sex_het_ratio`, `peddy_sex_error` | peddy `sex_check.csv` | Peddy sex prediction metrics |
+
+### Collated Variant QC Columns
+
+The `collated_variant_qc.tsv` merges per-variant QC across the full cohort and each ancestry. Columns follow the pattern `{scope}_{metric}` where scope is `all` (full cohort) or an ancestry code (e.g. `EUR`, `AFR`):
+
+| Column pattern | Source | Description |
+|----------------|--------|-------------|
+| `variant_id` | — | Variant identifier |
+| `{scope}_call_rate` | `.vmiss` (1 − F_MISS) | Genotype call rate |
+| `{scope}_hwe_p` | `.hardy` P column | Hardy-Weinberg equilibrium p-value |
+| `{scope}_maf` | `.afreq` ALT_FREQS | Minor allele frequency |
+| `{scope}_obs_ct` | `.vmiss` OBS_CT | Observed genotype count |
+| `{scope}_missing_ct` | `.vmiss` MISSING_CT | Missing genotype count |
+| `{scope}_hom_a1_ct` | `.hardy` HOM_A1_CT | Homozygous reference count |
+| `{scope}_het_ct` | `.hardy` HET_A1_AX_CT | Heterozygous count |
+| `{scope}_hom_a2_ct` | `.hardy` TWO_AX_CT | Homozygous alternate count |
+| `all_ancestries_call_rate_pass` | computed | 1 if call rate ≥ 0.98 in all ancestries |
+| `all_ancestries_hwe_pass` | computed | 1 if HWE p ≥ 1e-6 in all ancestries |
+| `all_ancestries_maf_pass` | computed | 1 if MAF ≥ 0.01 in all ancestries |
+| `all_ancestries_qc_pass` | computed | 1 if all three metrics pass in all ancestries |
+| `#tstv_ratio=` (header comment) | `tstv_stats.txt` | Project-level Ti/Tv ratio (if available) |
 
 ## Processing Rationale
 
