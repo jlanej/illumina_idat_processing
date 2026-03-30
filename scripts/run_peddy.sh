@@ -24,6 +24,10 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=utils.sh
+source "${SCRIPT_DIR}/utils.sh"
+
 # --- Resource URLs ---
 CHAIN_URL_CHM13="https://hgdownload.soe.ucsc.edu/goldenPath/hs1/liftOver/hs1ToHg38.over.chain.gz"
 CHAIN_URL_GRCh37="https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz"
@@ -347,10 +351,17 @@ _append_source_chrx() {
         return
     fi
 
+    # Generate PAR/XTR exclusion BED for the current genome build so that
+    # only non-PAR/XTR chrX variants are appended for peddy sex prediction.
+    # Uses centralized get_par_xtr_bed from utils.sh (single source of truth).
+    local par_xtr_bed="${TMP_DIR}/par_xtr_exclusion.bed"
+    get_par_xtr_bed "${GENOME}" "${par_xtr_bed}"
+
     local source_chrx_vcf="${TMP_DIR}/source_chrx.vcf.gz"
-    _debug_log_command "bcftools view \"${source_vcf}\" --threads \"${THREADS}\" -r \"${source_chrx_region}\" -Oz -o \"${source_chrx_vcf}\""
+    _debug_log_command "bcftools view \"${source_vcf}\" --threads \"${THREADS}\" -r \"${source_chrx_region}\" -T ^\"${par_xtr_bed}\" -Oz -o \"${source_chrx_vcf}\""
     bcftools view "${source_vcf}" --threads "${THREADS}" \
         -r "${source_chrx_region}" \
+        -T ^"${par_xtr_bed}" \
         -Oz -o "${source_chrx_vcf}"
     bcftools index -t "${source_chrx_vcf}"
 
@@ -361,7 +372,7 @@ _append_source_chrx() {
         return
     fi
 
-    echo "  chrX append: adding ${source_chrx_count} source ${source_chrx_region} variants without liftover (peddy sex_check uses chrX genotypes, not coordinate-specific matching)."
+    echo "  chrX append: adding ${source_chrx_count} source nonPAR/XTR ${source_chrx_region} variants without liftover (peddy sex_check uses chrX genotypes, PAR/XTR excluded)."
     local merged_vcf="${TMP_DIR}/peddy_input.with_source_chrx.vcf.gz"
     _debug_log_command "bcftools concat -a \"${base_vcf}\" \"${source_chrx_vcf}\" -Ou | bcftools sort -T \"${TMP_DIR}/bcftools.concat_sort\" -Ou | bcftools norm -d exact -Oz -o \"${merged_vcf}\""
     # -a allows overlapping positions/contigs across inputs; exact duplicates are removed with bcftools norm -d exact.

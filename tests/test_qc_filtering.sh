@@ -38,7 +38,7 @@ assert_eq() {
 
 assert_contains() {
     local haystack="$1" needle="$2" label="$3"
-    if echo "${haystack}" | grep -qF "${needle}"; then
+    if echo "${haystack}" | grep -qF -- "${needle}"; then
         echo "  PASS: ${label}"
         (( PASS++ )) || true
     else
@@ -710,6 +710,280 @@ if [[ $? -eq 0 ]]; then
     (( PASS++ )) || true
 else
     echo "  FAIL: Sex check table format incorrect"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 21: PAR/XTR region definitions per genome build
+# ===============================================================
+echo "--- Test 21: PAR/XTR region definitions per genome build ---"
+
+python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from par_xtr_regions import get_par_xtr_regions, get_par_xtr_bed, get_nonpar_chrx_regions, supported_builds
+import tempfile, os
+
+# Verify supported builds
+builds = supported_builds()
+assert 'CHM13' in builds, f'CHM13 not in supported builds: {builds}'
+assert 'GRCh38' in builds, f'GRCh38 not in supported builds: {builds}'
+assert 'GRCh37' in builds, f'GRCh37 not in supported builds: {builds}'
+
+# Verify CHM13 regions include both chrX and chrY entries
+chm13 = get_par_xtr_regions('CHM13')
+chm13_x = [r for r in chm13 if r[0] == 'chrX']
+chm13_y = [r for r in chm13 if r[0] == 'chrY']
+assert len(chm13_x) == 3, f'Expected 3 chrX regions for CHM13, got {len(chm13_x)}'
+assert len(chm13_y) == 3, f'Expected 3 chrY regions for CHM13, got {len(chm13_y)}'
+assert chm13_x[0] == ('chrX', 0, 2781479, 'PAR1'), f'CHM13 chrX PAR1: {chm13_x[0]}'
+assert chm13_x[1] == ('chrX', 2781479, 6400875, 'XTR'), f'CHM13 chrX XTR: {chm13_x[1]}'
+assert chm13_x[2] == ('chrX', 155701382, 156040895, 'PAR2'), f'CHM13 chrX PAR2: {chm13_x[2]}'
+assert chm13_y[0] == ('chrY', 0, 2458320, 'PAR1'), f'CHM13 chrY PAR1: {chm13_y[0]}'
+assert chm13_y[1] == ('chrY', 2458320, 6400875, 'XTR'), f'CHM13 chrY XTR: {chm13_y[1]}'
+assert chm13_y[2] == ('chrY', 62122809, 62460029, 'PAR2'), f'CHM13 chrY PAR2: {chm13_y[2]}'
+
+# Verify GRCh38 has chrY PAR entries (no XTR on Y for this build)
+grch38 = get_par_xtr_regions('GRCh38')
+grch38_y = [r for r in grch38 if r[0] == 'chrY']
+assert len(grch38_y) == 2, f'Expected 2 chrY regions for GRCh38 (PAR1+PAR2, XTR omitted), got {len(grch38_y)}'
+
+# Verify GRCh37 uses non-chr-prefixed chromosomes for both X and Y
+grch37 = get_par_xtr_regions('GRCh37')
+grch37_x = [r for r in grch37 if r[0] == 'X']
+grch37_y = [r for r in grch37 if r[0] == 'Y']
+assert len(grch37_x) == 3, f'GRCh37 should have 3 X regions (PAR1+XTR+PAR2): {grch37_x}'
+assert len(grch37_y) == 2, f'GRCh37 should have 2 Y regions (PAR1+PAR2): {grch37_y}'
+assert grch37_x[0][0] == 'X', f'GRCh37 should use X not chrX: {grch37_x[0][0]}'
+assert grch37_y[0][0] == 'Y', f'GRCh37 should use Y not chrY: {grch37_y[0][0]}'
+
+# Verify BED output includes both chrX and chrY lines
+with tempfile.TemporaryDirectory() as td:
+    bed_path = get_par_xtr_bed('CHM13', os.path.join(td, 'test.bed'))
+    with open(bed_path) as f:
+        lines = f.readlines()
+    assert len(lines) == 6, f'Expected 6 BED lines (3 chrX + 3 chrY), got {len(lines)}'
+    chrx_lines = [l for l in lines if l.startswith('chrX')]
+    chry_lines = [l for l in lines if l.startswith('chrY')]
+    assert len(chrx_lines) == 3, f'Expected 3 chrX BED lines, got {len(chrx_lines)}'
+    assert len(chry_lines) == 3, f'Expected 3 chrY BED lines, got {len(chry_lines)}'
+
+# Verify non-PAR region computation still returns chrX-only regions
+nonpar = get_nonpar_chrx_regions('CHM13')
+assert len(nonpar) >= 1, f'Expected at least 1 nonPAR region, got {len(nonpar)}'
+# All nonpar regions should be chrX, not chrY
+for region in nonpar:
+    assert 'chrX' in region or 'X:' in region, f'nonPAR region should be chrX: {region}'
+
+# Verify build aliases work
+assert get_par_xtr_regions('hg38') == get_par_xtr_regions('GRCh38')
+assert get_par_xtr_regions('hg19') == get_par_xtr_regions('GRCh37')
+assert get_par_xtr_regions('T2T') == get_par_xtr_regions('CHM13')
+
+# Verify unknown build raises ValueError
+try:
+    get_par_xtr_regions('unknown_build')
+    assert False, 'Should have raised ValueError'
+except ValueError:
+    pass
+
+print('All PAR/XTR region assertions passed (chrX + chrY)')
+" 2>&1
+
+if [[ $? -eq 0 ]]; then
+    echo "  PASS: PAR/XTR region definitions correct for all genome builds"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: PAR/XTR region definition error"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 22: plot_sex_check.py --genome in help
+# ===============================================================
+echo "--- Test 22: plot_sex_check.py --genome in help ---"
+
+SEX_HELP=$(python3 "${REPO_DIR}/scripts/plot_sex_check.py" --help 2>&1 || true)
+assert_contains "${SEX_HELP}" "--genome" "plot_sex_check.py help mentions --genome"
+
+echo ""
+
+# ===============================================================
+# Test 23: F-stat cache round-trip
+# ===============================================================
+echo "--- Test 23: F-stat cache round-trip ---"
+
+python3 -c "
+import sys, os, tempfile
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from plot_sex_check import _write_f_stat_cache, _read_f_stat_cache
+from plot_sex_check import _write_lrr_cache, _read_lrr_cache
+
+# --- F-stat cache: integer n_het/n_called (bcftools fallback) ---
+original = {
+    'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
+    'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
+    'S3': {'f_stat': 0.50, 'n_het': 200, 'n_called': 1000, 'f_sex': 'ambiguous'},
+}
+
+with tempfile.TemporaryDirectory() as td:
+    cache = os.path.join(td, 'cache.tsv')
+    _write_f_stat_cache(cache, original, 'CHM13')
+    loaded = _read_f_stat_cache(cache, expected_genome='CHM13')
+
+    assert loaded is not None, 'Cache should load for matching genome'
+    assert len(loaded) == 3, f'Expected 3 samples, got {len(loaded)}'
+    for name in original:
+        assert name in loaded, f'Missing sample {name}'
+        assert loaded[name]['f_stat'] == original[name]['f_stat'], \
+            f'{name} f_stat mismatch: {loaded[name][\"f_stat\"]} != {original[name][\"f_stat\"]}'
+        assert loaded[name]['f_sex'] == original[name]['f_sex'], \
+            f'{name} f_sex mismatch'
+
+    # Verify genome mismatch returns None (cache invalidation)
+    mismatched = _read_f_stat_cache(cache, expected_genome='GRCh38')
+    assert mismatched is None, 'Cache should return None for genome mismatch'
+
+# --- F-stat cache: None n_het/n_called (plink2 mode) ---
+plink2_data = {
+    'P1': {'f_stat': 0.98, 'n_het': None, 'n_called': None, 'f_sex': 'M'},
+    'P2': {'f_stat': 0.02, 'n_het': None, 'n_called': None, 'f_sex': 'F'},
+}
+with tempfile.TemporaryDirectory() as td:
+    cache = os.path.join(td, 'cache.tsv')
+    _write_f_stat_cache(cache, plink2_data, 'GRCh38')
+    loaded = _read_f_stat_cache(cache, expected_genome='GRCh38')
+    assert loaded is not None
+    assert loaded['P1']['n_het'] is None, 'plink2 n_het should round-trip as None'
+    assert loaded['P1']['n_called'] is None, 'plink2 n_called should round-trip as None'
+
+# --- LRR cache round-trip ---
+medx = {0: -0.1, 1: 0.03, 2: -0.15}
+medy = {0: 0.08, 1: -0.07}
+with tempfile.TemporaryDirectory() as td:
+    cache = os.path.join(td, 'lrr.tsv')
+    _write_lrr_cache(cache, medx, medy, 'CHM13')
+    loaded = _read_lrr_cache(cache, expected_genome='CHM13')
+    assert loaded is not None, 'LRR cache should load'
+    lx, ly = loaded
+    assert abs(lx[0] - (-0.1)) < 1e-5, f'chrX idx 0 mismatch: {lx[0]}'
+    assert abs(ly[0] - 0.08) < 1e-5, f'chrY idx 0 mismatch: {ly[0]}'
+    assert 2 in lx, 'idx 2 should be in chrX'
+    assert 2 not in ly, 'idx 2 should not be in chrY'
+
+    # LRR genome mismatch
+    bad = _read_lrr_cache(cache, expected_genome='GRCh37')
+    assert bad is None, 'LRR cache should return None on genome mismatch'
+
+print('F-stat and LRR cache round-trip verified')
+" 2>&1
+
+if [[ $? -eq 0 ]]; then
+    echo "  PASS: F-stat and LRR caches write, read, invalidate correctly"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: F-stat cache round-trip error"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 24: run_pipeline.sh passes --genome to plot_sex_check.py
+# ===============================================================
+echo "--- Test 24: run_pipeline.sh passes --genome to plot_sex_check.py ---"
+
+if grep -q -- '--genome "${GENOME}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
+   grep -A5 'plot_sex_check.py' "${REPO_DIR}/scripts/run_pipeline.sh" | grep -q -- '--genome'; then
+    echo "  PASS: run_pipeline.sh passes --genome to plot_sex_check.py"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: run_pipeline.sh missing --genome for plot_sex_check.py"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 25: run_peddy.sh excludes PAR/XTR in chrX append
+# ===============================================================
+echo "--- Test 25: run_peddy.sh excludes PAR/XTR in chrX append ---"
+
+if grep -q 'par_xtr_exclusion.bed' "${REPO_DIR}/scripts/run_peddy.sh" && \
+   grep -q 'PAR/XTR excluded' "${REPO_DIR}/scripts/run_peddy.sh" && \
+   grep -q 'get_par_xtr_bed' "${REPO_DIR}/scripts/run_peddy.sh" && \
+   grep -q 'source.*utils.sh' "${REPO_DIR}/scripts/run_peddy.sh" && \
+   grep -q 'T \^' "${REPO_DIR}/scripts/run_peddy.sh"; then
+    echo "  PASS: run_peddy.sh excludes PAR/XTR when appending chrX via utils.sh"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: run_peddy.sh missing PAR/XTR exclusion in chrX append"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 26: utils.sh get_par_xtr_bed function exists
+# ===============================================================
+echo "--- Test 26: utils.sh get_par_xtr_bed function ---"
+
+if grep -q 'get_par_xtr_bed()' "${REPO_DIR}/scripts/utils.sh" && \
+   grep -q 'PAR1' "${REPO_DIR}/scripts/utils.sh" && \
+   grep -q 'XTR' "${REPO_DIR}/scripts/utils.sh" && \
+   grep -q 'PAR2' "${REPO_DIR}/scripts/utils.sh" && \
+   grep -q 'chrY' "${REPO_DIR}/scripts/utils.sh"; then
+    echo "  PASS: utils.sh contains get_par_xtr_bed with chrX + chrY PAR/XTR regions"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: utils.sh missing get_par_xtr_bed function"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 27: compute_chrx_f_statistic dispatches to plink2 or bcftools
+# ===============================================================
+echo "--- Test 27: F-stat uses plink2 --check-sex when available ---"
+
+python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}/scripts')
+# Verify the plink2 function and bcftools fallback exist in module
+import plot_sex_check as ps
+assert hasattr(ps, '_compute_f_stat_plink2'), 'Missing _compute_f_stat_plink2'
+assert hasattr(ps, '_compute_f_stat_bcftools'), 'Missing _compute_f_stat_bcftools'
+
+# Verify plink2 function references --check-sex and --sex-check fallback
+import inspect
+src = inspect.getsource(ps._compute_f_stat_plink2)
+assert '--check-sex' in src, 'plink2 function should use --check-sex'
+assert '--sex-check' in src, 'plink2 function should handle --sex-check fallback'
+assert '--exclude-range' in src, 'plink2 function should use --exclude-range'
+assert '.sexcheck' in src, 'plink2 function should parse .sexcheck output'
+assert '--split-par' in src, 'plink2 function should mention --split-par alternative'
+
+# Verify bcftools fallback has a docstring indicating it's a fallback
+assert 'fallback' in ps._compute_f_stat_bcftools.__doc__.lower(), \
+    'bcftools function should be documented as fallback'
+
+# Verify dispatcher checks shutil.which
+src_main = inspect.getsource(ps.compute_chrx_f_statistic)
+assert 'shutil.which' in src_main, 'Should check shutil.which for plink2'
+
+print('plink2/bcftools dispatch structure verified')
+" 2>&1
+
+if [[ $? -eq 0 ]]; then
+    echo "  PASS: F-stat computation dispatches to plink2 with bcftools fallback"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: F-stat computation dispatch structure incorrect"
     (( FAIL++ )) || true
 fi
 

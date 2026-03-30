@@ -81,6 +81,7 @@ PYTHON_SCRIPTS=(
     scripts/diagnose_qc.py
     scripts/plot_qc_comparison.py
     scripts/plot_sex_check.py
+    scripts/par_xtr_regions.py
     scripts/compile_sample_sheet.py
     scripts/compute_sample_qc.py
     scripts/enrich_qc_with_names.py

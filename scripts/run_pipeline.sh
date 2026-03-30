@@ -447,6 +447,7 @@ if command -v python3 &>/dev/null && [[ -f "${FINAL_VCF}" && -f "${FINAL_QC}" ]]
             --vcf "${FINAL_VCF}" \
             --sample-qc "${FINAL_QC}" \
             --output-dir "${SEX_CHECK_DIR}" \
+            --genome "${GENOME}" \
             --threads "${THREADS}" 2>&1 || true
     fi
 else
@@ -509,6 +510,7 @@ if command -v python3 &>/dev/null && [[ -f "${PEDDY_SEX_CHECK}" && -f "${FINAL_V
         --sample-qc "${FINAL_QC}" \
         --output-dir "${SEX_CHECK_DIR}" \
         --peddy-sex-check "${PEDDY_SEX_CHECK}" \
+        --genome "${GENOME}" \
         --threads "${THREADS}" 2>&1 || true
     echo ""
 fi
