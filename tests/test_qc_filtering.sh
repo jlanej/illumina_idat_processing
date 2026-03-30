@@ -808,9 +808,10 @@ original = {
 
 with tempfile.TemporaryDirectory() as td:
     cache = os.path.join(td, 'cache.tsv')
-    _write_f_stat_cache(cache, original)
-    loaded = _read_f_stat_cache(cache)
+    _write_f_stat_cache(cache, original, 'CHM13')
+    loaded = _read_f_stat_cache(cache, expected_genome='CHM13')
 
+    assert loaded is not None, 'Cache should load for matching genome'
     assert len(loaded) == 3, f'Expected 3 samples, got {len(loaded)}'
     for name in original:
         assert name in loaded, f'Missing sample {name}'
@@ -819,11 +820,15 @@ with tempfile.TemporaryDirectory() as td:
         assert loaded[name]['f_sex'] == original[name]['f_sex'], \
             f'{name} f_sex mismatch'
 
-print('Cache round-trip verified')
+    # Verify genome mismatch returns None (cache invalidation)
+    mismatched = _read_f_stat_cache(cache, expected_genome='GRCh38')
+    assert mismatched is None, 'Cache should return None for genome mismatch'
+
+print('Cache round-trip and invalidation verified')
 " 2>&1
 
 if [[ $? -eq 0 ]]; then
-    echo "  PASS: F-stat cache writes and reads correctly"
+    echo "  PASS: F-stat cache writes, reads, and invalidates correctly"
     (( PASS++ )) || true
 else
     echo "  FAIL: F-stat cache round-trip error"

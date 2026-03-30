@@ -139,8 +139,9 @@ def get_nonpar_chrx_regions(genome='CHM13'):
         prev_end = max(prev_end, end)
 
     # Add region after last PAR/XTR to end of chromosome
-    # Use a large sentinel value for chromosome end
-    chrx_end = 200000000  # safe upper bound for any human chrX
+    # Use a generous sentinel: human chrX is ~156 Mb in CHM13 and ~155 Mb
+    # in GRCh37/38; 200 Mb safely exceeds all current assemblies.
+    chrx_end = 200000000
     if prev_end < chrx_end:
         nonpar.append(f'{chrom}:{prev_end + 1}-{chrx_end}')
 

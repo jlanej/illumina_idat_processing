@@ -171,12 +171,14 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
     Returns dict of sample_name -> {'f_stat': float, 'n_het': int,
     'n_called': int, 'f_sex': str}.
     """
-    # Check for cached results
+    # Check for cached results (cache includes genome build for invalidation)
     cache_path = None
     if output_dir:
         cache_path = os.path.join(output_dir, 'chrx_f_stat_cache.tsv')
         if os.path.exists(cache_path):
-            return _read_f_stat_cache(cache_path)
+            cached = _read_f_stat_cache(cache_path, expected_genome=genome)
+            if cached is not None:
+                return cached
 
     # Determine chrX contig name
     try:
@@ -276,28 +278,43 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
 
     # Write cache for reuse within the same run
     if cache_path and results:
-        _write_f_stat_cache(cache_path, results)
+        _write_f_stat_cache(cache_path, results, genome)
 
     return results
 
 
-def _write_f_stat_cache(cache_path, results):
+def _write_f_stat_cache(cache_path, results, genome='CHM13'):
     """Write F-statistic results to a TSV cache file."""
     with open(cache_path, 'w') as f:
+        f.write(f'# genome={genome}\n')
         f.write('sample_id\tf_stat\tn_het\tn_called\tf_sex\n')
         for name, info in results.items():
             f.write(f"{name}\t{info['f_stat']}\t{info['n_het']}\t"
                     f"{info['n_called']}\t{info['f_sex']}\n")
 
 
-def _read_f_stat_cache(cache_path):
-    """Read F-statistic results from a TSV cache file."""
+def _read_f_stat_cache(cache_path, expected_genome=None):
+    """Read F-statistic results from a TSV cache file.
+
+    Returns None if the cache genome build does not match expected_genome.
+    """
     results = {}
     with open(cache_path) as f:
-        header = f.readline()
-        for line in f:
+        first_line = f.readline().strip()
+        if first_line.startswith('# genome='):
+            cached_genome = first_line.split('=', 1)[1]
+            if expected_genome and cached_genome != expected_genome:
+                print(f"  Cache genome mismatch ({cached_genome} vs "
+                      f"{expected_genome}); recomputing.", file=sys.stderr)
+                return None
+            header = f.readline()  # skip header
+        else:
+            header = first_line  # no genome comment; treat as header
+        for lineno, line in enumerate(f, start=3):
             fields = line.strip().split('\t')
             if len(fields) < 5:
+                print(f"  Warning: skipping malformed cache line {lineno}: "
+                      f"{line.strip()}", file=sys.stderr)
                 continue
             results[fields[0]] = {
                 'f_stat': float(fields[1]),
