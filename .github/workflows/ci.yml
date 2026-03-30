@@ -41,3 +41,5 @@ jobs:
           bash tests/test_sample_name_map.sh
           bash tests/test_realign_manifest.sh
           bash tests/test_ancestry_pca_projection.sh
+          bash tests/test_qc_filtering.sh
+          bash tests/test_recluster_welford.sh
