@@ -45,14 +45,18 @@ check_field() {
 }
 
 # idx=0: LRR values 1,3,5,7 -> median 4.000000; 2 het calls out of 4
+# BAF values for het calls: 0.45, 0.55 -> mean 0.500000
 check_field 0 2 "1.000000" "sample0 call_rate"
 check_field 0 5 "4.000000" "sample0 lrr_median"
-check_field 0 7 "0.500000" "sample0 het_rate"
+check_field 0 6 "0.500000" "sample0 baf_mean"
+check_field 0 8 "0.500000" "sample0 het_rate"
 
 # idx=1: LRR values 2,4,6,8 -> median 5.000000; 2 het calls out of 4
+# BAF values for het calls: 0.60, 0.40 -> mean 0.500000
 check_field 1 2 "1.000000" "sample1 call_rate"
 check_field 1 5 "5.000000" "sample1 lrr_median"
-check_field 1 7 "0.500000" "sample1 het_rate"
+check_field 1 6 "0.500000" "sample1 baf_mean"
+check_field 1 8 "0.500000" "sample1 het_rate"
 
 echo ""
 echo "============================================"

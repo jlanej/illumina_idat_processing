@@ -47,6 +47,8 @@ Options:
                           HWE testing and PCA training sets.  These samples
                           are removed prior to variant QC and within-ancestry
                           PCA.  Used for related and het-outlier samples.
+  --tstv-file FILE        bcftools stats tstv output file for project-level
+                          Ti/Tv ratio in collated output
   --threads INT           Number of threads (default: all available)
   --force                 Re-run even if outputs exist
   --help                  Show this help message
@@ -66,6 +68,7 @@ PEDDY_HET_CHECK=""
 OUTPUT_DIR=""
 MIN_SAMPLES=100
 EXCLUDE_SAMPLES=""
+TSTV_FILE=""
 THREADS=$(nproc 2>/dev/null || echo 1)
 FORCE="false"
 
@@ -76,6 +79,7 @@ while [[ $# -gt 0 ]]; do
         --output-dir)       OUTPUT_DIR="$2"; shift 2 ;;
         --min-samples)      MIN_SAMPLES="$2"; shift 2 ;;
         --exclude-samples)  EXCLUDE_SAMPLES="$2"; shift 2 ;;
+        --tstv-file)        TSTV_FILE="$2"; shift 2 ;;
         --threads)          THREADS="$2"; shift 2 ;;
         --force)            FORCE="true"; shift ;;
         --help)             usage ;;
@@ -301,6 +305,21 @@ done
 
 if [[ -n "${FULL_VQC_DIR}" ]]; then
     COLLATE_ARGS+=(--all-variant-qc-dir "${FULL_VQC_DIR}")
+fi
+
+# Include Ti/Tv stats: prefer explicit --tstv-file arg, fallback to
+# standard location relative to variant QC directory
+TSTV_RESOLVED=""
+if [[ -n "${TSTV_FILE}" && -f "${TSTV_FILE}" ]]; then
+    TSTV_RESOLVED="${TSTV_FILE}"
+elif [[ -n "${FULL_VQC_DIR}" ]]; then
+    TSTV_CANDIDATE="${FULL_VQC_DIR}/../tstv_stats.txt"
+    if [[ -f "${TSTV_CANDIDATE}" ]]; then
+        TSTV_RESOLVED="${TSTV_CANDIDATE}"
+    fi
+fi
+if [[ -n "${TSTV_RESOLVED}" ]]; then
+    COLLATE_ARGS+=(--tstv-file "${TSTV_RESOLVED}")
 fi
 
 # Add per-ancestry variant QC directories

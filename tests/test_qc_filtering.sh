@@ -989,6 +989,269 @@ fi
 
 echo ""
 
+# ===============================================================
+# Test 28: compile_sample_sheet.py — sex check cross-tabulation merge
+# ===============================================================
+echo "--- Test 28: compile_sample_sheet.py sex check merge ---"
+
+cat > "${TMP_DIR}/css_qc.tsv" <<EOF
+sample_id	call_rate	lrr_sd	het_rate
+SA	0.990	0.20	0.300
+SB	0.980	0.25	0.310
+SC	0.970	0.30	0.290
+EOF
+
+cat > "${TMP_DIR}/sex_check.tsv" <<EOF
+sample_id	chrx_lrr_median	chry_lrr_median	computed_gender	chrx_f_stat	f_sex	peddy_sex	sex_status
+SA	-0.50	-3.00	F	0.05	F	female	CONCORDANT
+SB	-0.10	-0.50	M	0.95	M	male	CONCORDANT
+SC	-0.30	-1.50	F	0.40	AMBIGUOUS	female	AMBIGUOUS
+EOF
+
+python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" \
+    --sample-qc "${TMP_DIR}/css_qc.tsv" \
+    --sex-check "${TMP_DIR}/sex_check.tsv" \
+    --output "${TMP_DIR}/css_output.tsv" > /dev/null
+
+# Verify sex check columns are present in header
+CSS_HEADER=$(head -1 "${TMP_DIR}/css_output.tsv")
+assert_contains "${CSS_HEADER}" "chrx_lrr_median" "compiled sheet has chrx_lrr_median column"
+assert_contains "${CSS_HEADER}" "chry_lrr_median" "compiled sheet has chry_lrr_median column"
+assert_contains "${CSS_HEADER}" "chrx_f_stat" "compiled sheet has chrx_f_stat column"
+assert_contains "${CSS_HEADER}" "f_sex" "compiled sheet has f_sex column"
+assert_contains "${CSS_HEADER}" "peddy_sex" "compiled sheet has peddy_sex column"
+assert_contains "${CSS_HEADER}" "sex_status" "compiled sheet has sex_status column"
+
+# Verify values for SA
+SA_ROW=$(grep "^SA" "${TMP_DIR}/css_output.tsv")
+assert_contains "${SA_ROW}" "CONCORDANT" "SA sex_status is CONCORDANT"
+assert_contains "${SA_ROW}" "-0.50" "SA chrx_lrr_median is -0.50"
+assert_contains "${SA_ROW}" "0.05" "SA chrx_f_stat is 0.05"
+
+# Verify values for SC (ambiguous)
+SC_ROW=$(grep "^SC" "${TMP_DIR}/css_output.tsv")
+assert_contains "${SC_ROW}" "AMBIGUOUS" "SC sex_status is AMBIGUOUS"
+
+echo ""
+
+# ===============================================================
+# Test 29: compile_sample_sheet.py — pre-PCA exclusion flags
+# ===============================================================
+echo "--- Test 29: compile_sample_sheet.py exclusion flags ---"
+
+cat > "${TMP_DIR}/excl_qc.tsv" <<EOF
+sample_id	call_rate	lrr_sd	het_rate
+X1	0.990	0.20	0.300
+X2	0.980	0.25	0.310
+X3	0.970	0.30	0.290
+X4	0.960	0.35	0.280
+EOF
+
+cat > "${TMP_DIR}/rel_excl.txt" <<EOF
+X1
+X2
+EOF
+
+cat > "${TMP_DIR}/het_excl.txt" <<EOF
+X2
+X3
+EOF
+
+cat > "${TMP_DIR}/pca_excl.txt" <<EOF
+X1
+X2
+X3
+EOF
+
+python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" \
+    --sample-qc "${TMP_DIR}/excl_qc.tsv" \
+    --relatedness-excluded "${TMP_DIR}/rel_excl.txt" \
+    --het-outlier-excluded "${TMP_DIR}/het_excl.txt" \
+    --pre-pca-excluded "${TMP_DIR}/pca_excl.txt" \
+    --output "${TMP_DIR}/excl_output.tsv" > /dev/null
+
+# Verify exclusion flag columns in header
+EXCL_HEADER=$(head -1 "${TMP_DIR}/excl_output.tsv")
+assert_contains "${EXCL_HEADER}" "excluded_relatedness" "compiled sheet has excluded_relatedness column"
+assert_contains "${EXCL_HEADER}" "excluded_het_outlier" "compiled sheet has excluded_het_outlier column"
+assert_contains "${EXCL_HEADER}" "pre_pca_excluded" "compiled sheet has pre_pca_excluded column"
+
+# X1: rel=1, het=0, pca=1
+X1_REL=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="excluded_relatedness") c=i} NR>1 && $1=="X1" {print $c}' "${TMP_DIR}/excl_output.tsv")
+X1_HET=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="excluded_het_outlier") c=i} NR>1 && $1=="X1" {print $c}' "${TMP_DIR}/excl_output.tsv")
+X1_PCA=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="pre_pca_excluded") c=i} NR>1 && $1=="X1" {print $c}' "${TMP_DIR}/excl_output.tsv")
+
+assert_eq "${X1_REL}" "1" "X1 excluded_relatedness = 1"
+assert_eq "${X1_HET}" "0" "X1 excluded_het_outlier = 0"
+assert_eq "${X1_PCA}" "1" "X1 pre_pca_excluded = 1"
+
+# X4: not excluded by anything
+X4_REL=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="excluded_relatedness") c=i} NR>1 && $1=="X4" {print $c}' "${TMP_DIR}/excl_output.tsv")
+X4_HET=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="excluded_het_outlier") c=i} NR>1 && $1=="X4" {print $c}' "${TMP_DIR}/excl_output.tsv")
+X4_PCA=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="pre_pca_excluded") c=i} NR>1 && $1=="X4" {print $c}' "${TMP_DIR}/excl_output.tsv")
+
+assert_eq "${X4_REL}" "0" "X4 excluded_relatedness = 0"
+assert_eq "${X4_HET}" "0" "X4 excluded_het_outlier = 0"
+assert_eq "${X4_PCA}" "0" "X4 pre_pca_excluded = 0"
+
+echo ""
+
+# ===============================================================
+# Test 30: collate_variant_qc.py — genotype counts and missingness
+# ===============================================================
+echo "--- Test 30: collate_variant_qc.py genotype counts ---"
+
+VQCTEST="${TMP_DIR}/vqc_test"
+mkdir -p "${VQCTEST}/all_vqc"
+
+cat > "${VQCTEST}/all_vqc/variant_qc.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+1	v1	5	1000	0.005
+1	v2	20	1000	0.020
+EOF
+
+cat > "${VQCTEST}/all_vqc/variant_qc.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	v1	A	T	400	500	100	0.5	0.48	0.50
+1	v2	G	C	300	400	300	0.4	0.42	0.30
+EOF
+
+cat > "${VQCTEST}/all_vqc/variant_qc.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+1	v1	A	T	0.35	2000
+1	v2	G	C	0.50	2000
+EOF
+
+python3 "${REPO_DIR}/scripts/collate_variant_qc.py" \
+    --all-variant-qc-dir "${VQCTEST}/all_vqc" \
+    --output "${VQCTEST}/collated.tsv" > /dev/null
+
+VQC_HEADER=$(head -1 "${VQCTEST}/collated.tsv")
+assert_contains "${VQC_HEADER}" "all_obs_ct" "collated has all_obs_ct column"
+assert_contains "${VQC_HEADER}" "all_missing_ct" "collated has all_missing_ct column"
+assert_contains "${VQC_HEADER}" "all_hom_a1_ct" "collated has all_hom_a1_ct column"
+assert_contains "${VQC_HEADER}" "all_het_ct" "collated has all_het_ct column"
+assert_contains "${VQC_HEADER}" "all_hom_a2_ct" "collated has all_hom_a2_ct column"
+
+# Verify actual values for v1
+V1_OBS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_obs_ct") c=i} NR>1 && $1=="v1" {print $c}' "${VQCTEST}/collated.tsv")
+V1_MISS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_missing_ct") c=i} NR>1 && $1=="v1" {print $c}' "${VQCTEST}/collated.tsv")
+V1_HOM1=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_hom_a1_ct") c=i} NR>1 && $1=="v1" {print $c}' "${VQCTEST}/collated.tsv")
+V1_HET=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_het_ct") c=i} NR>1 && $1=="v1" {print $c}' "${VQCTEST}/collated.tsv")
+V1_HOM2=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_hom_a2_ct") c=i} NR>1 && $1=="v1" {print $c}' "${VQCTEST}/collated.tsv")
+
+assert_eq "${V1_OBS}" "1000" "v1 obs_ct = 1000"
+assert_eq "${V1_MISS}" "5" "v1 missing_ct = 5"
+assert_eq "${V1_HOM1}" "400" "v1 hom_a1_ct = 400"
+assert_eq "${V1_HET}" "500" "v1 het_ct = 500"
+assert_eq "${V1_HOM2}" "100" "v1 hom_a2_ct = 100"
+
+echo ""
+
+# ===============================================================
+# Test 31: collate_variant_qc.py — Ti/Tv ratio from tstv file
+# ===============================================================
+echo "--- Test 31: collate_variant_qc.py Ti/Tv ratio ---"
+
+cat > "${VQCTEST}/tstv_stats.txt" <<EOF
+SN	0	number of SNPs:	5000
+SN	0	number of indels:	200
+TSTV	0	3000	1500	2.00	0.00
+EOF
+
+python3 "${REPO_DIR}/scripts/collate_variant_qc.py" \
+    --all-variant-qc-dir "${VQCTEST}/all_vqc" \
+    --tstv-file "${VQCTEST}/tstv_stats.txt" \
+    --output "${VQCTEST}/collated_tstv.tsv" > /dev/null
+
+# Verify Ti/Tv ratio is in header comment
+TSTV_LINE=$(head -1 "${VQCTEST}/collated_tstv.tsv")
+assert_contains "${TSTV_LINE}" "#tstv_ratio=2.00" "Ti/Tv ratio present as header comment"
+
+echo ""
+
+# ===============================================================
+# Test 32: collate_variant_qc.py — ancestry-specific genotype counts
+# ===============================================================
+echo "--- Test 32: collate_variant_qc.py ancestry genotype counts ---"
+
+mkdir -p "${VQCTEST}/eur_vqc"
+
+cat > "${VQCTEST}/eur_vqc/variant_qc.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+1	v1	2	500	0.004
+1	v2	10	500	0.020
+EOF
+
+cat > "${VQCTEST}/eur_vqc/variant_qc.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	v1	A	T	200	250	50	0.5	0.48	0.60
+1	v2	G	C	150	200	150	0.4	0.42	0.40
+EOF
+
+cat > "${VQCTEST}/eur_vqc/variant_qc.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+1	v1	A	T	0.35	1000
+1	v2	G	C	0.50	1000
+EOF
+
+python3 "${REPO_DIR}/scripts/collate_variant_qc.py" \
+    --all-variant-qc-dir "${VQCTEST}/all_vqc" \
+    --ancestry-variant-qc "EUR:${VQCTEST}/eur_vqc" \
+    --output "${VQCTEST}/collated_anc.tsv" > /dev/null
+
+ANC_HEADER=$(grep -v '^#' "${VQCTEST}/collated_anc.tsv" | head -1)
+assert_contains "${ANC_HEADER}" "EUR_obs_ct" "ancestry collation has EUR_obs_ct"
+assert_contains "${ANC_HEADER}" "EUR_het_ct" "ancestry collation has EUR_het_ct"
+assert_contains "${ANC_HEADER}" "EUR_hom_a1_ct" "ancestry collation has EUR_hom_a1_ct"
+
+# Verify EUR v1 values
+EUR_V1_HET=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_het_ct") c=i} /^v1\t/ {print $c}' <(grep -v '^#' "${VQCTEST}/collated_anc.tsv"))
+assert_eq "${EUR_V1_HET}" "250" "EUR v1 het_ct = 250"
+
+echo ""
+
+# ===============================================================
+# Test 33: compile_sample_sheet.py — --help shows new args
+# ===============================================================
+echo "--- Test 33: compile_sample_sheet.py help shows new args ---"
+
+CSS_HELP=$(python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" --help 2>&1) || true
+assert_contains "${CSS_HELP}" "sex-check" "compile_sample_sheet.py help mentions --sex-check"
+assert_contains "${CSS_HELP}" "relatedness-excluded" "compile_sample_sheet.py help mentions --relatedness-excluded"
+assert_contains "${CSS_HELP}" "het-outlier-excluded" "compile_sample_sheet.py help mentions --het-outlier-excluded"
+assert_contains "${CSS_HELP}" "pre-pca-excluded" "compile_sample_sheet.py help mentions --pre-pca-excluded"
+
+echo ""
+
+# ===============================================================
+# Test 34: collate_variant_qc.py — --help shows --tstv-file
+# ===============================================================
+echo "--- Test 34: collate_variant_qc.py help shows --tstv-file ---"
+
+CVQ_HELP=$(python3 "${REPO_DIR}/scripts/collate_variant_qc.py" --help 2>&1) || true
+assert_contains "${CVQ_HELP}" "tstv-file" "collate_variant_qc.py help mentions --tstv-file"
+
+echo ""
+
+# ===============================================================
+# Test 35: run_pipeline.sh wires up sex check and exclusion args
+# ===============================================================
+echo "--- Test 35: run_pipeline.sh wires sex check and exclusion args ---"
+
+if grep -q -- '--sex-check "${SEX_CHECK_TSV}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
+   grep -q -- '--relatedness-excluded "${RELATEDNESS_EXCLUDED}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
+   grep -q -- '--het-outlier-excluded "${HET_OUTLIER_EXCLUDED}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
+   grep -q -- '--pre-pca-excluded "${PRE_PCA_EXCLUDE}"' "${REPO_DIR}/scripts/run_pipeline.sh"; then
+    echo "  PASS: run_pipeline.sh passes sex check and exclusion args to compile_sample_sheet.py"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: run_pipeline.sh missing sex check or exclusion args for compile_sample_sheet.py"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
 # ---------------------------------------------------------------
 # Final summary
 # ---------------------------------------------------------------

@@ -125,7 +125,7 @@ collect_qc_metrics() {
 
                 if [[ -s "${chunk_raw_file}" ]]; then
                     awk -F'\t' 'NR==FNR { names[NR-1] = $0; next }
-                        FNR > 1 { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 }' \
+                        FNR > 1 { print names[$1+0] "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 }' \
                         "${chunk_samples_file}" "${chunk_raw_file}" | sort -k1,1 > "${chunk_metrics_file}"
                     local mapped_count
                     mapped_count=$(wc -l < "${chunk_metrics_file}" | tr -d ' ')
@@ -180,7 +180,7 @@ collect_qc_metrics() {
             return 1
         fi
         echo "  [diag] QC metrics file: ${n_qm} samples"
-        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd, lrr_mean, lrr_median, baf_sd, het_rate):"
+        echo "  [diag] QC metrics first 3 lines (sample, call_rate, lrr_sd, lrr_mean, lrr_median, baf_mean, baf_sd, het_rate):"
         head -3 "${qc_metrics_file}" | sed 's/^/    [diag]   /'
     else
         echo "  [diag] WARNING: QC metrics file is empty"
@@ -208,13 +208,13 @@ collect_qc_metrics() {
     merge_start=${SECONDS}
     echo "  Merging metrics..."
     {
-        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_sd\thet_rate\tcomputed_gender"
-        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,1.4,1.5,1.6,1.7,2.2' "${qc_metrics_file}" "${gender_file}"
+        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_mean\tbaf_sd\thet_rate\tcomputed_gender"
+        join -t$'\t' -a1 -e 'NA' -o '0,1.2,1.3,1.4,1.5,1.6,1.7,1.8,2.2' "${qc_metrics_file}" "${gender_file}"
     } > "${output_file}" 2>/dev/null || {
         # Fallback: simpler merge approach
-        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_sd\thet_rate\tcomputed_gender"
+        echo -e "sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_mean\tbaf_sd\thet_rate\tcomputed_gender"
         paste "${qc_metrics_file}" "${gender_file}" | \
-            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $9}'
+            awk -F'\t' '{print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $10}'
     } > "${output_file}"
 
     merge_elapsed=$(( SECONDS - merge_start ))

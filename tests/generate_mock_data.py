@@ -69,7 +69,8 @@ def generate_sample_qc(output_dir, stage, n_samples=30):
         lrr_mean = round(rng.uniform(-0.02, 0.02), 4)
         lrr_median = round(lrr_mean + rng.uniform(-0.005, 0.005), 4)
 
-        # --- BAF SD (het sites) ---
+        # --- BAF mean and SD (het sites) ---
+        baf_mean = round(rng.uniform(0.48, 0.52), 4)
         if i == 7:
             bsd = 0.1823  # flag: above 0.15
         elif i == 18:
@@ -94,6 +95,7 @@ def generate_sample_qc(output_dir, stage, n_samples=30):
             'lrr_sd': f"{lsd:.4f}",
             'lrr_mean': f"{lrr_mean:.4f}",
             'lrr_median': f"{lrr_median:.4f}",
+            'baf_mean': f"{baf_mean:.4f}",
             'baf_sd': f"{bsd:.4f}",
             'het_rate': f"{hr:.4f}",
             'computed_gender': gender,
@@ -101,7 +103,7 @@ def generate_sample_qc(output_dir, stage, n_samples=30):
 
     filepath = os.path.join(qc_dir, f'{stage}_sample_qc.tsv')
     cols = ['sample_id', 'call_rate', 'lrr_sd', 'lrr_mean',
-            'lrr_median', 'baf_sd', 'het_rate', 'computed_gender']
+            'lrr_median', 'baf_mean', 'baf_sd', 'het_rate', 'computed_gender']
     with open(filepath, 'w') as f:
         f.write('\t'.join(cols) + '\n')
         for r in rows:
@@ -545,9 +547,15 @@ def generate_ancestry_stratified_qc(output_dir, n_samples=30):
     # Generate collated variant QC
     collated_path = os.path.join(strat_dir, 'collated_variant_qc.tsv')
     with open(collated_path, 'w') as f:
-        cols = ['variant_id', 'all_call_rate', 'all_hwe_p', 'all_maf']
+        cols = ['variant_id', 'all_call_rate', 'all_hwe_p', 'all_maf',
+                'all_obs_ct', 'all_missing_ct',
+                'all_hom_a1_ct', 'all_het_ct', 'all_hom_a2_ct']
         for anc in sorted(mock_ancestries):
-            cols.extend([f'{anc}_call_rate', f'{anc}_hwe_p', f'{anc}_maf'])
+            cols.extend([
+                f'{anc}_call_rate', f'{anc}_hwe_p', f'{anc}_maf',
+                f'{anc}_obs_ct', f'{anc}_missing_ct',
+                f'{anc}_hom_a1_ct', f'{anc}_het_ct', f'{anc}_hom_a2_ct',
+            ])
         cols.extend([
             'all_ancestries_call_rate_pass',
             'all_ancestries_hwe_pass',
@@ -558,18 +566,35 @@ def generate_ancestry_stratified_qc(output_dir, n_samples=30):
         for v in range(200):
             row = [f'rs{100000 + v}']
             # all
+            n_count = n_samples
             cr = round(1 - rng.uniform(0, 0.05), 6)
             hwe = f'{10 ** rng.uniform(-8, 0):.6e}'
             maf = round(rng.uniform(0, 0.5), 6)
-            row.extend([str(cr), hwe, str(maf)])
+            obs_ct = n_count
+            missing_ct = max(0, round(n_count * (1 - cr)))
+            het_ct = max(0, round(n_count * 2 * maf * (1 - maf)))
+            hom_a1 = max(0, round(n_count * (1 - maf) ** 2))
+            hom_a2 = max(0, n_count - missing_ct - het_ct - hom_a1)
+            row.extend([str(cr), hwe, str(maf),
+                        str(obs_ct), str(missing_ct),
+                        str(hom_a1), str(het_ct), str(hom_a2)])
             cr_pass = True
             hwe_pass = True
             maf_pass = True
             for anc in sorted(mock_ancestries):
+                n_count = len([s for s in ancestry_assign
+                               if ancestry_assign[s] == anc])
                 cr = round(1 - rng.uniform(0, 0.06), 6)
                 hwe = f'{10 ** rng.uniform(-10, 0):.6e}'
                 maf = round(rng.uniform(0, 0.5), 6)
-                row.extend([str(cr), hwe, str(maf)])
+                obs_ct = n_count
+                missing_ct = max(0, round(n_count * (1 - cr)))
+                het_ct = max(0, round(n_count * 2 * maf * (1 - maf)))
+                hom_a1 = max(0, round(n_count * (1 - maf) ** 2))
+                hom_a2 = max(0, n_count - missing_ct - het_ct - hom_a1)
+                row.extend([str(cr), hwe, str(maf),
+                            str(obs_ct), str(missing_ct),
+                            str(hom_a1), str(het_ct), str(hom_a2)])
                 cr_pass = cr_pass and cr >= 0.98
                 hwe_pass = hwe_pass and float(hwe) >= 1e-6
                 maf_pass = maf_pass and maf >= 0.01

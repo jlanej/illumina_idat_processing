@@ -616,6 +616,15 @@ else
         if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
             STRAT_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
         fi
+        # Pass Ti/Tv stats file explicitly (from variant QC step output)
+        for tstv_candidate in \
+            "${OUTPUT_DIR}/stage2/qc/tstv_stats.txt" \
+            "${OUTPUT_DIR}/stage1/qc/tstv_stats.txt"; do
+            if [[ -f "${tstv_candidate}" ]]; then
+                STRAT_ARGS+=(--tstv-file "${tstv_candidate}")
+                break
+            fi
+        done
         if [[ "${FORCE}" == "true" ]]; then
             STRAT_ARGS+=(--force)
         fi
@@ -694,6 +703,22 @@ if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
                 break
             fi
         done
+
+        # Include sex check cross-tabulation if available
+        if [[ -f "${SEX_CHECK_TSV}" ]]; then
+            COMPILE_ARGS+=(--sex-check "${SEX_CHECK_TSV}")
+        fi
+
+        # Include pre-PCA exclusion lists for flag columns
+        if [[ -f "${RELATEDNESS_EXCLUDED}" ]]; then
+            COMPILE_ARGS+=(--relatedness-excluded "${RELATEDNESS_EXCLUDED}")
+        fi
+        if [[ -f "${HET_OUTLIER_EXCLUDED}" ]]; then
+            COMPILE_ARGS+=(--het-outlier-excluded "${HET_OUTLIER_EXCLUDED}")
+        fi
+        if [[ -f "${PRE_PCA_EXCLUDE}" ]]; then
+            COMPILE_ARGS+=(--pre-pca-excluded "${PRE_PCA_EXCLUDE}")
+        fi
 
         # Include peddy sample-level metrics if available
         if [[ -f "${PEDDY_DIR}/peddy.het_check.csv" ]]; then

@@ -29,17 +29,17 @@ mkdir -p "${TMP_DIR}/stage2/qc" "${TMP_DIR}/stage1/qc" "${TMP_DIR}/ancestry_pca"
          "${TMP_DIR}/stage2/qc/variant_qc" "${TMP_DIR}/sex_check"
 
 cat > "${TMP_DIR}/stage2/qc/stage2_sample_qc.tsv" << 'EOF'
-sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
-S001	0.9985	0.1523	-0.0012	-0.0005	0.0321	0.2345	M
-S002	0.9654	0.4123	0.0321	0.0215	0.1623	0.2890	F
-S003	0.9992	0.1234	-0.0003	-0.0001	0.0287	0.2356	M
+sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_mean	baf_sd	het_rate	computed_gender
+S001	0.9985	0.1523	-0.0012	-0.0005	0.4987	0.0321	0.2345	M
+S002	0.9654	0.4123	0.0321	0.0215	0.5012	0.1623	0.2890	F
+S003	0.9992	0.1234	-0.0003	-0.0001	0.4995	0.0287	0.2356	M
 EOF
 
 cat > "${TMP_DIR}/stage1/qc/stage1_sample_qc.tsv" << 'EOF'
-sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
-S001	0.9945	0.1723	-0.0018	-0.0009	0.0345	0.2312	M
-S002	0.9554	0.4523	0.0389	0.0278	0.1712	0.2934	F
-S003	0.9972	0.1434	-0.0009	-0.0004	0.0298	0.2323	M
+sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_mean	baf_sd	het_rate	computed_gender
+S001	0.9945	0.1723	-0.0018	-0.0009	0.4978	0.0345	0.2312	M
+S002	0.9554	0.4523	0.0389	0.0278	0.5023	0.1712	0.2934	F
+S003	0.9972	0.1434	-0.0009	-0.0004	0.4989	0.0298	0.2323	M
 EOF
 
 cat > "${TMP_DIR}/ancestry_pca/pca_projections.tsv" << 'EOF'
@@ -133,10 +133,10 @@ AFR: 1 sample
 EOF
 
 cat > "${TMP_DIR}/ancestry_stratified_qc/collated_variant_qc.tsv" << 'EOF'
-variant_id	all_call_rate	all_hwe_p	all_maf	AFR_call_rate	AFR_hwe_p	AFR_maf	EUR_call_rate	EUR_hwe_p	EUR_maf	all_ancestries_call_rate_pass	all_ancestries_hwe_pass	all_ancestries_maf_pass	all_ancestries_qc_pass
-rs100000	0.985	1.2e-03	0.15	0.98	2.5e-04	0.12	0.99	5.1e-02	0.18	1	1	1	1
-rs100001	0.992	4.5e-01	0.32	0.99	3.2e-01	0.28	0.99	6.7e-01	0.35	1	1	1	1
-rs100002	0.978	8.9e-08	0.05	0.96	1.1e-06	0.08	0.99	2.3e-01	0.03	0	1	1	0
+variant_id	all_call_rate	all_hwe_p	all_maf	all_obs_ct	all_missing_ct	all_hom_a1_ct	all_het_ct	all_hom_a2_ct	AFR_call_rate	AFR_hwe_p	AFR_maf	AFR_obs_ct	AFR_missing_ct	AFR_hom_a1_ct	AFR_het_ct	AFR_hom_a2_ct	EUR_call_rate	EUR_hwe_p	EUR_maf	EUR_obs_ct	EUR_missing_ct	EUR_hom_a1_ct	EUR_het_ct	EUR_hom_a2_ct	all_ancestries_call_rate_pass	all_ancestries_hwe_pass	all_ancestries_maf_pass	all_ancestries_qc_pass
+rs100000	0.985	1.2e-03	0.15	1000	15	723	255	22	0.98	2.5e-04	0.12	500	8	360	128	12	0.99	5.1e-02	0.18	500	5	364	117	19	1	1	1	1
+rs100001	0.992	4.5e-01	0.32	1000	8	462	435	103	0.99	3.2e-01	0.28	500	4	260	202	38	0.99	6.7e-01	0.35	500	4	212	228	60	1	1	1	1
+rs100002	0.978	8.9e-08	0.05	1000	22	903	90	7	0.96	1.1e-06	0.08	500	12	423	74	3	0.99	2.3e-01	0.03	500	6	470	29	1	0	1	1	0
 EOF
 
 # --- Test 1: Generate report ---
@@ -482,11 +482,11 @@ echo "--- Test 17: Boundary value pass/fail classification ---"
 BOUNDARY_DIR="${TMP_DIR}/boundary"
 mkdir -p "${BOUNDARY_DIR}"
 cat > "${BOUNDARY_DIR}/boundary_qc.tsv" << 'BEOF'
-sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_sd	het_rate	computed_gender
-EXACT_PASS	0.9700	0.3500	0.0000	0.0000	0.0100	0.2500	M
-JUST_BELOW_CR	0.9699	0.3500	0.0000	0.0000	0.0100	0.2500	F
-JUST_ABOVE_LRR	0.9700	0.3501	0.0000	0.0000	0.0100	0.2500	M
-BOTH_FAIL	0.9699	0.3501	0.0000	0.0000	0.0100	0.2500	F
+sample_id	call_rate	lrr_sd	lrr_mean	lrr_median	baf_mean	baf_sd	het_rate	computed_gender
+EXACT_PASS	0.9700	0.3500	0.0000	0.0000	0.5000	0.0100	0.2500	M
+JUST_BELOW_CR	0.9699	0.3500	0.0000	0.0000	0.5000	0.0100	0.2500	F
+JUST_ABOVE_LRR	0.9700	0.3501	0.0000	0.0000	0.5000	0.0100	0.2500	M
+BOTH_FAIL	0.9699	0.3501	0.0000	0.0000	0.5000	0.0100	0.2500	F
 BEOF
 
 if python3 -c "
