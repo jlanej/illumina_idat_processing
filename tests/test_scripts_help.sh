@@ -242,11 +242,11 @@ if [[ -f "${RUN_PIPELINE}" ]]; then
     peddy_line="$(grep -n 'bash "${SCRIPT_DIR}/run_peddy.sh"' "${RUN_PIPELINE}" | head -n1 | cut -d: -f1 || true)"
     pca_line="$(grep -n 'bash "${SCRIPT_DIR}/ancestry_pca.sh"' "${RUN_PIPELINE}" | head -n1 | cut -d: -f1 || true)"
     strat_line="$(grep -n 'bash "${SCRIPT_DIR}/ancestry_stratified_qc.sh"' "${RUN_PIPELINE}" | head -n1 | cut -d: -f1 || true)"
-    if [[ -n "${peddy_line}" && -n "${pca_line}" && -n "${strat_line}" && "${peddy_line}" -lt "${pca_line}" && "${pca_line}" -lt "${strat_line}" ]]; then
-        echo "  PASS: run_pipeline.sh runs peddy before ancestry PCA before ancestry-stratified QC"
+    if [[ -n "${peddy_line}" && -n "${pca_line}" && -n "${strat_line}" && "${peddy_line}" -lt "${strat_line}" && "${strat_line}" -lt "${pca_line}" ]]; then
+        echo "  PASS: run_pipeline.sh runs peddy before ancestry-stratified QC before ancestry PCA"
         (( PASS++ )) || true
     else
-        echo "  FAIL: run_pipeline.sh ancestry step order is incorrect"
+        echo "  FAIL: run_pipeline.sh ancestry step order is incorrect (expected: peddy < stratified QC < PCA)"
         (( FAIL++ )) || true
     fi
 fi

@@ -53,6 +53,7 @@ Options:
 
 Output files:
   collated_variant_qc.tsv          Unified variant QC across all ancestries
+  hwe_passing_variants.txt         Variant IDs passing HWE in all ancestry groups
   ancestry_stratified_summary.txt  Summary of stratified analyses
   <ANCESTRY>/variant_qc/           Per-ancestry variant QC
   <ANCESTRY>/pca/                  Per-ancestry PCA projections
@@ -317,6 +318,62 @@ else
 fi
 
 # -----------------------------------------------------------------
+# Step 3b: Build HWE-passing variant list (intersection across ancestries)
+# -----------------------------------------------------------------
+HWE_PASSING="${OUTPUT_DIR}/hwe_passing_variants.txt"
+HWE_P_THRESH="1e-6"
+
+echo "======================================================"
+echo "  Building HWE-Passing Variant List"
+echo "======================================================"
+echo ""
+
+if [[ ${#PROCESSED_ANCESTRIES[@]} -gt 0 ]]; then
+    # For each ancestry, extract variant IDs where HWE p >= threshold
+    HWE_FIRST=""
+    for ANCESTRY in "${PROCESSED_ANCESTRIES[@]}"; do
+        HARDY_FILE="${OUTPUT_DIR}/${ANCESTRY}/variant_qc/variant_qc.hardy"
+        ANC_HWE_PASS="${OUTPUT_DIR}/${ANCESTRY}/variant_qc/hwe_passing_ids.txt"
+        if [[ -f "${HARDY_FILE}" ]]; then
+            # Extract ID column for variants with HWE p >= threshold
+            awk -v thresh="${HWE_P_THRESH}" \
+                'NR>1 { p=$NF+0; if (p >= thresh) print $2 }' \
+                "${HARDY_FILE}" | sort > "${ANC_HWE_PASS}"
+            N_PASS=$(wc -l < "${ANC_HWE_PASS}" | tr -d ' ')
+            echo "  ${ANCESTRY}: ${N_PASS} variants pass HWE (p >= ${HWE_P_THRESH})"
+            if [[ -z "${HWE_FIRST}" ]]; then
+                HWE_FIRST="${ANC_HWE_PASS}"
+            fi
+        else
+            echo "  ${ANCESTRY}: No .hardy file found — skipping"
+        fi
+    done
+
+    # Intersect across all ancestries: only keep variants passing HWE in ALL groups
+    if [[ -n "${HWE_FIRST}" ]]; then
+        cp "${HWE_FIRST}" "${HWE_PASSING}.tmp"
+        for ANCESTRY in "${PROCESSED_ANCESTRIES[@]}"; do
+            ANC_HWE_PASS="${OUTPUT_DIR}/${ANCESTRY}/variant_qc/hwe_passing_ids.txt"
+            if [[ -f "${ANC_HWE_PASS}" ]]; then
+                comm -12 "${HWE_PASSING}.tmp" "${ANC_HWE_PASS}" > "${HWE_PASSING}.tmp2"
+                mv "${HWE_PASSING}.tmp2" "${HWE_PASSING}.tmp"
+            fi
+        done
+        mv "${HWE_PASSING}.tmp" "${HWE_PASSING}"
+        N_HWE_PASS=$(wc -l < "${HWE_PASSING}" | tr -d ' ')
+        echo ""
+        echo "  HWE-passing variants (intersection across all ancestries): ${N_HWE_PASS}"
+    else
+        touch "${HWE_PASSING}"
+        echo "  No .hardy files found — HWE-passing list is empty"
+    fi
+else
+    touch "${HWE_PASSING}"
+    echo "  No ancestry groups processed — HWE-passing list is empty"
+fi
+echo ""
+
+# -----------------------------------------------------------------
 # Step 4: Write summary
 # -----------------------------------------------------------------
 {
@@ -350,6 +407,13 @@ fi
     fi
     echo ""
     echo "Collated variant QC: ${COLLATED}"
+    echo ""
+    if [[ -f "${HWE_PASSING}" ]]; then
+        N_HWE_FINAL=$(wc -l < "${HWE_PASSING}" | tr -d ' ')
+        echo "HWE-passing variant list: ${HWE_PASSING} (${N_HWE_FINAL} variants)"
+        echo "  These variants pass HWE (p >= ${HWE_P_THRESH}) across ALL ancestry groups."
+        echo "  Used as the variant set for full-cohort PCA (Price et al. 2006)."
+    fi
     echo ""
     echo "Scientific rationale:"
     echo "  Ancestry-stratified QC is performed because Hardy-Weinberg"

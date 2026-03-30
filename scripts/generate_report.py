@@ -946,7 +946,10 @@ def _prepare_pca_json(pca_file, qc_rows):
 
 
 def _prepare_sex_check_json(sex_check_file):
-    """Serialize sex check chrX/chrY median LRR data for interactive plotting."""
+    """Serialize sex check chrX/chrY median LRR data for interactive plotting.
+
+    Includes F-statistic and cross-tabulation status when available.
+    """
     if not os.path.exists(sex_check_file):
         return '[]'
 
@@ -957,12 +960,26 @@ def _prepare_sex_check_json(sex_check_file):
         y = safe_float(row.get('chry_lrr_median'))
         if x is None or y is None:
             continue
-        points.append({
+        point = {
             'id': row.get('sample_id', ''),
             'gender': row.get('computed_gender', 'NA'),
             'chrx_lrr_median': round(x, 6),
             'chry_lrr_median': round(y, 6),
-        })
+        }
+        # Include F-statistic and cross-tabulation columns if present
+        f_val = safe_float(row.get('chrx_f_stat'))
+        if f_val is not None:
+            point['chrx_f_stat'] = round(f_val, 6)
+        f_sex = row.get('f_sex', '')
+        if f_sex:
+            point['f_sex'] = f_sex
+        peddy_sex = row.get('peddy_sex', '')
+        if peddy_sex:
+            point['peddy_sex'] = peddy_sex
+        status = row.get('sex_status', '')
+        if status:
+            point['sex_status'] = status
+        points.append(point)
     return json.dumps(points)
 
 

@@ -527,6 +527,194 @@ assert_eq "${N_EMPTY}" "0" "empty inputs → 0 lines in combined list (no blank 
 
 echo ""
 
+# ===============================================================
+# Test 15: ancestry_pca.sh --include-variants in help
+# ===============================================================
+echo "--- Test 15: ancestry_pca.sh --include-variants in help ---"
+
+PCA_HELP=$(bash "${REPO_DIR}/scripts/ancestry_pca.sh" --help 2>&1 || true)
+assert_contains "${PCA_HELP}" "include-variants" "ancestry_pca.sh help mentions --include-variants"
+
+echo ""
+
+# ===============================================================
+# Test 16: ancestry_stratified_qc.sh help mentions hwe_passing_variants.txt
+# ===============================================================
+echo "--- Test 16: ancestry_stratified_qc.sh help mentions hwe_passing_variants.txt ---"
+
+STRAT_HELP=$(bash "${REPO_DIR}/scripts/ancestry_stratified_qc.sh" --help 2>&1 || true)
+assert_contains "${STRAT_HELP}" "hwe_passing_variants.txt" "ancestry_stratified_qc.sh help mentions hwe_passing_variants output"
+
+echo ""
+
+# ===============================================================
+# Test 17: HWE-passing variant list intersection logic
+# ===============================================================
+echo "--- Test 17: HWE-passing variant list intersection logic ---"
+
+# Simulate .hardy files from two ancestry groups
+HWE_TEST_DIR="${TMP_DIR}/hwe_intersection"
+mkdir -p "${HWE_TEST_DIR}/EUR/variant_qc" "${HWE_TEST_DIR}/AFR/variant_qc"
+
+# EUR hardy: variants v1, v2 pass HWE (p >> 1e-6); v3 borderline (p = 0.001, still passes)
+cat > "${HWE_TEST_DIR}/EUR/variant_qc/variant_qc.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	v1	A	T	100	200	100	0.5	0.5	0.95
+1	v2	A	T	100	200	100	0.5	0.5	0.80
+1	v3	A	T	100	200	100	0.5	0.5	0.001
+EOF
+
+# AFR hardy: v1, v2 pass HWE; v3 fails (p < 1e-6)
+cat > "${HWE_TEST_DIR}/AFR/variant_qc/variant_qc.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	v1	A	T	100	200	100	0.5	0.5	0.90
+1	v2	A	T	100	200	100	0.5	0.5	0.50
+1	v3	A	T	100	200	100	0.5	0.5	1e-8
+EOF
+
+# Test the intersection logic inline (mirrors ancestry_stratified_qc.sh logic)
+HWE_P_THRESH="1e-6"
+for ANC in EUR AFR; do
+    awk -v thresh="${HWE_P_THRESH}" \
+        'NR>1 { p=$NF+0; if (p >= thresh) print $2 }' \
+        "${HWE_TEST_DIR}/${ANC}/variant_qc/variant_qc.hardy" | sort > "${HWE_TEST_DIR}/${ANC}/variant_qc/hwe_passing_ids.txt"
+done
+
+# Intersect
+cp "${HWE_TEST_DIR}/EUR/variant_qc/hwe_passing_ids.txt" "${HWE_TEST_DIR}/hwe_tmp.txt"
+comm -12 "${HWE_TEST_DIR}/hwe_tmp.txt" "${HWE_TEST_DIR}/AFR/variant_qc/hwe_passing_ids.txt" > "${HWE_TEST_DIR}/hwe_passing_variants.txt"
+
+N_HWE=$(wc -l < "${HWE_TEST_DIR}/hwe_passing_variants.txt" | tr -d ' ')
+assert_eq "${N_HWE}" "2" "HWE intersection: 2 variants pass HWE in both EUR and AFR"
+
+# Check that the correct variants are in the intersection
+assert_contains "$(cat "${HWE_TEST_DIR}/hwe_passing_variants.txt")" "v1" "v1 in HWE-passing intersection"
+assert_contains "$(cat "${HWE_TEST_DIR}/hwe_passing_variants.txt")" "v2" "v2 in HWE-passing intersection"
+
+# v3 fails in AFR so should NOT be in the intersection
+if grep -q "v3" "${HWE_TEST_DIR}/hwe_passing_variants.txt"; then
+    echo "  FAIL: v3 should not be in HWE-passing intersection (fails AFR HWE)"
+    (( FAIL++ )) || true
+else
+    echo "  PASS: v3 correctly excluded from HWE-passing intersection"
+    (( PASS++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 18: Sex check cross-tabulation logic
+# ===============================================================
+echo "--- Test 18: Sex check cross-tabulation logic ---"
+
+python3 -c "
+import sys
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from plot_sex_check import cross_tabulate_sex
+
+sample_names = ['S1', 'S2', 'S3', 'S4', 'S5']
+sex_map = {'S1': 'M', 'S2': 'F', 'S3': 'M', 'S4': 'F', 'S5': 'M'}
+chrx_medians = {0: -0.1, 1: 0.03, 2: -0.1, 3: 0.03, 4: -0.1}
+chry_medians = {0: 0.08, 1: -0.07, 2: 0.08, 3: -0.07, 4: 0.08}
+f_stat_results = {
+    'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
+    'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
+    'S3': {'f_stat': 0.10, 'n_het': 400, 'n_called': 1000, 'f_sex': 'F'},  # discordant
+    'S4': {'f_stat': 0.50, 'n_het': 200, 'n_called': 1000, 'f_sex': 'ambiguous'},  # ambiguous
+    'S5': {'f_stat': 0.90, 'n_het': 10, 'n_called': 1000, 'f_sex': 'M'},
+}
+peddy_sex_results = {
+    'S1': {'peddy_sex': 'male', 'error': False},
+    'S2': {'peddy_sex': 'female', 'error': False},
+    'S3': {'peddy_sex': 'male', 'error': True},
+}
+
+rows = cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
+                          f_stat_results, peddy_sex_results)
+
+# Check S1: all agree male → CONCORDANT
+s1 = [r for r in rows if r['sample_id'] == 'S1'][0]
+assert s1['status'] == 'CONCORDANT', f'S1: expected CONCORDANT, got {s1[\"status\"]}'
+
+# Check S3: LRR says M, F says F → DISCORDANT
+s3 = [r for r in rows if r['sample_id'] == 'S3'][0]
+assert s3['status'] == 'DISCORDANT', f'S3: expected DISCORDANT, got {s3[\"status\"]}'
+
+# Check S4: F-stat ambiguous, LRR says F → AMBIGUOUS
+s4 = [r for r in rows if r['sample_id'] == 'S4'][0]
+assert s4['status'] == 'AMBIGUOUS', f'S4: expected AMBIGUOUS, got {s4[\"status\"]}'
+
+print('All cross-tabulation assertions passed')
+" 2>&1
+
+if [[ $? -eq 0 ]]; then
+    echo "  PASS: Sex check cross-tabulation correctly classifies concordant/discordant/ambiguous"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sex check cross-tabulation logic error"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 19: plot_sex_check.py --peddy-sex-check in help
+# ===============================================================
+echo "--- Test 19: plot_sex_check.py --peddy-sex-check in help ---"
+
+SEX_HELP=$(python3 "${REPO_DIR}/scripts/plot_sex_check.py" --help 2>&1 || true)
+assert_contains "${SEX_HELP}" "peddy-sex-check" "plot_sex_check.py help mentions --peddy-sex-check"
+
+echo ""
+
+# ===============================================================
+# Test 20: Sex check table has new columns
+# ===============================================================
+echo "--- Test 20: Sex check table format with F-statistic columns ---"
+
+python3 -c "
+import sys, os, tempfile
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from plot_sex_check import write_sex_check_table
+
+sample_names = ['S1', 'S2']
+sex_map = {'S1': 'M', 'S2': 'F'}
+chrx_medians = {0: -0.1, 1: 0.03}
+chry_medians = {0: 0.08, 1: -0.07}
+f_stat_results = {
+    'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
+    'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
+}
+
+with tempfile.TemporaryDirectory() as td:
+    path = write_sex_check_table(
+        chrx_medians, chry_medians, sample_names, sex_map, td,
+        f_stat_results=f_stat_results)
+    with open(path) as f:
+        header = f.readline().strip()
+    expected_cols = ['sample_id', 'chrx_lrr_median', 'chry_lrr_median',
+                     'computed_gender', 'chrx_f_stat', 'f_sex',
+                     'peddy_sex', 'sex_status']
+    actual_cols = header.split('\t')
+    assert actual_cols == expected_cols, f'Header mismatch: {actual_cols}'
+
+    # Check summary file was created
+    summary = os.path.join(td, 'sex_check_summary.txt')
+    assert os.path.exists(summary), 'sex_check_summary.txt not created'
+
+print('Table format and summary file verified')
+" 2>&1
+
+if [[ $? -eq 0 ]]; then
+    echo "  PASS: Sex check table includes F-statistic and cross-tabulation columns"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Sex check table format incorrect"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
 # ---------------------------------------------------------------
 # Final summary
 # ---------------------------------------------------------------

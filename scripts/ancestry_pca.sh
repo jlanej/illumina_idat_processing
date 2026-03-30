@@ -37,6 +37,11 @@ Options:
   --ld-window INT     LD pruning window in kb (default: 1000)
   --ld-step INT       LD pruning step size (must be 1 for kb windows; default: 1)
   --ld-r2 FLOAT       LD pruning r-squared threshold (default: 0.1)
+  --include-variants FILE
+                      File of variant IDs (one per line) to restrict PCA to.
+                      When provided, only these variants are considered before
+                      further QC filtering.  Typically the HWE-passing variant
+                      list from ancestry-stratified QC (Price et al. 2006).
   --exclude-samples FILE
                       File of sample IDs (one per line) to exclude from PCA
                       training set.  These samples are still projected onto
@@ -65,6 +70,7 @@ LD_WINDOW=1000
 LD_STEP=1
 LD_R2=0.1
 EXCLUDE_SAMPLES=""
+INCLUDE_VARIANTS=""
 THREADS=$(nproc 2>/dev/null || echo 1)
 FORCE="false"
 
@@ -81,6 +87,7 @@ while [[ $# -gt 0 ]]; do
         --ld-step)        LD_STEP="$2"; shift 2 ;;
         --ld-r2)          LD_R2="$2"; shift 2 ;;
         --exclude-samples) EXCLUDE_SAMPLES="$2"; shift 2 ;;
+        --include-variants) INCLUDE_VARIANTS="$2"; shift 2 ;;
         --threads)        THREADS="$2"; shift 2 ;;
         --force)          FORCE="true"; shift ;;
         --help)           usage ;;
@@ -159,6 +166,10 @@ if [[ -n "${EXCLUDE_SAMPLES}" && -s "${EXCLUDE_SAMPLES}" ]]; then
 else
     N_PRE_PCA_EXCLUDE=0
 fi
+if [[ -n "${INCLUDE_VARIANTS}" && -s "${INCLUDE_VARIANTS}" ]]; then
+    N_INCLUDE_VARIANTS=$(wc -l < "${INCLUDE_VARIANTS}" | tr -d ' ')
+    echo "  Include-variants list: ${N_INCLUDE_VARIANTS} variants (${INCLUDE_VARIANTS})"
+fi
 echo ""
 
 # -----------------------------------------------------------------
@@ -217,6 +228,10 @@ PLINK_QC_ARGS=(
 )
 if [[ -n "${PLINK_REMOVE_FILE}" && -s "${PLINK_REMOVE_FILE}" ]]; then
     PLINK_QC_ARGS+=(--remove "${PLINK_REMOVE_FILE}")
+fi
+if [[ -n "${INCLUDE_VARIANTS}" && -s "${INCLUDE_VARIANTS}" ]]; then
+    echo "  Restricting to HWE-passing variant set (${INCLUDE_VARIANTS})"
+    PLINK_QC_ARGS+=(--extract "${INCLUDE_VARIANTS}")
 fi
 
 plink2 "${PLINK_QC_ARGS[@]}" 2>&1 | tail -10
@@ -375,6 +390,10 @@ RUN_DATE=$(date '+%Y-%m-%d %H:%M:%S')
     echo "  Min MAF:                ${MIN_MAF}"
     echo "  Min sample call rate:   ${MIN_CALL_RATE}"
     echo "  LD pruning:             window=${LD_WINDOW}kb step=${LD_STEP} r2=${LD_R2}"
+    if [[ -n "${INCLUDE_VARIANTS}" && -s "${INCLUDE_VARIANTS}" ]]; then
+        echo "  Include-variants list:  ${INCLUDE_VARIANTS}"
+        echo "    (Restricting PCA to ancestry-stratified HWE-passing variants)"
+    fi
     echo ""
     echo "Variant Filtering Cascade:"
     echo "  Input variants:                    ${N_INPUT}"
