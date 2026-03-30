@@ -471,7 +471,8 @@ def compute_summary_stats(qc_rows):
     for metric, col in [
         ('call_rate', 'call_rate'), ('lrr_sd', 'lrr_sd'),
         ('lrr_mean', 'lrr_mean'), ('lrr_median', 'lrr_median'),
-        ('baf_sd', 'baf_sd'), ('het_rate', 'het_rate'),
+        ('baf_mean', 'baf_mean'), ('baf_sd', 'baf_sd'),
+        ('het_rate', 'het_rate'),
     ]:
         vals = [safe_float(r.get(col)) for r in qc_rows]
         vals = [v for v in vals if v is not None]
@@ -900,6 +901,7 @@ def _prepare_sample_json(qc_rows, stats):
             'lrr_sd': _clean(lsd),
             'lrr_mean': _clean(safe_float(r.get('lrr_mean'))),
             'lrr_median': _clean(safe_float(r.get('lrr_median'))),
+            'baf_mean': _clean(safe_float(r.get('baf_mean'))),
             'baf_sd': _clean(bsd),
             'het_rate': _clean(hr),
             'gender': r.get('computed_gender', 'NA'),
@@ -907,6 +909,13 @@ def _prepare_sample_json(qc_rows, stats):
             'fail_reason': ', '.join(fail_reasons) if fail_reasons else '',
             'baf_flag': bsd is not None and bsd > GWAS_THRESHOLDS['baf_sd_max'],
             'het_outlier': het_outlier,
+            # Sex check cross-tabulation fields (NA if not available)
+            'chrx_f_stat': _clean(safe_float(r.get('chrx_f_stat'))),
+            'sex_status': r.get('sex_status', 'NA'),
+            # Pre-PCA exclusion flags
+            'excluded_relatedness': r.get('excluded_relatedness', 'NA'),
+            'excluded_het_outlier': r.get('excluded_het_outlier', 'NA'),
+            'pre_pca_excluded': r.get('pre_pca_excluded', 'NA'),
         })
     return json.dumps(samples)
 
@@ -1086,6 +1095,9 @@ def _prepare_collated_vqc_json(collated_vqc_file):
 
     with open(collated_vqc_file) as f:
         header_line = f.readline().strip()
+        # Skip #-prefixed comment lines (e.g., #tstv_ratio=2.00)
+        while header_line.startswith('#'):
+            header_line = f.readline().strip()
         if not header_line:
             print(
                 f"[diag] Variant QC plots: collated file is empty: {collated_vqc_file}",

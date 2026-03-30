@@ -616,6 +616,15 @@ else
         if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
             STRAT_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
         fi
+        # Pass Ti/Tv stats file explicitly (from variant QC step output)
+        for tstv_candidate in \
+            "${OUTPUT_DIR}/stage2/qc/tstv_stats.txt" \
+            "${OUTPUT_DIR}/stage1/qc/tstv_stats.txt"; do
+            if [[ -f "${tstv_candidate}" ]]; then
+                STRAT_ARGS+=(--tstv-file "${tstv_candidate}")
+                break
+            fi
+        done
         if [[ "${FORCE}" == "true" ]]; then
             STRAT_ARGS+=(--force)
         fi
