@@ -675,9 +675,9 @@ assert_contains "${SEX_HELP}" "peddy-sex-check" "plot_sex_check.py help mentions
 echo ""
 
 # ===============================================================
-# Test 20: Sex check table has new columns
+# Test 20: Sex check table has correct columns
 # ===============================================================
-echo "--- Test 20: Sex check table format with F-statistic columns ---"
+echo "--- Test 20: Sex check table format with cross-tabulation columns ---"
 
 python3 -c "
 import sys, os, tempfile
@@ -688,19 +688,14 @@ sample_names = ['S1', 'S2']
 sex_map = {'S1': 'M', 'S2': 'F'}
 chrx_medians = {0: -0.1, 1: 0.03}
 chry_medians = {0: 0.08, 1: -0.07}
-f_stat_results = {
-    'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
-    'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
-}
 
 with tempfile.TemporaryDirectory() as td:
     path = write_sex_check_table(
-        chrx_medians, chry_medians, sample_names, sex_map, td,
-        f_stat_results=f_stat_results)
+        chrx_medians, chry_medians, sample_names, sex_map, td)
     with open(path) as f:
         header = f.readline().strip()
     expected_cols = ['sample_id', 'chrx_lrr_median', 'chry_lrr_median',
-                     'computed_gender', 'chrx_f_stat',
+                     'computed_gender',
                      'peddy_sex', 'sex_status']
     actual_cols = header.split('\t')
     assert actual_cols == expected_cols, f'Header mismatch: {actual_cols}'
@@ -713,7 +708,7 @@ print('Table format and summary file verified')
 " 2>&1
 
 if [[ $? -eq 0 ]]; then
-    echo "  PASS: Sex check table includes F-statistic and cross-tabulation columns"
+    echo "  PASS: Sex check table includes cross-tabulation columns"
     (( PASS++ )) || true
 else
     echo "  FAIL: Sex check table format incorrect"
@@ -820,53 +815,14 @@ assert_contains "${SEX_HELP}" "--genome" "plot_sex_check.py help mentions --geno
 echo ""
 
 # ===============================================================
-# Test 23: F-stat cache round-trip
+# Test 23: LRR cache round-trip
 # ===============================================================
-echo "--- Test 23: F-stat cache round-trip ---"
+echo "--- Test 23: LRR cache round-trip ---"
 
 python3 -c "
 import sys, os, tempfile
 sys.path.insert(0, '${REPO_DIR}/scripts')
-from plot_sex_check import _write_f_stat_cache, _read_f_stat_cache
 from plot_sex_check import _write_lrr_cache, _read_lrr_cache
-
-# --- F-stat cache: integer n_het/n_called (bcftools fallback) ---
-original = {
-    'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
-    'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
-    'S3': {'f_stat': 0.50, 'n_het': 200, 'n_called': 1000, 'f_sex': 'ambiguous'},
-}
-
-with tempfile.TemporaryDirectory() as td:
-    cache = os.path.join(td, 'cache.tsv')
-    _write_f_stat_cache(cache, original, 'CHM13')
-    loaded = _read_f_stat_cache(cache, expected_genome='CHM13')
-
-    assert loaded is not None, 'Cache should load for matching genome'
-    assert len(loaded) == 3, f'Expected 3 samples, got {len(loaded)}'
-    for name in original:
-        assert name in loaded, f'Missing sample {name}'
-        assert loaded[name]['f_stat'] == original[name]['f_stat'], \
-            f'{name} f_stat mismatch: {loaded[name][\"f_stat\"]} != {original[name][\"f_stat\"]}'
-        assert loaded[name]['f_sex'] == original[name]['f_sex'], \
-            f'{name} f_sex mismatch'
-
-    # Verify genome mismatch returns None (cache invalidation)
-    mismatched = _read_f_stat_cache(cache, expected_genome='GRCh38')
-    assert mismatched is None, 'Cache should return None for genome mismatch'
-
-# --- F-stat cache: None n_het/n_called (plink2 mode) ---
-plink2_data = {
-    'P1': {'f_stat': 0.98, 'n_het': None, 'n_called': None, 'f_sex': 'M'},
-    'P2': {'f_stat': 0.02, 'n_het': None, 'n_called': None, 'f_sex': 'F'},
-}
-with tempfile.TemporaryDirectory() as td:
-    cache = os.path.join(td, 'cache.tsv')
-    _write_f_stat_cache(cache, plink2_data, 'GRCh38')
-    loaded = _read_f_stat_cache(cache, expected_genome='GRCh38')
-    assert loaded is not None
-    assert loaded['P1']['n_het'] is None, 'plink2 n_het should round-trip as None'
-    assert loaded['P1']['n_called'] is None, 'plink2 n_called should round-trip as None'
 
 # --- LRR cache round-trip ---
 medx = {0: -0.1, 1: 0.03, 2: -0.15}
@@ -886,14 +842,14 @@ with tempfile.TemporaryDirectory() as td:
     bad = _read_lrr_cache(cache, expected_genome='GRCh37')
     assert bad is None, 'LRR cache should return None on genome mismatch'
 
-print('F-stat and LRR cache round-trip verified')
+print('LRR cache round-trip verified')
 " 2>&1
 
 if [[ $? -eq 0 ]]; then
-    echo "  PASS: F-stat and LRR caches write, read, invalidate correctly"
+    echo "  PASS: LRR cache writes, reads, and invalidates correctly"
     (( PASS++ )) || true
 else
-    echo "  FAIL: F-stat cache round-trip error"
+    echo "  FAIL: LRR cache round-trip error"
     (( FAIL++ )) || true
 fi
 
@@ -954,43 +910,43 @@ fi
 echo ""
 
 # ===============================================================
-# Test 27: compute_chrx_f_statistic dispatches to plink2 or bcftools
+# Test 27: sex check module does NOT have F-stat functions (removed)
 # ===============================================================
-echo "--- Test 27: F-stat uses plink2 --check-sex when available ---"
+echo "--- Test 27: F-stat functions removed from plot_sex_check ---"
 
 python3 -c "
 import sys
 sys.path.insert(0, '${REPO_DIR}/scripts')
-# Verify the plink2 function and bcftools fallback exist in module
 import plot_sex_check as ps
-assert hasattr(ps, '_compute_f_stat_plink2'), 'Missing _compute_f_stat_plink2'
-assert hasattr(ps, '_compute_f_stat_bcftools'), 'Missing _compute_f_stat_bcftools'
 
-# Verify plink2 function references --check-sex and --sex-check fallback
-import inspect
-src = inspect.getsource(ps._compute_f_stat_plink2)
-assert '--check-sex' in src, 'plink2 function should use --check-sex'
-assert '--sex-check' in src, 'plink2 function should handle --sex-check fallback'
-assert '--exclude-range' in src, 'plink2 function should use --exclude-range'
-assert '.sexcheck' in src, 'plink2 function should parse .sexcheck output'
-assert '--split-par' in src, 'plink2 function should mention --split-par alternative'
+# Verify F-stat functions were removed
+assert not hasattr(ps, 'compute_chrx_f_statistic'), \
+    'compute_chrx_f_statistic should be removed'
+assert not hasattr(ps, '_compute_f_stat_plink2'), \
+    '_compute_f_stat_plink2 should be removed'
+assert not hasattr(ps, '_compute_f_stat_bcftools'), \
+    '_compute_f_stat_bcftools should be removed'
+assert not hasattr(ps, '_write_f_stat_cache'), \
+    '_write_f_stat_cache should be removed'
+assert not hasattr(ps, '_read_f_stat_cache'), \
+    '_read_f_stat_cache should be removed'
 
-# Verify bcftools fallback has a docstring indicating it's a fallback
-assert 'fallback' in ps._compute_f_stat_bcftools.__doc__.lower(), \
-    'bcftools function should be documented as fallback'
+# Verify essential functions still exist
+assert hasattr(ps, 'extract_chrXY_lrr_medians'), \
+    'extract_chrXY_lrr_medians should exist'
+assert hasattr(ps, 'cross_tabulate_sex'), \
+    'cross_tabulate_sex should exist'
+assert hasattr(ps, 'write_sex_check_table'), \
+    'write_sex_check_table should exist'
 
-# Verify dispatcher checks shutil.which
-src_main = inspect.getsource(ps.compute_chrx_f_statistic)
-assert 'shutil.which' in src_main, 'Should check shutil.which for plink2'
-
-print('plink2/bcftools dispatch structure verified')
+print('F-stat functions confirmed removed, essential functions present')
 " 2>&1
 
 if [[ $? -eq 0 ]]; then
-    echo "  PASS: F-stat computation dispatches to plink2 with bcftools fallback"
+    echo "  PASS: F-stat functions removed, essential sex check functions present"
     (( PASS++ )) || true
 else
-    echo "  FAIL: F-stat computation dispatch structure incorrect"
+    echo "  FAIL: Unexpected function presence/absence in plot_sex_check"
     (( FAIL++ )) || true
 fi
 
@@ -1009,10 +965,10 @@ SC	0.970	0.30	0.290
 EOF
 
 cat > "${TMP_DIR}/sex_check.tsv" <<EOF
-sample_id	chrx_lrr_median	chry_lrr_median	computed_gender	chrx_f_stat	peddy_sex	sex_status
-SA	-0.50	-3.00	F	0.05	female	CONCORDANT
-SB	-0.10	-0.50	M	0.95	male	CONCORDANT
-SC	-0.30	-1.50	F	0.40	female	AMBIGUOUS
+sample_id	chrx_lrr_median	chry_lrr_median	computed_gender	peddy_sex	sex_status
+SA	-0.50	-3.00	F	female	CONCORDANT
+SB	-0.10	-0.50	M	male	CONCORDANT
+SC	-0.30	-1.50	F	female	CONCORDANT
 EOF
 
 python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" \
@@ -1024,7 +980,6 @@ python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" \
 CSS_HEADER=$(head -1 "${TMP_DIR}/css_output.tsv")
 assert_contains "${CSS_HEADER}" "chrx_lrr_median" "compiled sheet has chrx_lrr_median column"
 assert_contains "${CSS_HEADER}" "chry_lrr_median" "compiled sheet has chry_lrr_median column"
-assert_contains "${CSS_HEADER}" "chrx_f_stat" "compiled sheet has chrx_f_stat column"
 assert_contains "${CSS_HEADER}" "peddy_sex" "compiled sheet has peddy_sex column"
 assert_contains "${CSS_HEADER}" "sex_status" "compiled sheet has sex_status column"
 
@@ -1032,11 +987,10 @@ assert_contains "${CSS_HEADER}" "sex_status" "compiled sheet has sex_status colu
 SA_ROW=$(grep "^SA" "${TMP_DIR}/css_output.tsv")
 assert_contains "${SA_ROW}" "CONCORDANT" "SA sex_status is CONCORDANT"
 assert_contains "${SA_ROW}" "-0.50" "SA chrx_lrr_median is -0.50"
-assert_contains "${SA_ROW}" "0.05" "SA chrx_f_stat is 0.05"
 
-# Verify values for SC (ambiguous)
+# Verify values for SC
 SC_ROW=$(grep "^SC" "${TMP_DIR}/css_output.tsv")
-assert_contains "${SC_ROW}" "AMBIGUOUS" "SC sex_status is AMBIGUOUS"
+assert_contains "${SC_ROW}" "CONCORDANT" "SC sex_status is CONCORDANT"
 
 echo ""
 
