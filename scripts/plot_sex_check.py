@@ -550,11 +550,12 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
     """Cross-tabulate sex determinations from multiple methods.
 
     For each sample, compare:
-      1. LRR-based sex (from computed_gender in sample QC)
-      2. F-statistic sex (from chrX genotype heterozygosity)
-      3. Peddy sex (if available)
+      1. LRR-based sex (computed_gender from GTC metadata)
+      2. Peddy sex (genotype-based prediction, if available)
 
-    Flag discordances and potential issues.
+    The raw chrX F-statistic is retained as a diagnostic column but is
+    not used as a separate concordance vote because it is redundant with
+    peddy's chrX-heterozygosity-based sex prediction.
 
     Status values:
       CONCORDANT   – ≥2 methods agree on M or F
@@ -576,29 +577,22 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
         lrr_sex = _normalize.get(sex_map.get(name, ''), 'NA')
 
         f_info = f_stat_results.get(name, {})
-        raw_f_sex = f_info.get('f_sex', '')
-        f_sex = _normalize.get(raw_f_sex, 'NA')
         f_stat = f_info.get('f_stat', None)
-        # Display value preserves 'ambiguous' so users can distinguish
-        # an indeterminate F-stat from a missing one (plain 'NA').
-        f_sex_display = raw_f_sex if raw_f_sex else 'NA'
 
         peddy_info = peddy_sex_results.get(name, {})
         peddy_sex = _normalize.get(peddy_info.get('peddy_sex', ''), 'NA')
         peddy_error = peddy_info.get('error', False)
 
-        # Determine concordance
+        # Determine concordance using LRR-based and peddy sex only.
         methods = []
         if lrr_sex in ('M', 'F'):
             methods.append(lrr_sex)
-        if f_sex in ('M', 'F'):
-            methods.append(f_sex)
         if peddy_sex in ('M', 'F'):
             methods.append(peddy_sex)
 
         if len(methods) >= 2 and len(set(methods)) > 1:
             status = 'DISCORDANT'
-        elif raw_f_sex == 'ambiguous':
+        elif f_stat is not None and 0.2 <= f_stat <= 0.8:
             status = 'AMBIGUOUS'
         elif len(methods) >= 2 and len(set(methods)) == 1:
             status = 'CONCORDANT'
@@ -611,7 +605,6 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
             'sample_id': name,
             'lrr_sex': lrr_sex,
             'f_stat': f_stat,
-            'f_sex': f_sex_display,
             'peddy_sex': peddy_sex,
             'peddy_error': peddy_error,
             'status': status,
@@ -727,14 +720,14 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
     table_path = os.path.join(output_dir, 'sex_check_chrXY_lrr.tsv')
     with open(table_path, 'w') as out:
         out.write("sample_id\tchrx_lrr_median\tchry_lrr_median\t"
-                  "computed_gender\tchrx_f_stat\tf_sex\t"
+                  "computed_gender\tchrx_f_stat\t"
                   "peddy_sex\tsex_status\n")
         for row in cross_tab:
             f_val = f'{row["f_stat"]:.6f}' if row['f_stat'] is not None else 'NA'
             chrx = f'{row["chrx_lrr_median"]:.6f}' if row['chrx_lrr_median'] is not None else 'NA'
             chry = f'{row["chry_lrr_median"]:.6f}' if row['chry_lrr_median'] is not None else 'NA'
             out.write(f"{row['sample_id']}\t{chrx}\t{chry}\t"
-                      f"{row['lrr_sex']}\t{f_val}\t{row['f_sex']}\t"
+                      f"{row['lrr_sex']}\t{f_val}\t"
                       f"{row['peddy_sex']}\t{row['status']}\n")
 
     # Write discordance summary
@@ -767,14 +760,13 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
         out.write("Methods used:\n")
         out.write("  1. LRR-based (computed_gender): sex from GTC "
                   "metadata / intensity separation\n")
-        out.write("  2. F-statistic: chrX genotype heterozygosity "
-                  "(F>0.8=M, F<0.2=F, PAR/XTR excluded)\n")
         if peddy_sex_results:
-            out.write("  3. Peddy: Genotype-based sex prediction via "
+            out.write("  2. Peddy: Genotype-based sex prediction via "
                       "peddy\n")
         out.write("\nColumn notes:\n")
-        out.write("  f_sex values: M, F, ambiguous (F in 0.2–0.8), "
-                  "or NA (not computed)\n")
+        out.write("  chrx_f_stat: chrX inbreeding coefficient "
+                  "(F>0.8=M, F<0.2=F, 0.2–0.8=ambiguous, "
+                  "PAR/XTR excluded)\n")
         out.write("\nDiscordant samples may indicate:\n")
         out.write("  - Sex chromosome aneuploidy (e.g. XXY, X0)\n")
         out.write("  - Sample swaps or contamination\n")
@@ -838,10 +830,13 @@ def main():
         args.vcf, sample_names, args.threads,
         genome=args.genome, output_dir=args.output_dir)
     if f_stat_results:
-        n_m = sum(1 for v in f_stat_results.values() if v['f_sex'] == 'M')
-        n_f = sum(1 for v in f_stat_results.values() if v['f_sex'] == 'F')
-        n_a = sum(1 for v in f_stat_results.values() if v['f_sex'] == 'ambiguous')
-        print(f"    F-statistic sex: {n_m} male, {n_f} female, {n_a} ambiguous")
+        n_m = sum(1 for v in f_stat_results.values()
+                  if v['f_stat'] > 0.8)
+        n_f = sum(1 for v in f_stat_results.values()
+                  if v['f_stat'] < 0.2)
+        n_a = sum(1 for v in f_stat_results.values()
+                  if 0.2 <= v['f_stat'] <= 0.8)
+        print(f"    F-statistic: {n_m} male (F>0.8), {n_f} female (F<0.2), {n_a} ambiguous")
     else:
         print("    Warning: Could not compute chrX F-statistic.")
 

@@ -979,9 +979,6 @@ def _prepare_sex_check_json(sex_check_file):
         f_val = safe_float(row.get('chrx_f_stat'))
         if f_val is not None:
             point['chrx_f_stat'] = round(f_val, 6)
-        f_sex = row.get('f_sex', '')
-        if f_sex:
-            point['f_sex'] = f_sex
         peddy_sex = row.get('peddy_sex', '')
         if peddy_sex:
             point['peddy_sex'] = peddy_sex

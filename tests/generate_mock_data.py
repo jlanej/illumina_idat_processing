@@ -296,7 +296,7 @@ def generate_sex_check_data(output_dir, n_samples=30):
     filepath = os.path.join(sex_dir, 'sex_check_chrXY_lrr.tsv')
     with open(filepath, 'w') as f:
         f.write('sample_id\tchrx_lrr_median\tchry_lrr_median\t'
-                'computed_gender\tchrx_f_stat\tf_sex\t'
+                'computed_gender\tchrx_f_stat\t'
                 'peddy_sex\tsex_status\n')
         for i in range(n_samples):
             sid = f"SAMPLE_{i + 1:03d}"
@@ -306,7 +306,6 @@ def generate_sex_check_data(output_dir, n_samples=30):
                 chry = 0.08 + rng.gauss(0, 0.012)
                 sex = 'M'
                 f_stat = 0.95 + rng.gauss(0, 0.02)
-                f_sex = 'M'
                 peddy_sex = 'M'
                 status = 'CONCORDANT'
             else:
@@ -314,12 +313,11 @@ def generate_sex_check_data(output_dir, n_samples=30):
                 chry = -0.07 + rng.gauss(0, 0.012)
                 sex = 'F'
                 f_stat = 0.02 + rng.gauss(0, 0.02)
-                f_sex = 'F'
                 peddy_sex = 'F'
                 status = 'CONCORDANT'
             f_stat = max(0.0, min(1.0, f_stat))
             f.write(f'{sid}\t{chrx:.4f}\t{chry:.4f}\t{sex}\t'
-                    f'{f_stat:.6f}\t{f_sex}\t{peddy_sex}\t{status}\n')
+                    f'{f_stat:.6f}\t{peddy_sex}\t{status}\n')
 
     # Write sex check summary
     summary_path = os.path.join(sex_dir, 'sex_check_summary.txt')
