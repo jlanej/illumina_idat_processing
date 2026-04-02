@@ -641,7 +641,6 @@ if [[ -z "${PED_FILE}" || ! -f "${PED_FILE}" ]]; then
         # Look up the computed_gender column by header name rather than
         # hard-coding a field position so we are resilient to column
         # additions/removals in the QC TSV.
-        local gender_col
         gender_col=$(head -1 "${SAMPLE_QC}" | tr '\t' '\n' \
                      | grep -n '^computed_gender$' | cut -d: -f1)
         if [[ -n "${gender_col}" ]]; then
