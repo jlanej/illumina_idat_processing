@@ -628,6 +628,16 @@ else
         if [[ "${FORCE}" == "true" ]]; then
             STRAT_ARGS+=(--force)
         fi
+        # Pass sample QC and genome for sex chromosome variant QC
+        for sqc_candidate in \
+            "${OUTPUT_DIR}/stage2/qc/stage2_sample_qc.tsv" \
+            "${OUTPUT_DIR}/stage1/qc/stage1_sample_qc.tsv"; do
+            if [[ -f "${sqc_candidate}" ]]; then
+                STRAT_ARGS+=(--sample-qc "${sqc_candidate}")
+                break
+            fi
+        done
+        STRAT_ARGS+=(--genome "${GENOME}")
 
         bash "${SCRIPT_DIR}/ancestry_stratified_qc.sh" "${STRAT_ARGS[@]}" 2>&1 || true
     else

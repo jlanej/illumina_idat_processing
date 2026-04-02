@@ -177,6 +177,9 @@ def main():
     parser.add_argument("--tstv-file", default=None,
                         help="bcftools stats tstv output file for project-level "
                              "Ti/Tv ratio (tstv_stats.txt)")
+    parser.add_argument("--sex-chr-qc-dir", default=None,
+                        help="Directory with sex chromosome variant QC files "
+                             "(chrx_variant_qc.*, chry_variant_qc.*)")
     parser.add_argument("--output", required=True,
                         help="Output collated TSV file")
     args = parser.parse_args()
@@ -207,10 +210,25 @@ def main():
     # Parse project-level Ti/Tv ratio
     tstv_ratio = parse_tstv_file(args.tstv_file)
 
+    # Load sex chromosome variant QC if available
+    chrx_data = {}
+    chry_data = {}
+    if args.sex_chr_qc_dir and os.path.isdir(args.sex_chr_qc_dir):
+        chrx_vmiss = os.path.join(args.sex_chr_qc_dir, 'chrx_variant_qc.vmiss')
+        if os.path.exists(chrx_vmiss):
+            chrx_data = load_variant_qc(args.sex_chr_qc_dir, prefix='chrx_variant_qc')
+            print(f"  chrX variant QC: {len(chrx_data)} variants")
+        chry_vmiss = os.path.join(args.sex_chr_qc_dir, 'chry_variant_qc.vmiss')
+        if os.path.exists(chry_vmiss):
+            chry_data = load_variant_qc(args.sex_chr_qc_dir, prefix='chry_variant_qc')
+            print(f"  chrY variant QC: {len(chry_data)} variants")
+
     # Collect all variant IDs
     all_variants = set(all_data.keys())
     for anc_data in ancestry_data.values():
         all_variants.update(anc_data.keys())
+    all_variants.update(chrx_data.keys())
+    all_variants.update(chry_data.keys())
     all_variants = sorted(all_variants)
 
     if not all_variants:
@@ -246,6 +264,18 @@ def main():
         'all_ancestries_maf_pass',
         'all_ancestries_qc_pass',
     ])
+    # Sex chromosome columns (chrX: HWE is females-only; chrY: males-only)
+    if chrx_data:
+        columns.extend([
+            'chrX_call_rate', 'chrX_hwe_p_females', 'chrX_maf',
+            'chrX_obs_ct', 'chrX_missing_ct',
+            'chrX_hom_a1_ct', 'chrX_het_ct', 'chrX_hom_a2_ct',
+        ])
+    if chry_data:
+        columns.extend([
+            'chrY_call_rate', 'chrY_maf',
+            'chrY_obs_ct', 'chrY_missing_ct',
+        ])
 
     # Write collated output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -302,6 +332,29 @@ def main():
                 ])
             else:
                 row.extend(['NA', 'NA', 'NA', 'NA'])
+
+            # Sex chromosome columns
+            if chrx_data:
+                cx = chrx_data.get(vid, {})
+                row.extend([
+                    cx.get('call_rate', 'NA'),
+                    cx.get('hwe_p', 'NA'),
+                    cx.get('maf', 'NA'),
+                    cx.get('obs_ct', 'NA'),
+                    cx.get('missing_ct', 'NA'),
+                    cx.get('hom_a1_ct', 'NA'),
+                    cx.get('het_ct', 'NA'),
+                    cx.get('hom_a2_ct', 'NA'),
+                ])
+            if chry_data:
+                cy = chry_data.get(vid, {})
+                row.extend([
+                    cy.get('call_rate', 'NA'),
+                    cy.get('maf', 'NA'),
+                    cy.get('obs_ct', 'NA'),
+                    cy.get('missing_ct', 'NA'),
+                ])
+
             f.write('\t'.join(row) + '\n')
 
     print(f"Collated variant QC: {args.output}")

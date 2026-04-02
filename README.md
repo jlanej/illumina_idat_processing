@@ -29,9 +29,10 @@ The pipeline runs in eleven phases:
 
 7. **Ancestry-Stratified QC** *(runs before full-cohort PCA)*: Using peddy's ancestry predictions, the pipeline performs ancestry-stratified variant QC and PCA for each ancestry group meeting a minimum sample threshold (default: 100 samples, configurable via `--min-ancestry-samples`). Pre-PCA excluded samples (related and heterozygosity outliers) are removed from HWE testing and PCA training sets within each ancestry group. For each qualifying ancestry group (e.g., EUR, AFR, EAS):
    - The VCF is subset to samples of that ancestry
-   - **Ancestry-specific variant QC** is computed (missingness, HWE, MAF), avoiding inflated HWE deviation from the Wahlund effect in mixed-ancestry samples (Anderson et al. 2010)
+   - **Ancestry-specific variant QC** is computed on autosomes (missingness, HWE, MAF), avoiding inflated HWE deviation from the Wahlund effect in mixed-ancestry samples (Anderson et al. 2010)
+   - **Sex chromosome variant QC** is computed separately with sex-aware handling (Anderson et al. 2010; Marees et al. 2018): chrX non-PAR HWE is tested on females only (males are hemizygous), missingness and frequency on all samples; chrY metrics are computed on males only. PAR/XTR regions are excluded. Requires `--sample-qc` with `computed_gender` column
    - **Within-ancestry PCA** resolves finer population structure masked by multi-ancestry PCA (Peterson et al. 2019)
-   - All per-ancestry variant QC metrics are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf`, `EUR_obs_ct`, `EUR_missing_ct`, `EUR_hom_a1_ct`, `EUR_het_ct`, `EUR_hom_a2_ct` alongside the full-cohort equivalents; cross-ancestry summary flags (`all_ancestries_call_rate_pass`, `all_ancestries_hwe_pass`, `all_ancestries_maf_pass`, `all_ancestries_qc_pass`) indicate whether each variant passes each metric (and all metrics combined) across every ancestry subset analyzed. If a Ti/Tv statistics file is available, the project-level Ti/Tv ratio is included as a `#tstv_ratio=` header comment
+   - All variant QC metrics — autosomal, per-ancestry, and sex chromosome — are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf`, `chrX_call_rate`, `chrX_hwe_p_females`, `chrX_maf`, `chrY_call_rate`, `chrY_maf` alongside the full-cohort equivalents; cross-ancestry summary flags (`all_ancestries_call_rate_pass`, `all_ancestries_hwe_pass`, `all_ancestries_maf_pass`, `all_ancestries_qc_pass`) indicate whether each variant passes each metric (and all metrics combined) across every ancestry subset analyzed. If a Ti/Tv statistics file is available, the project-level Ti/Tv ratio is included as a `#tstv_ratio=` header comment
    - A **HWE-passing variant list** (`hwe_passing_variants.txt`) is produced: the intersection of variants passing HWE (p ≥ 1e-6) across all ancestry groups. This list is used by the subsequent full-cohort PCA step (Price et al. 2006; Anderson et al. 2010)
    - Ancestry-specific PCs are included in the compiled sample sheet, with `NaN` for samples not of a given ancestry
 
@@ -351,9 +352,16 @@ output/
 ├── ancestry_stratified_qc/          # Ancestry-stratified QC (if peddy ran)
 │   ├── ancestry_assignments.tsv     # Sample-to-ancestry mapping from peddy
 │   ├── collated_variant_qc.tsv      # Unified variant QC across all ancestries
-│   │                                 # (includes genotype counts, missingness,
-│   │                                 #  HWE stats, and Ti/Tv ratio)
+│   │                                 # (autosomal + chrX/chrY, genotype counts,
+│   │                                 #  missingness, HWE stats, and Ti/Tv ratio)
 │   ├── ancestry_stratified_summary.txt # Summary of stratified analyses
+│   ├── sex_chr_qc/                  # Sex chromosome variant QC
+│   │   ├── chrx_variant_qc.vmiss   # chrX non-PAR missingness (all samples)
+│   │   ├── chrx_variant_qc.hardy   # chrX non-PAR HWE (females only)
+│   │   ├── chrx_variant_qc.afreq   # chrX non-PAR allele frequencies
+│   │   ├── chry_variant_qc.vmiss   # chrY missingness (males only)
+│   │   ├── chry_variant_qc.afreq   # chrY allele frequencies (males only)
+│   │   └── sex_chr_variant_qc_summary.txt
 │   ├── EUR/                         # Per-ancestry analysis (example: EUR)
 │   │   ├── samples.txt              # Sample list for this ancestry
 │   │   ├── EUR_subset.bcf           # VCF subset to EUR samples

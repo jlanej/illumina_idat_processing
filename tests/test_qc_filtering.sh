@@ -1212,6 +1212,154 @@ fi
 
 echo ""
 
+# ===============================================================
+# Test 36: compute_sex_chr_variant_qc.sh help and structure
+# ===============================================================
+echo "--- Test 36: compute_sex_chr_variant_qc.sh help and structure ---"
+
+HELP_OUT=$(bash "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh" --help 2>&1 || true)
+if echo "${HELP_OUT}" | grep -q "chrX non-PAR" && \
+   echo "${HELP_OUT}" | grep -q "females" && \
+   echo "${HELP_OUT}" | grep -q "males"; then
+    echo "  PASS: compute_sex_chr_variant_qc.sh help mentions sex-stratified approach"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: help text missing sex-stratified description"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 37: collate_variant_qc.py --sex-chr-qc-dir option
+# ===============================================================
+echo "--- Test 37: collate_variant_qc.py sex chromosome collation ---"
+
+SCQC_TEST_DIR="${TMP_DIR}/sex_chr_qc_test"
+mkdir -p "${SCQC_TEST_DIR}/sex_chr_qc" "${SCQC_TEST_DIR}/auto_qc"
+
+# Create mock autosomal variant QC
+cat > "${SCQC_TEST_DIR}/auto_qc/variant_qc.vmiss" <<'EOF'
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+1	rs1	5	1000	0.005
+1	rs2	10	1000	0.01
+EOF
+
+cat > "${SCQC_TEST_DIR}/auto_qc/variant_qc.hardy" <<'EOF'
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	rs1	A	G	400	500	100	0.5	0.48	0.5
+1	rs2	T	C	300	600	100	0.6	0.5	0.001
+EOF
+
+cat > "${SCQC_TEST_DIR}/auto_qc/variant_qc.afreq" <<'EOF'
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+1	rs1	A	G	0.35	2000
+1	rs2	T	C	0.40	2000
+EOF
+
+# Create mock chrX variant QC
+cat > "${SCQC_TEST_DIR}/sex_chr_qc/chrx_variant_qc.vmiss" <<'EOF'
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	3	500	0.006
+chrX	chrx_v2	20	500	0.04
+EOF
+
+cat > "${SCQC_TEST_DIR}/sex_chr_qc/chrx_variant_qc.hardy" <<'EOF'
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+chrX	chrx_v1	A	G	100	150	50	0.5	0.48	0.8
+chrX	chrx_v2	T	C	80	170	50	0.57	0.5	0.01
+EOF
+
+cat > "${SCQC_TEST_DIR}/sex_chr_qc/chrx_variant_qc.afreq" <<'EOF'
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrX	chrx_v1	A	G	0.42	1000
+chrX	chrx_v2	T	C	0.45	1000
+EOF
+
+# Create mock chrY variant QC (no .hardy for chrY)
+cat > "${SCQC_TEST_DIR}/sex_chr_qc/chry_variant_qc.vmiss" <<'EOF'
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrY	chry_v1	2	250	0.008
+EOF
+
+cat > "${SCQC_TEST_DIR}/sex_chr_qc/chry_variant_qc.afreq" <<'EOF'
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrY	chry_v1	A	G	0.10	500
+EOF
+
+SCQC_OUTPUT="${SCQC_TEST_DIR}/collated.tsv"
+python3 "${REPO_DIR}/scripts/collate_variant_qc.py" \
+    --all-variant-qc-dir "${SCQC_TEST_DIR}/auto_qc" \
+    --sex-chr-qc-dir "${SCQC_TEST_DIR}/sex_chr_qc" \
+    --output "${SCQC_OUTPUT}" 2>&1 | sed 's/^/    /'
+
+SCQC_HEADER=$(head -1 "${SCQC_OUTPUT}")
+assert_contains "${SCQC_HEADER}" "chrX_call_rate" "collated has chrX_call_rate column"
+assert_contains "${SCQC_HEADER}" "chrX_hwe_p_females" "collated has chrX_hwe_p_females column"
+assert_contains "${SCQC_HEADER}" "chrX_maf" "collated has chrX_maf column"
+assert_contains "${SCQC_HEADER}" "chrY_call_rate" "collated has chrY_call_rate column"
+assert_contains "${SCQC_HEADER}" "chrY_maf" "collated has chrY_maf column"
+
+# Verify chrX variant is present
+CHRX_ROW=$(grep "^chrx_v1" "${SCQC_OUTPUT}" || true)
+if [[ -n "${CHRX_ROW}" ]]; then
+    echo "  PASS: chrX variant chrx_v1 present in collated output"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: chrX variant chrx_v1 missing from collated output"
+    (( FAIL++ )) || true
+fi
+
+# Verify chrY variant is present
+CHRY_ROW=$(grep "^chry_v1" "${SCQC_OUTPUT}" || true)
+if [[ -n "${CHRY_ROW}" ]]; then
+    echo "  PASS: chrY variant chry_v1 present in collated output"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: chrY variant chry_v1 missing from collated output"
+    (( FAIL++ )) || true
+fi
+
+# Verify total variant count includes both autosomal and sex chr variants
+N_VARIANTS=$(awk 'NR>1' "${SCQC_OUTPUT}" | wc -l | tr -d ' ')
+assert_eq "${N_VARIANTS}" "5" "collated has 5 total variants (2 auto + 2 chrX + 1 chrY)"
+
+echo ""
+
+# ===============================================================
+# Test 38: ancestry_stratified_qc.sh accepts --sample-qc and --genome
+# ===============================================================
+echo "--- Test 38: ancestry_stratified_qc.sh accepts new args ---"
+
+STRAT_HELP=$(bash "${REPO_DIR}/scripts/ancestry_stratified_qc.sh" --help 2>&1 || true)
+if echo "${STRAT_HELP}" | grep -q "\-\-sample-qc" && \
+   echo "${STRAT_HELP}" | grep -q "\-\-genome"; then
+    echo "  PASS: ancestry_stratified_qc.sh help shows --sample-qc and --genome"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: ancestry_stratified_qc.sh help missing new args"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 39: run_pipeline.sh wires sample-qc and genome to strat QC
+# ===============================================================
+echo "--- Test 39: run_pipeline.sh wires sex chr QC args ---"
+
+PIPELINE_SRC=$(cat "${REPO_DIR}/scripts/run_pipeline.sh")
+if echo "${PIPELINE_SRC}" | grep -q "sample-qc" && \
+   echo "${PIPELINE_SRC}" | grep -q "STRAT_ARGS.*genome"; then
+    echo "  PASS: run_pipeline.sh passes --sample-qc and --genome to ancestry_stratified_qc.sh"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: run_pipeline.sh missing sex chr QC arg wiring"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
 # ---------------------------------------------------------------
 # Final summary
 # ---------------------------------------------------------------
