@@ -612,21 +612,28 @@ import sys
 sys.path.insert(0, '${REPO_DIR}/scripts')
 from plot_sex_check import cross_tabulate_sex
 
-sample_names = ['S1', 'S2', 'S3', 'S4', 'S5']
-sex_map = {'S1': 'M', 'S2': 'F', 'S3': 'M', 'S4': 'F', 'S5': 'M'}
-chrx_medians = {0: -0.1, 1: 0.03, 2: -0.1, 3: 0.03, 4: -0.1}
-chry_medians = {0: 0.08, 1: -0.07, 2: 0.08, 3: -0.07, 4: 0.08}
+sample_names = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7']
+sex_map = {'S1': 'M', 'S2': 'F', 'S3': 'M', 'S4': 'F', 'S5': 'M',
+           'S6': 'F', 'S7': 'U'}
+chrx_medians = {0: -0.1, 1: 0.03, 2: -0.1, 3: 0.03, 4: -0.1, 5: 0.03, 6: 0.01}
+chry_medians = {0: 0.08, 1: -0.07, 2: 0.08, 3: -0.07, 4: 0.08, 5: -0.07, 6: -0.05}
 f_stat_results = {
     'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
     'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
     'S3': {'f_stat': 0.10, 'n_het': 400, 'n_called': 1000, 'f_sex': 'F'},  # discordant
     'S4': {'f_stat': 0.50, 'n_het': 200, 'n_called': 1000, 'f_sex': 'ambiguous'},  # ambiguous
     'S5': {'f_stat': 0.90, 'n_het': 10, 'n_called': 1000, 'f_sex': 'M'},
+    'S6': {'f_stat': 0.08, 'n_het': 440, 'n_called': 1000, 'f_sex': 'F'},
 }
 peddy_sex_results = {
     'S1': {'peddy_sex': 'male', 'error': False},
     'S2': {'peddy_sex': 'female', 'error': False},
     'S3': {'peddy_sex': 'male', 'error': True},
+    # S6: methods agree (lrr=F, f=F, peddy=F), but peddy_error=True
+    # (PED sex may have been wrong/unknown); status should be CONCORDANT
+    'S6': {'peddy_sex': 'female', 'error': True},
+    # S7: only peddy available (lrr=U→NA, no f_stat), peddy_error=True
+    'S7': {'peddy_sex': 'male', 'error': True},
 }
 
 rows = cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
@@ -643,6 +650,18 @@ assert s3['status'] == 'DISCORDANT', f'S3: expected DISCORDANT, got {s3[\"status
 # Check S4: F-stat ambiguous, LRR says F → AMBIGUOUS
 s4 = [r for r in rows if r['sample_id'] == 'S4'][0]
 assert s4['status'] == 'AMBIGUOUS', f'S4: expected AMBIGUOUS, got {s4[\"status\"]}'
+# f_sex display should show 'ambiguous', not 'NA'
+assert s4['f_sex'] == 'ambiguous', f'S4: expected f_sex=ambiguous, got {s4[\"f_sex\"]}'
+
+# Check S6: peddy_error=True but all 3 methods agree F → CONCORDANT (not PEDDY_ERROR)
+s6 = [r for r in rows if r['sample_id'] == 'S6'][0]
+assert s6['status'] == 'CONCORDANT', f'S6: expected CONCORDANT, got {s6[\"status\"]}'
+
+# Check S7: only peddy has M call (lrr=U→NA, no f_stat) → SINGLE_METHOD
+s7 = [r for r in rows if r['sample_id'] == 'S7'][0]
+assert s7['status'] == 'SINGLE_METHOD', f'S7: expected SINGLE_METHOD, got {s7[\"status\"]}'
+# f_sex should be NA when no f_stat data
+assert s7['f_sex'] == 'NA', f'S7: expected f_sex=NA, got {s7[\"f_sex\"]}'
 
 print('All cross-tabulation assertions passed')
 " 2>&1

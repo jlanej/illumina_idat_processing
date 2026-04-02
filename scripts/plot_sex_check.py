@@ -556,6 +556,13 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
 
     Flag discordances and potential issues.
 
+    Status values:
+      CONCORDANT   – ≥2 methods agree on M or F
+      DISCORDANT   – ≥2 methods disagree
+      AMBIGUOUS    – chrX F-statistic in the 0.2–0.8 indeterminate zone
+      SINGLE_METHOD – only 1 method produced a definitive M/F call
+      UNDETERMINED – no method produced a definitive call
+
     Returns list of dicts, one per sample.
     """
     _normalize = {'1': 'M', 'M': 'M', '2': 'F', 'F': 'F',
@@ -569,8 +576,12 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
         lrr_sex = _normalize.get(sex_map.get(name, ''), 'NA')
 
         f_info = f_stat_results.get(name, {})
-        f_sex = _normalize.get(f_info.get('f_sex', ''), 'NA')
+        raw_f_sex = f_info.get('f_sex', '')
+        f_sex = _normalize.get(raw_f_sex, 'NA')
         f_stat = f_info.get('f_stat', None)
+        # Display value preserves 'ambiguous' so users can distinguish
+        # an indeterminate F-stat from a missing one (plain 'NA').
+        f_sex_display = raw_f_sex if raw_f_sex else 'NA'
 
         peddy_info = peddy_sex_results.get(name, {})
         peddy_sex = _normalize.get(peddy_info.get('peddy_sex', ''), 'NA')
@@ -585,15 +596,10 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
         if peddy_sex in ('M', 'F'):
             methods.append(peddy_sex)
 
-        # Check raw f_sex for ambiguous classification
-        raw_f_sex = f_info.get('f_sex', '')
-
         if len(methods) >= 2 and len(set(methods)) > 1:
             status = 'DISCORDANT'
         elif raw_f_sex == 'ambiguous':
             status = 'AMBIGUOUS'
-        elif peddy_error:
-            status = 'PEDDY_ERROR'
         elif len(methods) >= 2 and len(set(methods)) == 1:
             status = 'CONCORDANT'
         elif len(methods) == 1:
@@ -605,7 +611,7 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
             'sample_id': name,
             'lrr_sex': lrr_sex,
             'f_stat': f_stat,
-            'f_sex': f_sex,
+            'f_sex': f_sex_display,
             'peddy_sex': peddy_sex,
             'peddy_error': peddy_error,
             'status': status,
@@ -735,22 +741,40 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
     n_discordant = sum(1 for r in cross_tab if r['status'] == 'DISCORDANT')
     n_ambiguous = sum(1 for r in cross_tab if r['status'] == 'AMBIGUOUS')
     n_concordant = sum(1 for r in cross_tab if r['status'] == 'CONCORDANT')
+    n_single = sum(1 for r in cross_tab if r['status'] == 'SINGLE_METHOD')
+    n_undetermined = sum(1 for r in cross_tab if r['status'] == 'UNDETERMINED')
 
     summary_path = os.path.join(output_dir, 'sex_check_summary.txt')
     with open(summary_path, 'w') as out:
         out.write("Sex Check Cross-Tabulation Summary\n")
         out.write("=" * 50 + "\n\n")
-        out.write(f"Total samples evaluated:  {len(cross_tab)}\n")
-        out.write(f"Concordant (all agree):   {n_concordant}\n")
+        out.write(f"Total samples evaluated:       {len(cross_tab)}\n")
+        out.write(f"Concordant (≥2 methods agree): {n_concordant}\n")
         out.write(f"Discordant (methods disagree): {n_discordant}\n")
-        out.write(f"Ambiguous (F-stat 0.2-0.8):    {n_ambiguous}\n\n")
+        out.write(f"Ambiguous (F-stat 0.2-0.8):    {n_ambiguous}\n")
+        out.write(f"Single method only:            {n_single}\n")
+        out.write(f"Undetermined (no calls):       {n_undetermined}\n\n")
+        out.write("Status definitions:\n")
+        out.write("  CONCORDANT   – ≥2 methods agree on M or F\n")
+        out.write("  DISCORDANT   – ≥2 methods disagree (possible "
+                  "sample swap / aneuploidy)\n")
+        out.write("  AMBIGUOUS    – chrX F-statistic in the 0.2–0.8 "
+                  "indeterminate zone\n")
+        out.write("  SINGLE_METHOD – only 1 method produced a "
+                  "definitive M/F call\n")
+        out.write("  UNDETERMINED – no method produced a definitive "
+                  "call\n\n")
         out.write("Methods used:\n")
-        out.write("  1. LRR-based: Median chrX/chrY LRR intensity separation "
-                  "(PAR/XTR excluded)\n")
+        out.write("  1. LRR-based (computed_gender): sex from GTC "
+                  "metadata / intensity separation\n")
         out.write("  2. F-statistic: chrX genotype heterozygosity "
                   "(F>0.8=M, F<0.2=F, PAR/XTR excluded)\n")
         if peddy_sex_results:
-            out.write("  3. Peddy: Genotype-based sex prediction via peddy\n")
+            out.write("  3. Peddy: Genotype-based sex prediction via "
+                      "peddy\n")
+        out.write("\nColumn notes:\n")
+        out.write("  f_sex values: M, F, ambiguous (F in 0.2–0.8), "
+                  "or NA (not computed)\n")
         out.write("\nDiscordant samples may indicate:\n")
         out.write("  - Sex chromosome aneuploidy (e.g. XXY, X0)\n")
         out.write("  - Sample swaps or contamination\n")
