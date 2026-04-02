@@ -206,7 +206,7 @@ def main():
 
     # Read sex check cross-tabulation if available
     SEX_CHECK_FIELDS = [
-        'chrx_lrr_median', 'chry_lrr_median', 'chrx_f_stat',
+        'chrx_lrr_median', 'chry_lrr_median',
         'peddy_sex', 'sex_status',
     ]
     sex_check_cols = []

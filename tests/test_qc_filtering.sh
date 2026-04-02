@@ -617,14 +617,6 @@ sex_map = {'S1': 'M', 'S2': 'F', 'S3': 'M', 'S4': 'F', 'S5': 'M',
            'S6': 'F', 'S7': 'U'}
 chrx_medians = {0: -0.1, 1: 0.03, 2: -0.1, 3: 0.03, 4: -0.1, 5: 0.03, 6: 0.01}
 chry_medians = {0: 0.08, 1: -0.07, 2: 0.08, 3: -0.07, 4: 0.08, 5: -0.07, 6: -0.05}
-f_stat_results = {
-    'S1': {'f_stat': 0.95, 'n_het': 5, 'n_called': 1000, 'f_sex': 'M'},
-    'S2': {'f_stat': 0.05, 'n_het': 450, 'n_called': 1000, 'f_sex': 'F'},
-    'S3': {'f_stat': 0.10, 'n_het': 400, 'n_called': 1000, 'f_sex': 'F'},
-    'S4': {'f_stat': 0.50, 'n_het': 200, 'n_called': 1000, 'f_sex': 'ambiguous'},  # ambiguous
-    'S5': {'f_stat': 0.90, 'n_het': 10, 'n_called': 1000, 'f_sex': 'M'},
-    'S6': {'f_stat': 0.08, 'n_het': 440, 'n_called': 1000, 'f_sex': 'F'},
-}
 peddy_sex_results = {
     'S1': {'peddy_sex': 'male', 'error': False},
     'S2': {'peddy_sex': 'female', 'error': False},
@@ -632,32 +624,30 @@ peddy_sex_results = {
     # S6: methods agree (lrr=F, peddy=F), but peddy_error=True
     # (PED sex may have been wrong/unknown); status should be CONCORDANT
     'S6': {'peddy_sex': 'female', 'error': True},
-    # S7: only peddy available (lrr=U->NA, no f_stat), peddy_error=True
+    # S7: only peddy available (lrr=U->NA), peddy_error=True
     'S7': {'peddy_sex': 'male', 'error': True},
 }
 
 rows = cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
-                          f_stat_results, peddy_sex_results)
+                          peddy_sex_results)
 
 # Check S1: lrr=M, peddy=M -> CONCORDANT
 s1 = [r for r in rows if r['sample_id'] == 'S1'][0]
 assert s1['status'] == 'CONCORDANT', f'S1: expected CONCORDANT, got {s1[\"status\"]}'
 
-# Check S3: lrr=M, peddy=M -> CONCORDANT (f_sex no longer used as vote)
+# Check S3: lrr=M, peddy=M -> CONCORDANT
 s3 = [r for r in rows if r['sample_id'] == 'S3'][0]
 assert s3['status'] == 'CONCORDANT', f'S3: expected CONCORDANT, got {s3[\"status\"]}'
 
-# Check S4: F-stat 0.50 in ambiguous zone -> AMBIGUOUS
+# Check S4: lrr=F, no peddy -> SINGLE_METHOD
 s4 = [r for r in rows if r['sample_id'] == 'S4'][0]
-assert s4['status'] == 'AMBIGUOUS', f'S4: expected AMBIGUOUS, got {s4[\"status\"]}'
-# f_sex should NOT be in row keys (column removed)
-assert 'f_sex' not in s4, f'S4: f_sex should not be in row keys'
+assert s4['status'] == 'SINGLE_METHOD', f'S4: expected SINGLE_METHOD, got {s4[\"status\"]}'
 
 # Check S6: peddy_error=True but lrr=F, peddy=F -> CONCORDANT
 s6 = [r for r in rows if r['sample_id'] == 'S6'][0]
 assert s6['status'] == 'CONCORDANT', f'S6: expected CONCORDANT, got {s6[\"status\"]}'
 
-# Check S7: only peddy has M call (lrr=U->NA, no f_stat) -> SINGLE_METHOD
+# Check S7: only peddy has M call (lrr=U->NA) -> SINGLE_METHOD
 s7 = [r for r in rows if r['sample_id'] == 'S7'][0]
 assert s7['status'] == 'SINGLE_METHOD', f'S7: expected SINGLE_METHOD, got {s7[\"status\"]}'
 

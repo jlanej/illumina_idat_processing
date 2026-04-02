@@ -910,7 +910,6 @@ def _prepare_sample_json(qc_rows, stats):
             'baf_flag': bsd is not None and bsd > GWAS_THRESHOLDS['baf_sd_max'],
             'het_outlier': het_outlier,
             # Sex check cross-tabulation fields (NA if not available)
-            'chrx_f_stat': _clean(safe_float(r.get('chrx_f_stat'))),
             'sex_status': r.get('sex_status', 'NA'),
             # Pre-PCA exclusion flags
             'excluded_relatedness': r.get('excluded_relatedness', 'NA'),
@@ -955,10 +954,7 @@ def _prepare_pca_json(pca_file, qc_rows):
 
 
 def _prepare_sex_check_json(sex_check_file):
-    """Serialize sex check chrX/chrY median LRR data for interactive plotting.
-
-    Includes F-statistic and cross-tabulation status when available.
-    """
+    """Serialize sex check chrX/chrY median LRR data for interactive plotting."""
     if not os.path.exists(sex_check_file):
         return '[]'
 
@@ -975,10 +971,6 @@ def _prepare_sex_check_json(sex_check_file):
             'chrx_lrr_median': round(x, 6),
             'chry_lrr_median': round(y, 6),
         }
-        # Include F-statistic and cross-tabulation columns if present
-        f_val = safe_float(row.get('chrx_f_stat'))
-        if f_val is not None:
-            point['chrx_f_stat'] = round(f_val, 6)
         peddy_sex = row.get('peddy_sex', '')
         if peddy_sex:
             point['peddy_sex'] = peddy_sex

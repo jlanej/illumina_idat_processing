@@ -6,12 +6,9 @@ Generate a scatter plot of median per-sample LRR on chrX vs median per-sample
 LRR on chrY, colored by predicted sex.  This is a standard sex-check
 visualization for genotyping array QC.
 
-Additionally computes X-chromosome F-statistic (genotype-based inbreeding
-coefficient on chrX) for a complementary genotype-based sex determination.
-Males (hemizygous X) have F close to 1.0; females (diploid X) have F close
-to 0.0.  Results from both methods (LRR-based and F-statistic) are
-cross-tabulated with peddy's sex check (when available) to flag discordances,
-potential aneuploidy, sample swaps, or sex mismatches.
+LRR-based sex predictions are cross-tabulated with peddy's sex check
+(when available) to flag discordances, potential aneuploidy, sample swaps,
+or sex mismatches.
 
 Males are expected to have lower chrX LRR (hemizygous) and higher chrY LRR,
 while females should have higher chrX LRR and lower chrY LRR.
@@ -27,10 +24,8 @@ Usage:
 import argparse
 import csv
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 
 # Allow importing par_xtr_regions from the same directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -218,307 +213,6 @@ def _read_lrr_cache(cache_path, expected_genome=None):
     return medians_x, medians_y
 
 
-def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
-                             genome='CHM13', output_dir=None):
-    """Compute X-chromosome inbreeding F-statistic per sample.
-
-    F = 1 - (observed_het / expected_het).  For chrX:
-      - Males (hemizygous): F ≈ 1.0  (very few heterozygous calls)
-      - Females (diploid):  F ≈ 0.0  (normal heterozygosity)
-
-    Thresholds (following plink --check-sex convention):
-      - F > 0.8  → likely male
-      - F < 0.2  → likely female
-      - 0.2 ≤ F ≤ 0.8 → ambiguous (potential aneuploidy or data issue)
-
-    PAR1, PAR2, and XTR regions are excluded so that the F-statistic
-    reflects only non-pseudoautosomal chrX genotypes.
-
-    When plink2 is available it is used for an allele-frequency-aware
-    F-statistic; otherwise a simplified bcftools-based approximation is
-    used as a fallback.
-
-    If a cached result file exists at ``output_dir/chrx_f_stat_cache.tsv``,
-    results are read from cache instead of recomputing.
-
-    Returns dict of sample_name -> {'f_stat': float, 'n_het': int,
-    'n_called': int, 'f_sex': str}.
-    """
-    # Check for cached results (cache includes genome build for invalidation)
-    cache_path = None
-    if output_dir:
-        cache_path = os.path.join(output_dir, 'chrx_f_stat_cache.tsv')
-        if os.path.exists(cache_path):
-            cached = _read_f_stat_cache(cache_path, expected_genome=genome)
-            if cached is not None:
-                return cached
-
-    if shutil.which('plink2'):
-        results = _compute_f_stat_plink2(
-            vcf_file, sample_names, threads, genome, output_dir)
-    else:
-        results = _compute_f_stat_bcftools(
-            vcf_file, sample_names, threads, genome, output_dir)
-
-    # Write cache for reuse within the same run
-    if cache_path and results:
-        _write_f_stat_cache(cache_path, results, genome)
-
-    return results
-
-
-def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
-                           output_dir):
-    """Compute chrX F-statistic via plink2 --check-sex.
-
-    PAR/XTR regions are excluded via ``--exclude-range``.  An alternative
-    approach would be plink2's ``--split-par`` flag, which reclassifies PAR
-    variants as autosomal — but ``--exclude-range`` is more explicit and
-    also handles XTR, which ``--split-par`` does not cover.
-
-    Note: some newer plink2 alpha builds renamed ``--check-sex`` to
-    ``--sex-check``.  We try ``--check-sex`` first (compatible with the
-    Dockerfile-pinned v2.00a6.33 and most stable builds) and fall back to
-    ``--sex-check`` if the first attempt fails with an unrecognized-flag
-    error.
-    """
-    work_dir = tempfile.mkdtemp(prefix='plink2_sexcheck_')
-    try:
-        prefix = os.path.join(work_dir, 'sexcheck')
-        bed_path = _get_par_xtr_bed_path(genome, output_dir)
-        base_cmd = [
-            'plink2', '--bcf', vcf_file,
-            '--allow-extra-chr', '--threads', str(threads),
-            '--exclude-range', bed_path,
-        ]
-
-        # Try --check-sex first; fall back to --sex-check for newer alphas
-        for sex_flag in ['--check-sex', '--sex-check']:
-            cmd = base_cmd + [sex_flag, '0.2', '0.8', '--out', prefix]
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            sexcheck_file = prefix + '.sexcheck'
-            if proc.returncode == 0 and os.path.exists(sexcheck_file):
-                break
-            # If the error is specifically about an unrecognized flag name,
-            # try the next flag variant.  plink2 uses phrases like
-            # "Unrecognized flag" or "Invalid flag" in its error output.
-            stderr_lower = proc.stderr.lower()
-            if 'unrecognized flag' in stderr_lower or \
-               'invalid flag' in stderr_lower:
-                continue
-            # Other error — report and return empty
-            if proc.stderr:
-                print(f"  plink2 failed (rc={proc.returncode}): "
-                      f"{proc.stderr.strip()[:200]}", file=sys.stderr)
-            return {}
-        else:
-            # Neither flag worked
-            if proc.stderr:
-                print(f"  plink2 failed (rc={proc.returncode}): "
-                      f"{proc.stderr.strip()[:200]}", file=sys.stderr)
-            return {}
-
-        # Copy raw .sexcheck to output_dir for diagnostics
-        if output_dir:
-            shutil.copy2(sexcheck_file,
-                         os.path.join(output_dir, 'plink2_sexcheck.tsv'))
-
-        # Parse .sexcheck: columns are #FID IID PEDSEX SNPSEX STATUS F
-        # plink2 may also provide OBS_CT (non-missing genotype count).
-        results = {}
-        sample_set = set(sample_names)
-        with open(sexcheck_file) as f:
-            header = f.readline().strip().split()
-            col_map = {col.lstrip('#'): i for i, col in enumerate(header)}
-            iid_idx = col_map.get('IID', 1)
-            f_idx = col_map.get('F', len(header) - 1)
-            obs_ct_idx = col_map.get('OBS_CT')
-            for line in f:
-                fields = line.strip().split()
-                if len(fields) <= max(iid_idx, f_idx):
-                    continue
-                name = fields[iid_idx]
-                if name not in sample_set:
-                    continue
-                try:
-                    f_stat = float(fields[f_idx])
-                except ValueError:
-                    continue
-                if f_stat > 0.8:
-                    f_sex = 'M'
-                elif f_stat < 0.2:
-                    f_sex = 'F'
-                else:
-                    f_sex = 'ambiguous'
-
-                # Extract OBS_CT if present in the header
-                n_called = None
-                if obs_ct_idx is not None and obs_ct_idx < len(fields):
-                    try:
-                        n_called = int(fields[obs_ct_idx])
-                    except ValueError:
-                        pass
-
-                results[name] = {
-                    'f_stat': round(f_stat, 6),
-                    'n_het': None,
-                    'n_called': n_called,
-                    'f_sex': f_sex,
-                }
-        return results
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
-
-
-def _compute_f_stat_bcftools(vcf_file, sample_names, threads, genome,
-                             output_dir):
-    """Compute chrX F-statistic via bcftools genotype counting (fallback).
-
-    This is a simplified approximation used when plink2 is not available.
-    It estimates F ≈ 1 - 2 * observed_het_rate rather than computing a
-    proper allele-frequency-aware inbreeding coefficient.  The result is
-    less accurate than plink2 --check-sex but sufficient for flagging
-    obvious sex mismatches on genotyping array data.
-    """
-    # Determine chrX contig name
-    try:
-        idx_output = subprocess.run(
-            ['bcftools', 'index', '-s', vcf_file],
-            capture_output=True, text=True
-        )
-        contigs = [line.split('\t')[0]
-                   for line in idx_output.stdout.strip().split('\n') if line]
-    except Exception:
-        contigs = []
-
-    chrom_x = None
-    for candidate in ['chrX', 'X']:
-        if candidate in contigs:
-            chrom_x = candidate
-            break
-    if chrom_x is None:
-        return {}
-
-    # PAR/XTR exclusion BED — always generated so chrX F-stat reflects
-    # only non-PAR/XTR loci.
-    bed_path = _get_par_xtr_bed_path(genome, output_dir)
-    par_xtr_arg = f' -T ^"{bed_path}"'
-
-    # Extract genotypes on chrX (biallelic SNPs only, non-intensity-only)
-    cmd = (
-        f'bcftools view -e "INFO/INTENSITY_ONLY=1" -r {chrom_x}'
-        f'{par_xtr_arg} '
-        f'-v snps -m2 -M2 --threads {threads} "{vcf_file}" 2>/dev/null | '
-        f'bcftools query -f "[%GT\\t]\\n" 2>/dev/null'
-    )
-    try:
-        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        lines = proc.stdout.strip().split('\n')
-    except Exception:
-        return {}
-
-    if not lines or lines == ['']:
-        return {}
-
-    n_samples = len(sample_names)
-    het_counts = [0] * n_samples
-    called_counts = [0] * n_samples
-
-    for line in lines:
-        gts = line.rstrip('\t').split('\t')
-        for i, gt in enumerate(gts):
-            if i >= n_samples:
-                break
-            if gt in ('.', './.', '.|.', ''):
-                continue
-            called_counts[i] += 1
-            # Heterozygous: 0/1, 0|1, 1/0, 1|0
-            alleles = gt.replace('|', '/').split('/')
-            if len(alleles) == 2 and alleles[0] != alleles[1]:
-                het_counts[i] += 1
-
-    # Simplified F-statistic approximation for sex chromosome ploidy.
-    # The standard plink --check-sex computes F = 1 - (obs_het / E[het])
-    # where E[het] is the per-locus expected heterozygosity from allele
-    # frequencies summed across all loci.  This fallback uses a proxy:
-    #   F ≈ 1 - 2 * observed_het_rate
-    # which maps het_rate ∈ [0, 0.5] → F ∈ [1, 0].
-    #   Males (hemizygous, het_rate ≈ 0)    → F ≈ 1.0  (classified M)
-    #   Females (diploid, het_rate ≈ 0.4+)  → F ≈ 0.2  (classified F)
-    # Note: this approximation is less accurate than plink2's allele-
-    # frequency-aware F, particularly for datasets with many low-MAF
-    # variants where expected heterozygosity differs from the uniform
-    # assumption.  Prefer plink2 --check-sex when available.
-    results = {}
-    for i, name in enumerate(sample_names):
-        n_called = called_counts[i]
-        n_het = het_counts[i]
-        if n_called == 0:
-            continue
-        het_rate = n_het / n_called
-        f_stat = 1.0 - (2.0 * het_rate) if het_rate <= 0.5 else 0.0
-
-        if f_stat > 0.8:
-            f_sex = 'M'
-        elif f_stat < 0.2:
-            f_sex = 'F'
-        else:
-            f_sex = 'ambiguous'
-
-        results[name] = {
-            'f_stat': round(f_stat, 6),
-            'n_het': n_het,
-            'n_called': n_called,
-            'f_sex': f_sex,
-        }
-
-    return results
-
-
-def _write_f_stat_cache(cache_path, results, genome='CHM13'):
-    """Write F-statistic results to a TSV cache file."""
-    with open(cache_path, 'w') as f:
-        f.write(f'# genome={genome}\n')
-        f.write('sample_id\tf_stat\tn_het\tn_called\tf_sex\n')
-        for name, info in results.items():
-            n_het = info['n_het'] if info['n_het'] is not None else 'NA'
-            n_called = info['n_called'] if info['n_called'] is not None else 'NA'
-            f.write(f"{name}\t{info['f_stat']}\t{n_het}\t"
-                    f"{n_called}\t{info['f_sex']}\n")
-
-
-def _read_f_stat_cache(cache_path, expected_genome=None):
-    """Read F-statistic results from a TSV cache file.
-
-    Returns None if the cache genome build does not match expected_genome.
-    """
-    results = {}
-    with open(cache_path) as f:
-        first_line = f.readline().strip()
-        if first_line.startswith('# genome='):
-            cached_genome = first_line.split('=', 1)[1]
-            if expected_genome and cached_genome != expected_genome:
-                print(f"  Cache genome mismatch ({cached_genome} vs "
-                      f"{expected_genome}); recomputing.", file=sys.stderr)
-                return None
-            header = f.readline()  # skip header
-        else:
-            header = first_line  # no genome comment; treat as header
-        for lineno, line in enumerate(f, start=3):
-            fields = line.strip().split('\t')
-            if len(fields) < 5:
-                print(f"  Warning: skipping malformed cache line {lineno}: "
-                      f"{line.strip()}", file=sys.stderr)
-                continue
-            results[fields[0]] = {
-                'f_stat': float(fields[1]),
-                'n_het': int(fields[2]) if fields[2] != 'NA' else None,
-                'n_called': int(fields[3]) if fields[3] != 'NA' else None,
-                'f_sex': fields[4],
-            }
-    return results
-
-
 def read_peddy_sex_check(peddy_sex_check_file):
     """Read peddy sex_check.csv and return dict of sample_id -> peddy sex info.
 
@@ -546,21 +240,16 @@ def read_peddy_sex_check(peddy_sex_check_file):
 
 
 def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
-                       f_stat_results, peddy_sex_results):
+                       peddy_sex_results):
     """Cross-tabulate sex determinations from multiple methods.
 
     For each sample, compare:
       1. LRR-based sex (computed_gender from GTC metadata)
       2. Peddy sex (genotype-based prediction, if available)
 
-    The raw chrX F-statistic is retained as a diagnostic column but is
-    not used as a separate concordance vote because it is redundant with
-    peddy's chrX-heterozygosity-based sex prediction.
-
     Status values:
       CONCORDANT   – ≥2 methods agree on M or F
       DISCORDANT   – ≥2 methods disagree
-      AMBIGUOUS    – chrX F-statistic in the 0.2–0.8 indeterminate zone
       SINGLE_METHOD – only 1 method produced a definitive M/F call
       UNDETERMINED – no method produced a definitive call
 
@@ -576,9 +265,6 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
 
         lrr_sex = _normalize.get(sex_map.get(name, ''), 'NA')
 
-        f_info = f_stat_results.get(name, {})
-        f_stat = f_info.get('f_stat', None)
-
         peddy_info = peddy_sex_results.get(name, {})
         peddy_sex = _normalize.get(peddy_info.get('peddy_sex', ''), 'NA')
         peddy_error = peddy_info.get('error', False)
@@ -592,8 +278,6 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
 
         if len(methods) >= 2 and len(set(methods)) > 1:
             status = 'DISCORDANT'
-        elif f_stat is not None and 0.2 <= f_stat <= 0.8:
-            status = 'AMBIGUOUS'
         elif len(methods) >= 2 and len(set(methods)) == 1:
             status = 'CONCORDANT'
         elif len(methods) == 1:
@@ -604,7 +288,6 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
         rows.append({
             'sample_id': name,
             'lrr_sex': lrr_sex,
-            'f_stat': f_stat,
             'peddy_sex': peddy_sex,
             'peddy_error': peddy_error,
             'status': status,
@@ -700,39 +383,34 @@ def create_sex_check_plot(chrx_medians, chry_medians, sample_names,
 
 
 def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
-                          output_dir, f_stat_results=None,
-                          peddy_sex_results=None):
+                          output_dir, peddy_sex_results=None):
     """Write per-sample sex check table with all available methods.
 
-    Columns include LRR-based, F-statistic, and peddy sex determinations
-    along with a concordance status flag.
+    Columns include LRR-based and peddy sex determinations along with a
+    concordance status flag.
     """
-    if f_stat_results is None:
-        f_stat_results = {}
     if peddy_sex_results is None:
         peddy_sex_results = {}
 
     cross_tab = cross_tabulate_sex(
         sample_names, sex_map, chrx_medians, chry_medians,
-        f_stat_results, peddy_sex_results,
+        peddy_sex_results,
     )
 
     table_path = os.path.join(output_dir, 'sex_check_chrXY_lrr.tsv')
     with open(table_path, 'w') as out:
         out.write("sample_id\tchrx_lrr_median\tchry_lrr_median\t"
-                  "computed_gender\tchrx_f_stat\t"
+                  "computed_gender\t"
                   "peddy_sex\tsex_status\n")
         for row in cross_tab:
-            f_val = f'{row["f_stat"]:.6f}' if row['f_stat'] is not None else 'NA'
             chrx = f'{row["chrx_lrr_median"]:.6f}' if row['chrx_lrr_median'] is not None else 'NA'
             chry = f'{row["chry_lrr_median"]:.6f}' if row['chry_lrr_median'] is not None else 'NA'
             out.write(f"{row['sample_id']}\t{chrx}\t{chry}\t"
-                      f"{row['lrr_sex']}\t{f_val}\t"
+                      f"{row['lrr_sex']}\t"
                       f"{row['peddy_sex']}\t{row['status']}\n")
 
     # Write discordance summary
     n_discordant = sum(1 for r in cross_tab if r['status'] == 'DISCORDANT')
-    n_ambiguous = sum(1 for r in cross_tab if r['status'] == 'AMBIGUOUS')
     n_concordant = sum(1 for r in cross_tab if r['status'] == 'CONCORDANT')
     n_single = sum(1 for r in cross_tab if r['status'] == 'SINGLE_METHOD')
     n_undetermined = sum(1 for r in cross_tab if r['status'] == 'UNDETERMINED')
@@ -744,15 +422,12 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
         out.write(f"Total samples evaluated:       {len(cross_tab)}\n")
         out.write(f"Concordant (≥2 methods agree): {n_concordant}\n")
         out.write(f"Discordant (methods disagree): {n_discordant}\n")
-        out.write(f"Ambiguous (F-stat 0.2-0.8):    {n_ambiguous}\n")
         out.write(f"Single method only:            {n_single}\n")
         out.write(f"Undetermined (no calls):       {n_undetermined}\n\n")
         out.write("Status definitions:\n")
         out.write("  CONCORDANT   – ≥2 methods agree on M or F\n")
         out.write("  DISCORDANT   – ≥2 methods disagree (possible "
                   "sample swap / aneuploidy)\n")
-        out.write("  AMBIGUOUS    – chrX F-statistic in the 0.2–0.8 "
-                  "indeterminate zone\n")
         out.write("  SINGLE_METHOD – only 1 method produced a "
                   "definitive M/F call\n")
         out.write("  UNDETERMINED – no method produced a definitive "
@@ -763,10 +438,6 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
         if peddy_sex_results:
             out.write("  2. Peddy: Genotype-based sex prediction via "
                       "peddy\n")
-        out.write("\nColumn notes:\n")
-        out.write("  chrx_f_stat: chrX inbreeding coefficient "
-                  "(F>0.8=M, F<0.2=F, 0.2–0.8=ambiguous, "
-                  "PAR/XTR excluded)\n")
         out.write("\nDiscordant samples may indicate:\n")
         out.write("  - Sex chromosome aneuploidy (e.g. XXY, X0)\n")
         out.write("  - Sample swaps or contamination\n")
@@ -777,8 +448,8 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate sex check plot and cross-tabulate LRR, "
-                    "F-statistic, and peddy sex determinations"
+        description="Generate sex check plot and cross-tabulate LRR "
+                    "and peddy sex determinations"
     )
     parser.add_argument("--vcf", required=True,
                         help="Input VCF/BCF file with LRR FORMAT field")
@@ -808,10 +479,6 @@ def main():
 
     print("Generating sex check plot...")
     print(f"  Genome build: {args.genome} (PAR/XTR regions excluded from chrX)")
-    if shutil.which('plink2'):
-        print("  Using plink2 --check-sex for allele-frequency-aware F-statistic")
-    else:
-        print("  plink2 not found; using bcftools-based F-statistic approximation")
 
     sample_names = read_sample_names(args.vcf)
     if not sample_names:
@@ -825,21 +492,6 @@ def main():
 
     sex_map = read_predicted_sex(args.sample_qc)
 
-    print("  Computing chrX F-statistic for genotype-based sex check...")
-    f_stat_results = compute_chrx_f_statistic(
-        args.vcf, sample_names, args.threads,
-        genome=args.genome, output_dir=args.output_dir)
-    if f_stat_results:
-        n_m = sum(1 for v in f_stat_results.values()
-                  if v['f_stat'] > 0.8)
-        n_f = sum(1 for v in f_stat_results.values()
-                  if v['f_stat'] < 0.2)
-        n_a = sum(1 for v in f_stat_results.values()
-                  if 0.2 <= v['f_stat'] <= 0.8)
-        print(f"    F-statistic: {n_m} male (F>0.8), {n_f} female (F<0.2), {n_a} ambiguous")
-    else:
-        print("    Warning: Could not compute chrX F-statistic.")
-
     peddy_sex_results = read_peddy_sex_check(args.peddy_sex_check)
     if peddy_sex_results:
         print(f"  Peddy sex check: {len(peddy_sex_results)} samples loaded")
@@ -849,7 +501,6 @@ def main():
     )
     table_path = write_sex_check_table(
         chrx_medians, chry_medians, sample_names, sex_map, args.output_dir,
-        f_stat_results=f_stat_results,
         peddy_sex_results=peddy_sex_results,
     )
 
