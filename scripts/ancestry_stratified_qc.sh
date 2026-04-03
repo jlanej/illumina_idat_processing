@@ -62,8 +62,10 @@ Output files:
   collated_variant_qc.tsv          Unified variant QC across all ancestries
   hwe_passing_variants.txt         Variant IDs passing HWE in all ancestry groups
   ancestry_stratified_summary.txt  Summary of stratified analyses
-  <ANCESTRY>/variant_qc/           Per-ancestry variant QC
+  <ANCESTRY>/variant_qc/           Per-ancestry autosomal variant QC
+  <ANCESTRY>/sex_chr_qc/           Per-ancestry sex-chromosome variant QC
   <ANCESTRY>/pca/                  Per-ancestry PCA projections
+  sex_chr_qc/                      Full-cohort sex-chromosome variant QC
 EOF
     exit 0
 }
@@ -257,6 +259,22 @@ for ANCESTRY in "${ANCESTRIES[@]}"; do
         echo "  ${ANCESTRY} variant QC already exists."
     fi
 
+    # ----- Ancestry-specific sex-chromosome variant QC -----
+    ANC_SEX_CHR_DIR="${ANC_DIR}/sex_chr_qc"
+    if [[ -n "${SAMPLE_QC}" && -f "${SAMPLE_QC}" ]]; then
+        if [[ "${FORCE}" == "true" || ! -d "${ANC_SEX_CHR_DIR}/chrX" ]]; then
+            echo "  Running ancestry-specific sex-chr variant QC for ${ANCESTRY}..."
+            bash "${SCRIPT_DIR}/compute_sex_chr_variant_qc.sh" \
+                --vcf "${ANC_VCF}" \
+                --sample-qc "${SAMPLE_QC}" \
+                --output-dir "${ANC_SEX_CHR_DIR}" \
+                --genome "${GENOME}" \
+                --threads "${THREADS}" 2>&1 | sed 's/^/    /'
+        else
+            echo "  ${ANCESTRY} sex-chr variant QC already exists."
+        fi
+    fi
+
     # ----- Ancestry-specific PCA -----
     # PCA training is on unrelated samples; all ancestry samples are projected
     ANC_PCA_DIR="${ANC_DIR}/pca"
@@ -367,9 +385,14 @@ for ANCESTRY in "${PROCESSED_ANCESTRIES[@]}"; do
     if [[ -d "${ANC_VQC_DIR}" && -f "${ANC_VQC_DIR}/variant_qc.vmiss" ]]; then
         COLLATE_ARGS+=(--ancestry-variant-qc "${ANCESTRY}:${ANC_VQC_DIR}")
     fi
+    # Add per-ancestry sex-chr QC if available
+    ANC_SCQC_DIR="${OUTPUT_DIR}/${ANCESTRY}/sex_chr_qc"
+    if [[ -d "${ANC_SCQC_DIR}" ]]; then
+        COLLATE_ARGS+=(--ancestry-sex-chr-qc "${ANCESTRY}:${ANC_SCQC_DIR}")
+    fi
 done
 
-# Add sex-chromosome QC directory if available
+# Add full-cohort sex-chromosome QC directory if available
 if [[ -d "${SEX_CHR_QC_DIR}" ]]; then
     COLLATE_ARGS+=(--sex-chr-qc-dir "${SEX_CHR_QC_DIR}")
 fi

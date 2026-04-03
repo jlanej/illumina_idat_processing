@@ -1426,7 +1426,7 @@ echo ""
 echo "--- Test 41: Functional F-stat computation with test BCF ---"
 
 TEST_BCF="${REPO_DIR}/tests/data/stage2_reclustered.100.subsample.subset.bcf"
-FSTAT_OUT="${TEST_TMP}/fstat_functional_test"
+FSTAT_OUT="${TMP_DIR}/fstat_functional_test"
 mkdir -p "${FSTAT_OUT}"
 
 if [[ -f "${TEST_BCF}" ]] && command -v plink2 &>/dev/null && command -v bcftools &>/dev/null; then
@@ -1551,21 +1551,202 @@ echo ""
 echo "--- Test 42: plink2 uses --impute-sex and --split-par (not deprecated flags) ---"
 
 # Verify the modern plink2 flags are used and legacy flags removed
-assert_contains "$(cat "${REPO_DIR}/scripts/plot_sex_check.py")" "--impute-sex" \
-    "plot_sex_check.py uses --impute-sex"
-assert_contains "$(cat "${REPO_DIR}/scripts/plot_sex_check.py")" "--split-par" \
-    "plot_sex_check.py uses --split-par"
+if grep -q '\-\-impute-sex' "${REPO_DIR}/scripts/plot_sex_check.py"; then
+    echo "  PASS: plot_sex_check.py uses --impute-sex"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: plot_sex_check.py uses --impute-sex (missing '--impute-sex')"
+    (( FAIL++ )) || true
+fi
+if grep -q '\-\-split-par' "${REPO_DIR}/scripts/plot_sex_check.py"; then
+    echo "  PASS: plot_sex_check.py uses --split-par"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: plot_sex_check.py uses --split-par (missing '--split-par')"
+    (( FAIL++ )) || true
+fi
 
 # Verify compute_sex_chr_variant_qc.sh uses --exclude bed0 (not --exclude-range)
-assert_contains "$(cat "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh")" "--exclude bed0" \
-    "compute_sex_chr_variant_qc.sh uses --exclude bed0"
-if grep -q '\-\-exclude-range' "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh"; then
+# Verify compute_sex_chr_variant_qc.sh uses --exclude bed0 (not --exclude-range)
+if grep -q '\-\-exclude bed0' "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh"; then
+    echo "  PASS: compute_sex_chr_variant_qc.sh uses --exclude bed0"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: compute_sex_chr_variant_qc.sh uses --exclude bed0 (missing)"
+    (( FAIL++ )) || true
+fi
+if grep -v '^#' "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh" | grep -q '\-\-exclude-range'; then
     echo "  FAIL: compute_sex_chr_variant_qc.sh still uses deprecated --exclude-range"
     (( FAIL++ )) || true
 else
     echo "  PASS: compute_sex_chr_variant_qc.sh does not use deprecated --exclude-range"
     (( PASS++ )) || true
 fi
+
+echo ""
+
+# ===============================================================
+# Test 43: collate_variant_qc.py — --ancestry-sex-chr-qc adds per-ancestry columns
+# ===============================================================
+echo "--- Test 43: collate_variant_qc.py ancestry-stratified sex-chr QC ---"
+
+ANCSEX_TEST="${TMP_DIR}/ancsex_collation"
+mkdir -p "${ANCSEX_TEST}/all_vqc"
+mkdir -p "${ANCSEX_TEST}/sex_chr_qc/chrX"
+mkdir -p "${ANCSEX_TEST}/sex_chr_qc/chrY"
+mkdir -p "${ANCSEX_TEST}/EUR_sex_chr/chrX"
+mkdir -p "${ANCSEX_TEST}/EUR_sex_chr/chrY"
+mkdir -p "${ANCSEX_TEST}/AFR_sex_chr/chrX"
+
+# Autosomal variant QC
+cat > "${ANCSEX_TEST}/all_vqc/variant_qc.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+1	auto_v1	5	1000	0.005
+EOF
+cat > "${ANCSEX_TEST}/all_vqc/variant_qc.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	auto_v1	A	T	400	500	100	0.5	0.48	0.60
+EOF
+cat > "${ANCSEX_TEST}/all_vqc/variant_qc.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+1	auto_v1	A	T	0.30	2000
+EOF
+
+# Full-cohort sex-chr QC
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrX/chrX_all.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	10	1000	0.010
+EOF
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrX/chrX_all.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrX	chrx_v1	A	G	0.25	2000
+EOF
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrX/chrX_female.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+chrX	chrx_v1	A	G	150	300	50	0.6	0.48	0.50
+EOF
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrX/chrX_female.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	3	500	0.006
+EOF
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrX/chrX_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	7	500	0.014
+EOF
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrY/chrY_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrY	chry_v1	5	500	0.010
+EOF
+cat > "${ANCSEX_TEST}/sex_chr_qc/chrY/chrY_male.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrY	chry_v1	G	A	0.05	1000
+EOF
+
+# EUR-specific sex-chr QC (chrX + chrY)
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrX/chrX_all.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	4	600	0.00667
+EOF
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrX/chrX_all.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrX	chrx_v1	A	G	0.22	1200
+EOF
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrX/chrX_female.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+chrX	chrx_v1	A	G	90	180	30	0.6	0.48	0.45
+EOF
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrX/chrX_female.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	2	300	0.00667
+EOF
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrX/chrX_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	2	300	0.00667
+EOF
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrY/chrY_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrY	chry_v1	2	300	0.00667
+EOF
+cat > "${ANCSEX_TEST}/EUR_sex_chr/chrY/chrY_male.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrY	chry_v1	G	A	0.04	600
+EOF
+
+# AFR-specific sex-chr QC (chrX only, smaller group has no chrY)
+cat > "${ANCSEX_TEST}/AFR_sex_chr/chrX/chrX_all.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	6	400	0.015
+EOF
+cat > "${ANCSEX_TEST}/AFR_sex_chr/chrX/chrX_all.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrX	chrx_v1	A	G	0.28	800
+EOF
+cat > "${ANCSEX_TEST}/AFR_sex_chr/chrX/chrX_female.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+chrX	chrx_v1	A	G	60	120	20	0.6	0.48	0.55
+EOF
+cat > "${ANCSEX_TEST}/AFR_sex_chr/chrX/chrX_female.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	1	200	0.005
+EOF
+cat > "${ANCSEX_TEST}/AFR_sex_chr/chrX/chrX_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	5	200	0.025
+EOF
+
+# Run collation with per-ancestry sex-chr QC
+python3 "${REPO_DIR}/scripts/collate_variant_qc.py" \
+    --all-variant-qc-dir "${ANCSEX_TEST}/all_vqc" \
+    --sex-chr-qc-dir "${ANCSEX_TEST}/sex_chr_qc" \
+    --ancestry-sex-chr-qc "EUR:${ANCSEX_TEST}/EUR_sex_chr" \
+    --ancestry-sex-chr-qc "AFR:${ANCSEX_TEST}/AFR_sex_chr" \
+    --output "${ANCSEX_TEST}/collated.tsv" > /dev/null
+
+ANCSEX_HEADER=$(grep -v '^#' "${ANCSEX_TEST}/collated.tsv" | head -1)
+
+# Verify per-ancestry sex-chr columns exist
+assert_contains "${ANCSEX_HEADER}" "EUR_chrX_female_hwe_p" \
+    "collation has EUR_chrX_female_hwe_p column"
+assert_contains "${ANCSEX_HEADER}" "EUR_chrX_call_rate" \
+    "collation has EUR_chrX_call_rate column"
+assert_contains "${ANCSEX_HEADER}" "EUR_chrY_male_call_rate" \
+    "collation has EUR_chrY_male_call_rate column"
+assert_contains "${ANCSEX_HEADER}" "AFR_chrX_female_hwe_p" \
+    "collation has AFR_chrX_female_hwe_p column"
+assert_contains "${ANCSEX_HEADER}" "AFR_chrX_male_call_rate" \
+    "collation has AFR_chrX_male_call_rate column"
+
+# Verify EUR chrX female HWE p-value for chrx_v1 = 0.45
+EUR_CHRX_HWE=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_female_hwe_p") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${EUR_CHRX_HWE}" "0.45" "EUR chrX v1 female HWE p = 0.45"
+
+# Verify AFR chrX female HWE p-value for chrx_v1 = 0.55
+AFR_CHRX_HWE=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="AFR_chrX_female_hwe_p") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${AFR_CHRX_HWE}" "0.55" "AFR chrX v1 female HWE p = 0.55"
+
+# Verify EUR chrY male call rate for chry_v1 = 1 - 0.00667 = 0.993330
+EUR_CHRY_MCR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrY_male_call_rate") c=i} /^chry_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${EUR_CHRY_MCR}" "0.993330" "EUR chrY v1 male call rate = 0.993330"
+
+# Verify autosomal variant has NA for per-ancestry sex-chr columns
+AUTO_EUR_CHRX=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_call_rate") c=i} /^auto_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${AUTO_EUR_CHRX}" "NA" "autosomal variant has NA for EUR_chrX_call_rate"
+
+# Verify sex_chr_qc_note header mentions per-ancestry
+ANCSEX_NOTE=$(grep '^#sex_chr_qc_note' "${ANCSEX_TEST}/collated.tsv" || echo "")
+assert_contains "${ANCSEX_NOTE}" "Per-ancestry" \
+    "header note mentions per-ancestry sex-chr QC"
+
+echo ""
+
+# ===============================================================
+# Test 44: ancestry_stratified_qc.sh --help shows per-ancestry sex-chr QC
+# ===============================================================
+echo "--- Test 44: ancestry_stratified_qc.sh help shows per-ancestry sex-chr QC ---"
+
+HELP_ASQ=$(bash "${REPO_DIR}/scripts/ancestry_stratified_qc.sh" --help 2>&1 || true)
+assert_contains "${HELP_ASQ}" "sex_chr_qc" \
+    "ancestry_stratified_qc.sh help mentions sex_chr_qc"
 
 echo ""
 

@@ -108,6 +108,22 @@ The collated output `collated_variant_qc.tsv` includes these sex-chromosome colu
 | `chrY_male_call_rate` | chrY call rate, males only (non-PAR) |
 | `chrY_male_maf` | chrY minor allele frequency, males only |
 
+##### Ancestry-Stratified Sex-Chromosome QC
+
+When ancestry-stratified QC is run, sex-chromosome variant QC is also computed *within each ancestry group*. This is important because allele frequencies and missingness patterns on sex chromosomes can differ across ancestries, and HWE on chrX (females only) is sensitive to population structure just like autosomal HWE. Per-ancestry sex-chr columns are prefixed with the ancestry label:
+
+| Column pattern | Description |
+|----------------|-------------|
+| `{ANC}_chrX_call_rate` | chrX call rate within ancestry group |
+| `{ANC}_chrX_maf` | chrX MAF within ancestry group |
+| `{ANC}_chrX_female_call_rate` | chrX female call rate within ancestry group |
+| `{ANC}_chrX_female_hwe_p` | chrX female HWE p-value within ancestry group |
+| `{ANC}_chrX_male_call_rate` | chrX male call rate within ancestry group |
+| `{ANC}_chrY_male_call_rate` | chrY male call rate within ancestry group |
+| `{ANC}_chrY_male_maf` | chrY male MAF within ancestry group |
+
+For example, `EUR_chrX_female_hwe_p` is the chrX HWE p-value computed on European-ancestry females only.
+
 When ancestry-stratified QC is skipped (e.g., peddy not available), the pipeline runs sex-chromosome QC as a standalone fallback to ensure chrX/chrY variants appear in the collated output.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).

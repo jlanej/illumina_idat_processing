@@ -27,6 +27,8 @@ Usage:
         --ancestry-variant-qc EUR:ancestry_qc/EUR/variant_qc \\
         --ancestry-variant-qc AFR:ancestry_qc/AFR/variant_qc \\
         --sex-chr-qc-dir ancestry_qc/sex_chr_qc \\
+        --ancestry-sex-chr-qc EUR:ancestry_qc/EUR/sex_chr_qc \\
+        --ancestry-sex-chr-qc AFR:ancestry_qc/AFR/sex_chr_qc \\
         --output collated_variant_qc.tsv
 """
 
@@ -283,6 +285,9 @@ def main():
                         help="Directory with sex-chromosome variant QC from "
                              "compute_sex_chr_variant_qc.sh (chrX/ and chrY/ "
                              "subdirectories)")
+    parser.add_argument("--ancestry-sex-chr-qc", action='append', default=[],
+                        help="Ancestry-specific sex-chr QC in format "
+                             "ANCESTRY:DIR (repeatable)")
     parser.add_argument("--output", required=True,
                         help="Output collated TSV file")
     args = parser.parse_args()
@@ -313,7 +318,7 @@ def main():
     # Parse project-level Ti/Tv ratio
     tstv_ratio = parse_tstv_file(args.tstv_file)
 
-    # Load sex-chromosome QC if available
+    # Load full-cohort sex-chromosome QC if available
     sex_chr_data = load_sex_chr_qc(args.sex_chr_qc_dir)
     has_chrx = bool(sex_chr_data.get('chrX'))
     has_chry = bool(sex_chr_data.get('chrY'))
@@ -321,6 +326,22 @@ def main():
         print(f"  chrX variant QC: {len(sex_chr_data['chrX'])} variants")
     if has_chry:
         print(f"  chrY variant QC: {len(sex_chr_data['chrY'])} variants")
+
+    # Load per-ancestry sex-chromosome QC
+    ancestry_sex_chr_data = {}
+    for spec in args.ancestry_sex_chr_qc:
+        if ':' not in spec:
+            print(f"Warning: Invalid ancestry-sex-chr-qc spec "
+                  f"(expected ANCESTRY:DIR): {spec}", file=sys.stderr)
+            continue
+        anc, scqc_dir = spec.split(':', 1)
+        if os.path.isdir(scqc_dir):
+            anc_scqc = load_sex_chr_qc(scqc_dir)
+            if anc_scqc.get('chrX') or anc_scqc.get('chrY'):
+                ancestry_sex_chr_data[anc] = anc_scqc
+                n_x = len(anc_scqc.get('chrX', {}))
+                n_y = len(anc_scqc.get('chrY', {}))
+                print(f"  {anc} chrX: {n_x}, chrY: {n_y} sex-chr variants")
 
     # Collect all variant IDs (autosomes + sex chromosomes)
     all_variants = set(all_data.keys())
@@ -330,6 +351,9 @@ def main():
         all_variants.update(sex_chr_data['chrX'].keys())
     if has_chry:
         all_variants.update(sex_chr_data['chrY'].keys())
+    for anc_scqc in ancestry_sex_chr_data.values():
+        for chrom_data in anc_scqc.values():
+            all_variants.update(chrom_data.keys())
     all_variants = sorted(all_variants)
 
     if not all_variants:
@@ -382,6 +406,29 @@ def main():
         ]
         columns.extend(chry_columns)
 
+    # Per-ancestry sex-chromosome columns
+    # These mirror the full-cohort sex-chr columns but are prefixed with
+    # the ancestry label, e.g. EUR_chrX_female_hwe_p, AFR_chrY_male_maf.
+    anc_sex_chr_sorted = sorted(ancestry_sex_chr_data.keys())
+    anc_chrx_col_defs = {}  # ancestry -> list of column names
+    anc_chry_col_defs = {}
+    for anc in anc_sex_chr_sorted:
+        anc_scqc = ancestry_sex_chr_data[anc]
+        if anc_scqc.get('chrX'):
+            cols = [
+                f'{anc}_chrX_call_rate', f'{anc}_chrX_maf',
+                f'{anc}_chrX_female_call_rate', f'{anc}_chrX_female_hwe_p',
+                f'{anc}_chrX_male_call_rate',
+            ]
+            anc_chrx_col_defs[anc] = cols
+            columns.extend(cols)
+        if anc_scqc.get('chrY'):
+            cols = [
+                f'{anc}_chrY_male_call_rate', f'{anc}_chrY_male_maf',
+            ]
+            anc_chry_col_defs[anc] = cols
+            columns.extend(cols)
+
     # Write collated output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
     with open(args.output, 'w') as f:
@@ -389,12 +436,14 @@ def main():
         if tstv_ratio != 'NA':
             f.write(f'#tstv_ratio={tstv_ratio}\n')
         # Document sex-chromosome QC design decisions in header comments
-        if has_chrx or has_chry:
+        if has_chrx or has_chry or ancestry_sex_chr_data:
             f.write('#sex_chr_qc_note=chrX HWE computed on females only '
                     '(males are hemizygous; diploid HWE is undefined). '
                     'chrX_male_hwe_p is intentionally omitted. '
                     'chrY metrics are computed on males only. '
                     'PAR/XTR regions excluded. '
+                    'Per-ancestry sex-chr columns (e.g. EUR_chrX_female_hwe_p) '
+                    'follow the same conventions within each ancestry subset. '
                     'Ref: Laurie et al. 2012 Genet Epidemiol 36:384-91\n')
         f.write('\t'.join(columns) + '\n')
         for vid in all_variants:
@@ -446,7 +495,7 @@ def main():
             else:
                 row.extend(['NA', 'NA', 'NA', 'NA'])
 
-            # Append sex-chromosome columns
+            # Append sex-chromosome columns (full cohort)
             if has_chrx:
                 chrx_vd = sex_chr_data['chrX'].get(vid, {})
                 for col in chrx_columns:
@@ -455,6 +504,21 @@ def main():
                 chry_vd = sex_chr_data['chrY'].get(vid, {})
                 for col in chry_columns:
                     row.append(chry_vd.get(col, 'NA'))
+
+            # Append per-ancestry sex-chromosome columns
+            for anc in anc_sex_chr_sorted:
+                anc_scqc = ancestry_sex_chr_data[anc]
+                if anc in anc_chrx_col_defs:
+                    chrx_vd = anc_scqc.get('chrX', {}).get(vid, {})
+                    # Map ANC_chrX_foo -> chrX_foo for internal lookup
+                    for col in anc_chrx_col_defs[anc]:
+                        internal_key = col[len(anc) + 1:]  # strip "ANC_"
+                        row.append(chrx_vd.get(internal_key, 'NA'))
+                if anc in anc_chry_col_defs:
+                    chry_vd = anc_scqc.get('chrY', {}).get(vid, {})
+                    for col in anc_chry_col_defs[anc]:
+                        internal_key = col[len(anc) + 1:]
+                        row.append(chry_vd.get(internal_key, 'NA'))
 
             f.write('\t'.join(row) + '\n')
 
