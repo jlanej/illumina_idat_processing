@@ -510,9 +510,9 @@ def main():
                 anc_scqc = ancestry_sex_chr_data[anc]
                 if anc in anc_chrx_col_defs:
                     chrx_vd = anc_scqc.get('chrX', {}).get(vid, {})
-                    # Map ANC_chrX_foo -> chrX_foo for internal lookup
+                    # Map EUR_chrX_foo -> chrX_foo for internal lookup
                     for col in anc_chrx_col_defs[anc]:
-                        internal_key = col[len(anc) + 1:]  # strip "ANC_"
+                        internal_key = col[len(anc) + 1:]  # strip "{anc}_" prefix
                         row.append(chrx_vd.get(internal_key, 'NA'))
                 if anc in anc_chry_col_defs:
                     chry_vd = anc_scqc.get('chrY', {}).get(vid, {})
