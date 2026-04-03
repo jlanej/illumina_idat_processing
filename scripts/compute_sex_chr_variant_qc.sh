@@ -188,8 +188,8 @@ CHRX="${CHR_PREFIX}X"
 CHRY="${CHR_PREFIX}Y"
 
 # Build bcftools target regions for non-PAR chrX and non-PAR chrY.
-# We use plink2 --exclude-range for PAR exclusion (more robust with
-# plink2), but need chr targets for bcftools subsetting.
+# plink2 v2.00a6+ replaced --exclude-range with --exclude bed0.
+# We use --exclude bed0 for PAR/XTR exclusion in variant QC.
 
 # =================================================================
 # chrX variant QC (non-PAR/XTR)
@@ -200,8 +200,8 @@ mkdir -p "${CHRX_DIR}"
 echo ""
 echo "--- chrX Variant QC ---"
 
-# Check if VCF contains chrX variants
-N_CHRX=$(bcftools view -r "${CHRX}" "${FILTERED_VCF}" 2>/dev/null | grep -cv '^#' || echo 0)
+# Check if VCF contains chrX variants (use -H to skip headers efficiently)
+N_CHRX=$(bcftools view -H -r "${CHRX}" "${FILTERED_VCF}" 2>/dev/null | wc -l | tr -d ' ')
 echo "  chrX variants in VCF: ${N_CHRX}"
 
 if [[ "${N_CHRX}" -gt 0 ]]; then
@@ -216,7 +216,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
     plink2 \
         --bcf "${CHRX_VCF}" \
         --allow-extra-chr \
-        --exclude-range "${PAR_BED}" \
+        --exclude bed0 "${PAR_BED}" \
         --threads "${THREADS}" \
         --missing variant-only \
         --freq \
@@ -234,7 +234,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
         plink2 \
             --bcf "${CHRX_VCF}" \
             --allow-extra-chr \
-            --exclude-range "${PAR_BED}" \
+            --exclude bed0 "${PAR_BED}" \
             --keep "${FEMALE_KEEP}" \
             --threads "${THREADS}" \
             --missing variant-only \
@@ -251,7 +251,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
         plink2 \
             --bcf "${CHRX_VCF}" \
             --allow-extra-chr \
-            --exclude-range "${PAR_BED}" \
+            --exclude bed0 "${PAR_BED}" \
             --keep "${MALE_KEEP}" \
             --threads "${THREADS}" \
             --missing variant-only \
@@ -270,7 +270,7 @@ mkdir -p "${CHRY_DIR}"
 echo ""
 echo "--- chrY Variant QC ---"
 
-N_CHRY=$(bcftools view -r "${CHRY}" "${FILTERED_VCF}" 2>/dev/null | grep -cv '^#' || echo 0)
+N_CHRY=$(bcftools view -H -r "${CHRY}" "${FILTERED_VCF}" 2>/dev/null | wc -l | tr -d ' ')
 echo "  chrY variants in VCF: ${N_CHRY}"
 
 if [[ "${N_CHRY}" -gt 0 && "${N_MALES}" -gt 0 ]]; then
@@ -287,7 +287,7 @@ if [[ "${N_CHRY}" -gt 0 && "${N_MALES}" -gt 0 ]]; then
     plink2 \
         --bcf "${CHRY_VCF}" \
         --allow-extra-chr \
-        --exclude-range "${PAR_BED}" \
+        --exclude bed0 "${PAR_BED}" \
         --keep "${MALE_KEEP}" \
         --threads "${THREADS}" \
         --missing variant-only \

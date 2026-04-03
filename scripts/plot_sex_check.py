@@ -102,7 +102,15 @@ def extract_chrXY_lrr_medians(vcf_file, threads=1, genome='CHM13',
             break
 
     if chrom_x is None and chrom_y is None:
+        print("  [diag] F-stat input: No chrX or chrY contigs found in VCF index. "
+              "chrX F-stat and LRR medians will be NA.", file=sys.stderr)
         return {}, {}
+
+    if chrom_x:
+        print(f"  [diag] chrX contig found in VCF: {chrom_x}")
+    else:
+        print("  [diag] No chrX contig found in VCF — chrX F-stat will be NA.",
+              file=sys.stderr)
 
     # Build region string for both chromosomes
     regions = ','.join(c for c in [chrom_x, chrom_y] if c is not None)
@@ -236,7 +244,9 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
 
     When plink2 is available it is used for an allele-frequency-aware
     F-statistic; otherwise a simplified bcftools-based approximation is
-    used as a fallback.
+    used as a fallback.  If plink2 is installed but its ``--check-sex``
+    (or ``--sex-check``) flag fails, the bcftools fallback is also tried
+    before giving up.
 
     If a cached result file exists at ``output_dir/chrx_f_stat_cache.tsv``,
     results are read from cache instead of recomputing.
@@ -253,12 +263,35 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
             if cached is not None:
                 return cached
 
+    # Pre-flight: verify chrX variants exist in VCF before attempting
+    # computation.  This avoids silent failures from plink2/bcftools
+    # when chrX is absent or empty.
+    chrx_contig = _find_chrx_contig(vcf_file)
+    if chrx_contig is None:
+        print("  [diag] No chrX/X contig found in VCF index. "
+              "F-stat will be NA for all samples.", file=sys.stderr)
+        return {}
+
+    results = {}
     if shutil.which('plink2'):
         results = _compute_f_stat_plink2(
             vcf_file, sample_names, threads, genome, output_dir)
+        # Fall back to bcftools if plink2 --check-sex failed (e.g. flag
+        # removed in newer builds, chrX not recognized, etc.)
+        if not results:
+            print("  [diag] plink2 --check-sex returned no results; "
+                  "falling back to bcftools F-stat approximation.",
+                  file=sys.stderr)
+            results = _compute_f_stat_bcftools(
+                vcf_file, sample_names, threads, genome, output_dir)
     else:
         results = _compute_f_stat_bcftools(
             vcf_file, sample_names, threads, genome, output_dir)
+
+    if not results:
+        print("  [diag] F-stat computation returned no results. "
+              "Verify VCF contains chrX variants (non-PAR/XTR) with "
+              "genotype calls.", file=sys.stderr)
 
     # Write cache for reuse within the same run
     if cache_path and results:
@@ -267,56 +300,149 @@ def compute_chrx_f_statistic(vcf_file, sample_names, threads=1,
     return results
 
 
+def _find_chrx_contig(vcf_file):
+    """Return the chrX contig name from VCF index, or None if absent.
+
+    Checks for both 'chrX' and 'X' naming conventions.
+    """
+    try:
+        proc = subprocess.run(
+            ['bcftools', 'index', '-s', vcf_file],
+            capture_output=True, text=True
+        )
+        for line in proc.stdout.strip().split('\n'):
+            if not line:
+                continue
+            contig = line.split('\t')[0]
+            if contig in ('chrX', 'X'):
+                return contig
+    except Exception:
+        pass
+    return None
+
+
 def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
                            output_dir):
-    """Compute chrX F-statistic via plink2 --check-sex.
+    """Compute chrX F-statistic via plink2 --impute-sex.
 
-    PAR/XTR regions are excluded via ``--exclude-range``.  An alternative
-    approach would be plink2's ``--split-par`` flag, which reclassifies PAR
-    variants as autosomal — but ``--exclude-range`` is more explicit and
-    also handles XTR, which ``--split-par`` does not cover.
+    The input BCF is first subset to chrX via bcftools to avoid loading
+    all chromosomes into plink2.  PAR/XTR regions are reclassified as
+    autosomal via ``--split-par`` (plink2 v2.00a6+ requires this instead
+    of the removed ``--exclude-range``).
 
-    Note: some newer plink2 alpha builds renamed ``--check-sex`` to
-    ``--sex-check``.  We try ``--check-sex`` first (compatible with the
-    Dockerfile-pinned v2.00a6.33 and most stable builds) and fall back to
-    ``--sex-check`` if the first attempt fails with an unrecognized-flag
-    error.
+    plink2 v2.00a6+ requires ``--impute-sex`` (not ``--check-sex``)
+    when sex is not already set in the input data — which is always the
+    case for BCF input without a .psam file.  ``--impute-sex`` requires
+    ``--make-pgen`` (or ``--make-bed``).  We use ``--impute-sex`` with
+    default thresholds (which sets min-male-xf=1 / max-female-yrate=0)
+    and apply our own 0.2/0.8 thresholds to the F column in the
+    ``.sexcheck`` output.
+
+    Falls back to legacy ``--check-sex 0.2 0.8`` for older plink2 builds
+    where ``--impute-sex`` is not available.
     """
+    # PAR/XTR split boundaries per genome build.  These cover both PAR
+    # and XTR on chrX, matching the BED definitions in par_xtr_regions.py.
+    _SPLIT_PAR = {
+        'CHM13':  (6400875, 155701382),
+        'GRCh38': (6400000, 155701383),
+        'GRCh37': (6100000, 154931044),
+    }
+    split_par = _SPLIT_PAR.get(genome, _SPLIT_PAR['CHM13'])
+
     work_dir = tempfile.mkdtemp(prefix='plink2_sexcheck_')
     try:
         prefix = os.path.join(work_dir, 'sexcheck')
-        bed_path = _get_par_xtr_bed_path(genome, output_dir)
-        base_cmd = [
-            'plink2', '--bcf', vcf_file,
-            '--allow-extra-chr', '--threads', str(threads),
-            '--exclude-range', bed_path,
-        ]
 
-        # Try --check-sex first; fall back to --sex-check for newer alphas
-        for sex_flag in ['--check-sex', '--sex-check']:
-            cmd = base_cmd + [sex_flag, '0.2', '0.8', '--out', prefix]
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            sexcheck_file = prefix + '.sexcheck'
-            if proc.returncode == 0 and os.path.exists(sexcheck_file):
-                break
-            # If the error is specifically about an unrecognized flag name,
-            # try the next flag variant.  plink2 uses phrases like
-            # "Unrecognized flag" or "Invalid flag" in its error output.
-            stderr_lower = proc.stderr.lower()
+        # Pre-subset to chrX so plink2 only processes sex-chromosome data.
+        chrx_contig = _find_chrx_contig(vcf_file)
+        if chrx_contig is None:
+            print("  [diag] plink2: no chrX contig found in VCF",
+                  file=sys.stderr)
+            return {}
+
+        chrx_bcf = os.path.join(work_dir, 'chrx_only.bcf')
+        subset_cmd = [
+            'bcftools', 'view', '-r', chrx_contig,
+            '-e', 'INFO/INTENSITY_ONLY=1',
+            '--threads', str(threads),
+            '-Ob', '-o', chrx_bcf, vcf_file
+        ]
+        subset_proc = subprocess.run(
+            subset_cmd, capture_output=True, text=True)
+        if subset_proc.returncode != 0:
+            print(f"  [diag] bcftools chrX subset failed: "
+                  f"{subset_proc.stderr.strip()[:200]}", file=sys.stderr)
+            return {}
+
+        # Index the chrX-only BCF
+        subprocess.run(
+            ['bcftools', 'index', chrx_bcf],
+            capture_output=True, text=True)
+
+        # Verify the subset has variants
+        n_chrx = 0
+        try:
+            stat_proc = subprocess.run(
+                ['bcftools', 'index', '-n', chrx_bcf],
+                capture_output=True, text=True)
+            n_chrx = int(stat_proc.stdout.strip()) if stat_proc.stdout.strip() else 0
+        except (ValueError, Exception):
+            pass
+
+        if n_chrx == 0:
+            print("  [diag] chrX BCF subset is empty (0 variants after "
+                  "intensity-only filtering)", file=sys.stderr)
+            return {}
+
+        print(f"  [diag] plink2 chrX input: {n_chrx} variants "
+              f"(contig={chrx_contig})")
+
+        # Modern plink2 (v2.00a6+): --impute-sex + --split-par + --make-pgen
+        # This is the correct approach for BCF input without sex info.
+        cmd = [
+            'plink2', '--bcf', chrx_bcf,
+            '--allow-extra-chr', '--threads', str(threads),
+            '--split-par', str(split_par[0]), str(split_par[1]),
+            '--impute-sex',
+            '--make-pgen',
+            '--out', prefix,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        sexcheck_file = prefix + '.sexcheck'
+
+        if proc.returncode != 0 or not os.path.exists(sexcheck_file):
+            stderr_lower = (proc.stderr or '').lower()
+            # Fall back to legacy --check-sex for older plink2 builds
             if 'unrecognized flag' in stderr_lower or \
                'invalid flag' in stderr_lower:
-                continue
-            # Other error — report and return empty
-            if proc.stderr:
-                print(f"  plink2 failed (rc={proc.returncode}): "
-                      f"{proc.stderr.strip()[:200]}", file=sys.stderr)
-            return {}
-        else:
-            # Neither flag worked
-            if proc.stderr:
-                print(f"  plink2 failed (rc={proc.returncode}): "
-                      f"{proc.stderr.strip()[:200]}", file=sys.stderr)
-            return {}
+                print("  [diag] plink2 --impute-sex not available; "
+                      "trying legacy --check-sex", file=sys.stderr)
+                bed_path = _get_par_xtr_bed_path(genome, output_dir)
+                for sex_flag in ['--check-sex', '--sex-check']:
+                    cmd = [
+                        'plink2', '--bcf', chrx_bcf,
+                        '--allow-extra-chr', '--threads', str(threads),
+                        '--exclude-range', bed_path,
+                        sex_flag, '0.2', '0.8',
+                        '--out', prefix,
+                    ]
+                    proc = subprocess.run(
+                        cmd, capture_output=True, text=True)
+                    if proc.returncode == 0 and \
+                       os.path.exists(sexcheck_file):
+                        break
+                    s = (proc.stderr or '').lower()
+                    if 'unrecognized flag' in s or \
+                       'invalid flag' in s:
+                        continue
+                    break
+
+            if not os.path.exists(sexcheck_file):
+                if proc.stderr:
+                    print(f"  plink2 failed (rc={proc.returncode}): "
+                          f"{proc.stderr.strip()[:200]}", file=sys.stderr)
+                return {}
 
         # Copy raw .sexcheck to output_dir for diagnostics
         if output_dir:

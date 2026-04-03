@@ -31,7 +31,8 @@ The pipeline runs in eleven phases:
    - The VCF is subset to samples of that ancestry
    - **Ancestry-specific variant QC** is computed (missingness, HWE, MAF), avoiding inflated HWE deviation from the Wahlund effect in mixed-ancestry samples (Anderson et al. 2010)
    - **Within-ancestry PCA** resolves finer population structure masked by multi-ancestry PCA (Peterson et al. 2019)
-   - All per-ancestry variant QC metrics are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf`, `EUR_obs_ct`, `EUR_missing_ct`, `EUR_hom_a1_ct`, `EUR_het_ct`, `EUR_hom_a2_ct` alongside the full-cohort equivalents; cross-ancestry summary flags (`all_ancestries_call_rate_pass`, `all_ancestries_hwe_pass`, `all_ancestries_maf_pass`, `all_ancestries_qc_pass`) indicate whether each variant passes each metric (and all metrics combined) across every ancestry subset analyzed. If a Ti/Tv statistics file is available, the project-level Ti/Tv ratio is included as a `#tstv_ratio=` header comment
+   - **Sex-chromosome variant QC** (`compute_sex_chr_variant_qc.sh`) is run when `--sample-qc` is provided, computing sex-aware metrics for chrX and chrY with PAR/XTR exclusion. See [Sex-Chromosome Variant QC](#sex-chromosome-variant-qc) below for details
+   - All per-ancestry variant QC metrics are collated into a single `collated_variant_qc.tsv` file with columns like `EUR_call_rate`, `EUR_hwe_p`, `EUR_maf`, `EUR_obs_ct`, `EUR_missing_ct`, `EUR_hom_a1_ct`, `EUR_het_ct`, `EUR_hom_a2_ct` alongside the full-cohort equivalents; cross-ancestry summary flags (`all_ancestries_call_rate_pass`, `all_ancestries_hwe_pass`, `all_ancestries_maf_pass`, `all_ancestries_qc_pass`) indicate whether each variant passes each metric (and all metrics combined) across every ancestry subset analyzed. When sex-chromosome QC data is available, `chrX_*` and `chrY_*` columns are appended (see below). If a Ti/Tv statistics file is available, the project-level Ti/Tv ratio is included as a `#tstv_ratio=` header comment
    - A **HWE-passing variant list** (`hwe_passing_variants.txt`) is produced: the intersection of variants passing HWE (p ≥ 1e-6) across all ancestry groups. This list is used by the subsequent full-cohort PCA step (Price et al. 2006; Anderson et al. 2010)
    - Ancestry-specific PCs are included in the compiled sample sheet, with `NaN` for samples not of a given ancestry
 
@@ -82,6 +83,32 @@ Region boundaries per genome build are defined in `scripts/par_xtr_regions.py` (
 XTR on chrY is well-defined for CHM13 (from [GIAB genome-stratifications v3.1](https://github.com/genome-in-a-bottle/genome-stratifications)) but not clearly delineated in the reference assemblies for GRCh38/GRCh37 — only PAR1/PAR2 regions are excluded on chrY for those builds.
 
 To add support for a new genome build, add an entry to `_PAR_XTR_REGIONS` in `scripts/par_xtr_regions.py` and a new `case` clause in `get_par_xtr_bed()` in `scripts/utils.sh`. See [CHM13-annotations](https://github.com/marbl/CHM13-annotations) and [GIAB genome stratifications](https://github.com/genome-in-a-bottle/genome-stratifications) for updated boundaries.
+
+#### Sex-Chromosome Variant QC
+
+The `compute_sex_chr_variant_qc.sh` script computes sex-aware variant QC for chrX and chrY, following best practices (Laurie et al. 2012, *Genet Epidemiol* 36:384-91; Anderson et al. 2010; Marees et al. 2018):
+
+- **chrX (non-PAR/XTR)**:
+  - **HWE**: Computed on **females only**. Males are hemizygous for chrX outside PAR, so diploid-based HWE is undefined for males — `chrX_male_hwe_p` is intentionally absent.
+  - **Call rate / missingness**: Reported for all samples (`chrX_call_rate`) and separately per sex (`chrX_female_call_rate`, `chrX_male_call_rate`).
+  - **MAF**: Reported for all samples (`chrX_maf`).
+- **chrY (non-PAR)**:
+  - All metrics computed on **males only** (`chrY_male_call_rate`, `chrY_male_maf`), as females do not carry chrY.
+- **PAR/XTR regions** are excluded from all sex-chromosome QC using the same build-specific BED files used for sex determination.
+
+The collated output `collated_variant_qc.tsv` includes these sex-chromosome columns alongside autosomal metrics. A `#sex_chr_qc_note=...` header comment documents these design decisions for downstream consumers.
+
+| Column | Description |
+|--------|-------------|
+| `chrX_call_rate` | chrX call rate, all samples (non-PAR/XTR) |
+| `chrX_maf` | chrX minor allele frequency, all samples |
+| `chrX_female_call_rate` | chrX call rate, females only |
+| `chrX_female_hwe_p` | chrX HWE p-value, females only (diploid) |
+| `chrX_male_call_rate` | chrX call rate, males only |
+| `chrY_male_call_rate` | chrY call rate, males only (non-PAR) |
+| `chrY_male_maf` | chrY minor allele frequency, males only |
+
+When ancestry-stratified QC is skipped (e.g., peddy not available), the pipeline runs sex-chromosome QC as a standalone fallback to ensure chrX/chrY variants appear in the collated output.
 
 The output VCF (with `GT`, `BAF`, and `LRR` FORMAT fields) is ready for downstream analysis such as phasing with [SHAPEIT5](https://odelaneau.github.io/shapeit5/), mosaic chromosomal alteration detection with [MoChA](https://github.com/freeseek/mocha), or imputation with [IMPUTE5](https://jmarchini.org/software/#impute-5).
 

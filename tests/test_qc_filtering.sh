@@ -1421,28 +1421,150 @@ fi
 echo ""
 
 # ===============================================================
-# Test 41: F-stat is included in sex_check_chrXY_lrr.tsv output
+# Test 41: Functional F-stat test using real BCF with plink2
 # ===============================================================
-echo "--- Test 41: F-stat in sex check TSV output ---"
+echo "--- Test 41: Functional F-stat computation with test BCF ---"
 
-# Verify plot_sex_check.py writes chrx_f_stat column
-FSTAT_CHECK=$(grep -c 'chrx_f_stat' "${REPO_DIR}/scripts/plot_sex_check.py" || echo 0)
-if [[ "${FSTAT_CHECK}" -gt 0 ]]; then
-    echo "  PASS: plot_sex_check.py references chrx_f_stat"
-    (( PASS++ )) || true
+TEST_BCF="${REPO_DIR}/tests/data/stage2_reclustered.100.subsample.subset.bcf"
+FSTAT_OUT="${TEST_TMP}/fstat_functional_test"
+mkdir -p "${FSTAT_OUT}"
+
+if [[ -f "${TEST_BCF}" ]] && command -v plink2 &>/dev/null && command -v bcftools &>/dev/null; then
+    # Index the BCF if needed
+    bcftools index -f "${TEST_BCF}" 2>/dev/null
+
+    # Run the actual F-stat computation
+    FSTAT_RESULT=$(python3 -c "
+import sys, os
+sys.path.insert(0, '${REPO_DIR}/scripts')
+from plot_sex_check import compute_chrx_f_statistic, read_sample_names
+
+vcf = '${TEST_BCF}'
+samples = read_sample_names(vcf)
+results = compute_chrx_f_statistic(vcf, samples, threads=2,
+    genome='CHM13', output_dir='${FSTAT_OUT}')
+n_total = len(results)
+n_m = sum(1 for v in results.values() if v['f_sex'] == 'M')
+n_f = sum(1 for v in results.values() if v['f_sex'] == 'F')
+n_a = sum(1 for v in results.values() if v['f_sex'] == 'ambiguous')
+n_valid = sum(1 for v in results.values() if v['f_stat'] is not None)
+n_na = n_total - n_valid
+# Check first sample has a real float f_stat
+first_f = list(results.values())[0]['f_stat'] if results else None
+print(f'{n_total}\t{n_m}\t{n_f}\t{n_a}\t{n_valid}\t{n_na}\t{first_f}')
+" 2>/dev/null)
+
+    if [[ -n "${FSTAT_RESULT}" ]]; then
+        N_TOTAL=$(echo "${FSTAT_RESULT}" | cut -f1)
+        N_MALE=$(echo "${FSTAT_RESULT}" | cut -f2)
+        N_FEMALE=$(echo "${FSTAT_RESULT}" | cut -f3)
+        N_AMBIG=$(echo "${FSTAT_RESULT}" | cut -f4)
+        N_VALID=$(echo "${FSTAT_RESULT}" | cut -f5)
+        N_NA=$(echo "${FSTAT_RESULT}" | cut -f6)
+        FIRST_F=$(echo "${FSTAT_RESULT}" | cut -f7)
+
+        # Must produce results for all 100 samples
+        if [[ "${N_TOTAL}" -eq 100 ]]; then
+            echo "  PASS: F-stat returned results for all 100 samples"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: Expected 100 F-stat results, got ${N_TOTAL}"
+            (( FAIL++ )) || true
+        fi
+
+        # All results must have valid (non-NA) f_stat values
+        if [[ "${N_VALID}" -eq 100 && "${N_NA}" -eq 0 ]]; then
+            echo "  PASS: All 100 F-stat values are valid (no NAs)"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: ${N_NA} samples have NA f_stat (expected 0)"
+            (( FAIL++ )) || true
+        fi
+
+        # Must identify both males and females (not all ambiguous/same)
+        if [[ "${N_MALE}" -gt 0 && "${N_FEMALE}" -gt 0 ]]; then
+            echo "  PASS: Identified ${N_MALE} males and ${N_FEMALE} females from F-stat"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: Expected both males and females (got M=${N_MALE}, F=${N_FEMALE})"
+            (( FAIL++ )) || true
+        fi
+
+        # F-stat must be a real float (not NA or empty)
+        if [[ "${FIRST_F}" != "None" && "${FIRST_F}" != "NA" && -n "${FIRST_F}" ]]; then
+            echo "  PASS: F-stat values are numeric (first=${FIRST_F})"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: F-stat values are not numeric (first=${FIRST_F})"
+            (( FAIL++ )) || true
+        fi
+
+        # Cache file and plink2 diagnostic output should be written
+        if [[ -f "${FSTAT_OUT}/chrx_f_stat_cache.tsv" ]]; then
+            echo "  PASS: F-stat cache file written"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: F-stat cache file not found"
+            (( FAIL++ )) || true
+        fi
+
+        if [[ -f "${FSTAT_OUT}/plink2_sexcheck.tsv" ]]; then
+            echo "  PASS: plink2 .sexcheck diagnostic file written"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: plink2 .sexcheck diagnostic file not found"
+            (( FAIL++ )) || true
+        fi
+    else
+        echo "  FAIL: F-stat computation returned empty output"
+        (( FAIL++ )) || true
+        # Count this as 6 failures for the 6 sub-assertions above
+        for i in 1 2 3 4 5; do (( FAIL++ )) || true; done
+    fi
 else
-    echo "  FAIL: plot_sex_check.py does not reference chrx_f_stat"
-    (( FAIL++ )) || true
+    echo "  SKIP: plink2 or bcftools not available (or test BCF missing)"
+    echo "  (This test requires both tools — it runs in the Docker container)"
+    # Still pass the code-presence checks as fallback
+    FSTAT_CHECK=$(grep -c 'chrx_f_stat' "${REPO_DIR}/scripts/plot_sex_check.py" || echo 0)
+    if [[ "${FSTAT_CHECK}" -gt 0 ]]; then
+        echo "  PASS: plot_sex_check.py references chrx_f_stat (code check)"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: plot_sex_check.py does not reference chrx_f_stat"
+        (( FAIL++ )) || true
+    fi
+    FSTAT_COMPILE=$(grep -c "'chrx_f_stat'" "${REPO_DIR}/scripts/compile_sample_sheet.py" || echo 0)
+    if [[ "${FSTAT_COMPILE}" -gt 0 ]]; then
+        echo "  PASS: compile_sample_sheet.py includes chrx_f_stat (code check)"
+        (( PASS++ )) || true
+    else
+        echo "  FAIL: compile_sample_sheet.py does not include chrx_f_stat"
+        (( FAIL++ )) || true
+    fi
 fi
 
-# Verify compile_sample_sheet.py includes chrx_f_stat in SEX_CHECK_FIELDS
-FSTAT_COMPILE=$(grep -c "'chrx_f_stat'" "${REPO_DIR}/scripts/compile_sample_sheet.py" || echo 0)
-if [[ "${FSTAT_COMPILE}" -gt 0 ]]; then
-    echo "  PASS: compile_sample_sheet.py includes chrx_f_stat in SEX_CHECK_FIELDS"
-    (( PASS++ )) || true
-else
-    echo "  FAIL: compile_sample_sheet.py does not include chrx_f_stat in SEX_CHECK_FIELDS"
+echo ""
+
+# ===============================================================
+# Test 42: plink2 --impute-sex + --split-par in plot_sex_check.py
+# ===============================================================
+echo "--- Test 42: plink2 uses --impute-sex and --split-par (not deprecated flags) ---"
+
+# Verify the modern plink2 flags are used and legacy flags removed
+assert_contains "$(cat "${REPO_DIR}/scripts/plot_sex_check.py")" "--impute-sex" \
+    "plot_sex_check.py uses --impute-sex"
+assert_contains "$(cat "${REPO_DIR}/scripts/plot_sex_check.py")" "--split-par" \
+    "plot_sex_check.py uses --split-par"
+
+# Verify compute_sex_chr_variant_qc.sh uses --exclude bed0 (not --exclude-range)
+assert_contains "$(cat "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh")" "--exclude bed0" \
+    "compute_sex_chr_variant_qc.sh uses --exclude bed0"
+if grep -q '\-\-exclude-range' "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh"; then
+    echo "  FAIL: compute_sex_chr_variant_qc.sh still uses deprecated --exclude-range"
     (( FAIL++ )) || true
+else
+    echo "  PASS: compute_sex_chr_variant_qc.sh does not use deprecated --exclude-range"
+    (( PASS++ )) || true
 fi
 
 echo ""

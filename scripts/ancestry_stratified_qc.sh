@@ -311,7 +311,10 @@ if [[ -n "${SAMPLE_QC}" && -f "${SAMPLE_QC}" ]]; then
         echo "  Sex-chromosome variant QC already exists."
     fi
 else
-    echo "  Skipping sex-chromosome variant QC (--sample-qc not provided)."
+    echo "  WARNING: Skipping sex-chromosome variant QC." >&2
+    echo "    --sample-qc was not provided or file does not exist." >&2
+    echo "    chrX and chrY variants will be absent from collated_variant_qc.tsv." >&2
+    echo "    To include sex-chr QC, re-run with --sample-qc <sample_qc.tsv>." >&2
 fi
 echo ""
 

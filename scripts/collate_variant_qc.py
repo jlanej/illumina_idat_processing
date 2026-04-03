@@ -388,6 +388,14 @@ def main():
         # Write project-level Ti/Tv as a header comment if available
         if tstv_ratio != 'NA':
             f.write(f'#tstv_ratio={tstv_ratio}\n')
+        # Document sex-chromosome QC design decisions in header comments
+        if has_chrx or has_chry:
+            f.write('#sex_chr_qc_note=chrX HWE computed on females only '
+                    '(males are hemizygous; diploid HWE is undefined). '
+                    'chrX_male_hwe_p is intentionally omitted. '
+                    'chrY metrics are computed on males only. '
+                    'PAR/XTR regions excluded. '
+                    'Ref: Laurie et al. 2012 Genet Epidemiol 36:384-91\n')
         f.write('\t'.join(columns) + '\n')
         for vid in all_variants:
             row = [vid]
