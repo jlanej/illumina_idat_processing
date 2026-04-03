@@ -158,6 +158,18 @@ def load_variant_qc(qc_dir, prefix='variant_qc'):
     return data
 
 
+def _fmiss_to_call_rate(vmiss_row):
+    """Convert a plink2 vmiss row to a formatted call-rate string.
+
+    Returns 'NA' if F_MISS is missing or unparseable.
+    """
+    fmiss = vmiss_row.get('F_MISS', 'NA')
+    try:
+        return f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
+    except (TypeError, ValueError):
+        return 'NA'
+
+
 def load_sex_chr_qc(sex_chr_dir):
     """Load sex-chromosome variant QC from the structured output directory.
 
@@ -204,38 +216,16 @@ def load_sex_chr_qc(sex_chr_dir):
         ))
 
         for vid in all_chrx_ids:
-            # All-sample metrics
-            all_vm = chrx_all_vmiss.get(vid, {})
-            fmiss = all_vm.get('F_MISS', 'NA')
-            try:
-                cr = f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
-            except ValueError:
-                cr = 'NA'
-
-            # Female metrics
-            fem_vm = chrx_female_vmiss.get(vid, {})
-            fem_fmiss = fem_vm.get('F_MISS', 'NA')
-            try:
-                fem_cr = f'{1 - float(fem_fmiss):.6f}' if fem_fmiss != 'NA' else 'NA'
-            except ValueError:
-                fem_cr = 'NA'
-
             fem_hardy = chrx_female_hardy.get(vid, {})
-
-            # Male metrics
-            male_vm = chrx_male_vmiss.get(vid, {})
-            male_fmiss = male_vm.get('F_MISS', 'NA')
-            try:
-                male_cr = f'{1 - float(male_fmiss):.6f}' if male_fmiss != 'NA' else 'NA'
-            except ValueError:
-                male_cr = 'NA'
-
             result['chrX'][vid] = {
-                'chrX_call_rate': cr,
+                'chrX_call_rate': _fmiss_to_call_rate(
+                    chrx_all_vmiss.get(vid, {})),
                 'chrX_maf': chrx_all_afreq.get(vid, 'NA'),
-                'chrX_female_call_rate': fem_cr,
+                'chrX_female_call_rate': _fmiss_to_call_rate(
+                    chrx_female_vmiss.get(vid, {})),
                 'chrX_female_hwe_p': fem_hardy.get('P', 'NA'),
-                'chrX_male_call_rate': male_cr,
+                'chrX_male_call_rate': _fmiss_to_call_rate(
+                    chrx_male_vmiss.get(vid, {})),
             }
 
     # ---- chrY ----
@@ -252,15 +242,9 @@ def load_sex_chr_qc(sex_chr_dir):
         ))
 
         for vid in all_chry_ids:
-            vm = chry_male_vmiss.get(vid, {})
-            fmiss = vm.get('F_MISS', 'NA')
-            try:
-                cr = f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
-            except ValueError:
-                cr = 'NA'
-
             result['chrY'][vid] = {
-                'chrY_male_call_rate': cr,
+                'chrY_male_call_rate': _fmiss_to_call_rate(
+                    chry_male_vmiss.get(vid, {})),
                 'chrY_male_maf': chry_male_afreq.get(vid, 'NA'),
             }
 
