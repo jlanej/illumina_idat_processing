@@ -1252,6 +1252,201 @@ fi
 
 echo ""
 
+# ===============================================================
+# Test 36: compute_sex_chr_variant_qc.sh — --help works
+# ===============================================================
+echo "--- Test 36: compute_sex_chr_variant_qc.sh --help ---"
+
+SEXQC_HELP=$(bash "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh" --help 2>&1) || true
+assert_contains "${SEXQC_HELP}" "sex-aware variant QC" "compute_sex_chr_variant_qc.sh help text present"
+assert_contains "${SEXQC_HELP}" "--sample-qc" "compute_sex_chr_variant_qc.sh help mentions --sample-qc"
+assert_contains "${SEXQC_HELP}" "--genome" "compute_sex_chr_variant_qc.sh help mentions --genome"
+assert_contains "${SEXQC_HELP}" "chrX" "compute_sex_chr_variant_qc.sh help mentions chrX"
+assert_contains "${SEXQC_HELP}" "chrY" "compute_sex_chr_variant_qc.sh help mentions chrY"
+
+echo ""
+
+# ===============================================================
+# Test 37: collate_variant_qc.py — --sex-chr-qc-dir merges chrX/chrY
+# ===============================================================
+echo "--- Test 37: collate_variant_qc.py sex-chr QC collation ---"
+
+SEXCHR_TEST="${TMP_DIR}/sexchr_collation"
+mkdir -p "${SEXCHR_TEST}/all_vqc"
+mkdir -p "${SEXCHR_TEST}/sex_chr_qc/chrX"
+mkdir -p "${SEXCHR_TEST}/sex_chr_qc/chrY"
+
+# Create minimal autosomal variant QC
+cat > "${SEXCHR_TEST}/all_vqc/variant_qc.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+1	auto_v1	5	1000	0.005
+EOF
+
+cat > "${SEXCHR_TEST}/all_vqc/variant_qc.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+1	auto_v1	A	T	400	500	100	0.5	0.48	0.60
+EOF
+
+cat > "${SEXCHR_TEST}/all_vqc/variant_qc.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+1	auto_v1	A	T	0.30	2000
+EOF
+
+# Create chrX variant QC files
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrX/chrX_all.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	10	1000	0.010
+chrX	chrx_v2	20	1000	0.020
+EOF
+
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrX/chrX_all.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrX	chrx_v1	A	G	0.25	2000
+chrX	chrx_v2	C	T	0.40	2000
+EOF
+
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrX/chrX_female.hardy" <<EOF
+#CHROM	ID	A1	AX	HOM_A1_CT	HET_A1_AX_CT	TWO_AX_CT	O(HET_A1_AX)	E(HET_A1_AX)	P
+chrX	chrx_v1	A	G	150	300	50	0.6	0.48	0.50
+chrX	chrx_v2	C	T	100	350	50	0.7	0.48	0.01
+EOF
+
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrX/chrX_female.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	3	500	0.006
+chrX	chrx_v2	8	500	0.016
+EOF
+
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrX/chrX_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrX	chrx_v1	7	500	0.014
+chrX	chrx_v2	12	500	0.024
+EOF
+
+# Create chrY variant QC files
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrY/chrY_male.vmiss" <<EOF
+#CHROM	ID	MISSING_CT	OBS_CT	F_MISS
+chrY	chry_v1	5	500	0.010
+EOF
+
+cat > "${SEXCHR_TEST}/sex_chr_qc/chrY/chrY_male.afreq" <<EOF
+#CHROM	ID	REF	ALT	ALT_FREQS	OBS_CT
+chrY	chry_v1	G	A	0.05	1000
+EOF
+
+# Run collation with sex-chr QC
+python3 "${REPO_DIR}/scripts/collate_variant_qc.py" \
+    --all-variant-qc-dir "${SEXCHR_TEST}/all_vqc" \
+    --sex-chr-qc-dir "${SEXCHR_TEST}/sex_chr_qc" \
+    --output "${SEXCHR_TEST}/collated_sexchr.tsv" > /dev/null
+
+SEXCHR_HEADER=$(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv" | head -1)
+assert_contains "${SEXCHR_HEADER}" "chrX_call_rate" "sex-chr collation has chrX_call_rate"
+assert_contains "${SEXCHR_HEADER}" "chrX_maf" "sex-chr collation has chrX_maf"
+assert_contains "${SEXCHR_HEADER}" "chrX_female_call_rate" "sex-chr collation has chrX_female_call_rate"
+assert_contains "${SEXCHR_HEADER}" "chrX_female_hwe_p" "sex-chr collation has chrX_female_hwe_p"
+assert_contains "${SEXCHR_HEADER}" "chrX_male_call_rate" "sex-chr collation has chrX_male_call_rate"
+assert_contains "${SEXCHR_HEADER}" "chrY_male_call_rate" "sex-chr collation has chrY_male_call_rate"
+assert_contains "${SEXCHR_HEADER}" "chrY_male_maf" "sex-chr collation has chrY_male_maf"
+
+# Verify the output includes chrX variants
+CHRX_COUNT=$(grep -c '^chrx_v' "${SEXCHR_TEST}/collated_sexchr.tsv" || echo 0)
+assert_eq "${CHRX_COUNT}" "2" "collated output contains 2 chrX variants"
+
+# Verify the output includes chrY variants
+CHRY_COUNT=$(grep -c '^chry_v' "${SEXCHR_TEST}/collated_sexchr.tsv" || echo 0)
+assert_eq "${CHRY_COUNT}" "1" "collated output contains 1 chrY variant"
+
+# Verify autosomal variant still present
+AUTO_COUNT=$(grep -c '^auto_v' "${SEXCHR_TEST}/collated_sexchr.tsv" || echo 0)
+assert_eq "${AUTO_COUNT}" "1" "collated output contains 1 autosomal variant"
+
+# Verify chrX female HWE p-value for chrx_v1 = 0.50
+CHRX_V1_HWE=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_female_hwe_p") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRX_V1_HWE}" "0.50" "chrX v1 female HWE p = 0.50"
+
+# Verify chrX female call rate for chrx_v1 = 1 - 0.006 = 0.994000
+CHRX_V1_FCR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_female_call_rate") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRX_V1_FCR}" "0.994000" "chrX v1 female call rate = 0.994000"
+
+# Verify chrX male call rate for chrx_v1 = 1 - 0.014 = 0.986000
+CHRX_V1_MCR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_male_call_rate") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRX_V1_MCR}" "0.986000" "chrX v1 male call rate = 0.986000"
+
+# Verify chrY male call rate for chry_v1 = 1 - 0.010 = 0.990000
+CHRY_V1_MCR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrY_male_call_rate") c=i} /^chry_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRY_V1_MCR}" "0.990000" "chrY v1 male call rate = 0.990000"
+
+# Verify autosomal variant has NA for sex-chr columns
+AUTO_CHRX_CR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_call_rate") c=i} /^auto_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${AUTO_CHRX_CR}" "NA" "autosomal variant has NA for chrX_call_rate"
+
+echo ""
+
+# ===============================================================
+# Test 38: collate_variant_qc.py — --help shows --sex-chr-qc-dir
+# ===============================================================
+echo "--- Test 38: collate_variant_qc.py help shows --sex-chr-qc-dir ---"
+
+CVQ_HELP2=$(python3 "${REPO_DIR}/scripts/collate_variant_qc.py" --help 2>&1) || true
+assert_contains "${CVQ_HELP2}" "sex-chr-qc-dir" "collate_variant_qc.py help mentions --sex-chr-qc-dir"
+
+echo ""
+
+# ===============================================================
+# Test 39: ancestry_stratified_qc.sh --help shows new args
+# ===============================================================
+echo "--- Test 39: ancestry_stratified_qc.sh help shows new args ---"
+
+ASQ_HELP=$(bash "${REPO_DIR}/scripts/ancestry_stratified_qc.sh" --help 2>&1) || true
+assert_contains "${ASQ_HELP}" "--sample-qc" "ancestry_stratified_qc.sh help mentions --sample-qc"
+assert_contains "${ASQ_HELP}" "--genome" "ancestry_stratified_qc.sh help mentions --genome"
+
+echo ""
+
+# ===============================================================
+# Test 40: run_pipeline.sh wires sample-qc and genome to stratified QC
+# ===============================================================
+echo "--- Test 40: run_pipeline.sh wires sample-qc and genome to stratified QC ---"
+
+if grep -q -- '--sample-qc "${FINAL_QC}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
+   grep -q -- '--genome "${GENOME}"' "${REPO_DIR}/scripts/run_pipeline.sh"; then
+    echo "  PASS: run_pipeline.sh passes --sample-qc and --genome to ancestry_stratified_qc.sh"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: run_pipeline.sh missing --sample-qc or --genome for ancestry_stratified_qc.sh"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 41: F-stat is included in sex_check_chrXY_lrr.tsv output
+# ===============================================================
+echo "--- Test 41: F-stat in sex check TSV output ---"
+
+# Verify plot_sex_check.py writes chrx_f_stat column
+FSTAT_CHECK=$(grep -c 'chrx_f_stat' "${REPO_DIR}/scripts/plot_sex_check.py" || echo 0)
+if [[ "${FSTAT_CHECK}" -gt 0 ]]; then
+    echo "  PASS: plot_sex_check.py references chrx_f_stat"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: plot_sex_check.py does not reference chrx_f_stat"
+    (( FAIL++ )) || true
+fi
+
+# Verify compile_sample_sheet.py includes chrx_f_stat in SEX_CHECK_FIELDS
+FSTAT_COMPILE=$(grep -c "'chrx_f_stat'" "${REPO_DIR}/scripts/compile_sample_sheet.py" || echo 0)
+if [[ "${FSTAT_COMPILE}" -gt 0 ]]; then
+    echo "  PASS: compile_sample_sheet.py includes chrx_f_stat in SEX_CHECK_FIELDS"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: compile_sample_sheet.py does not include chrx_f_stat in SEX_CHECK_FIELDS"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
 # ---------------------------------------------------------------
 # Final summary
 # ---------------------------------------------------------------

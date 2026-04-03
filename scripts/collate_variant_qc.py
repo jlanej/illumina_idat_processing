@@ -13,11 +13,20 @@ This enables analysts to compare variant quality across ancestry strata,
 which is essential because HWE tests assume panmixia and can produce
 misleading results in mixed-ancestry samples (Wahlund effect).
 
+When a sex-chromosome QC directory is provided (--sex-chr-qc-dir), chrX
+and chrY variant metrics are also included in the output.  Sex-chromosome
+QC follows best practices (Laurie et al. 2012, Genet Epidemiol 36:384-91):
+  - chrX HWE is computed on females only (diploid genotypes)
+  - chrX call rate / MAF are reported for all samples, plus per-sex
+  - chrY metrics are computed on males only
+  - PAR/XTR regions are excluded
+
 Usage:
     python3 collate_variant_qc.py \\
         --all-variant-qc-dir stage2/qc/variant_qc \\
         --ancestry-variant-qc EUR:ancestry_qc/EUR/variant_qc \\
         --ancestry-variant-qc AFR:ancestry_qc/AFR/variant_qc \\
+        --sex-chr-qc-dir ancestry_qc/sex_chr_qc \\
         --output collated_variant_qc.tsv
 """
 
@@ -149,6 +158,115 @@ def load_variant_qc(qc_dir, prefix='variant_qc'):
     return data
 
 
+def load_sex_chr_qc(sex_chr_dir):
+    """Load sex-chromosome variant QC from the structured output directory.
+
+    Expected layout (produced by compute_sex_chr_variant_qc.sh):
+      sex_chr_dir/chrX/chrX_all.vmiss     - all-sample missingness
+      sex_chr_dir/chrX/chrX_all.afreq     - all-sample allele frequency
+      sex_chr_dir/chrX/chrX_female.hardy   - female-only HWE
+      sex_chr_dir/chrX/chrX_female.vmiss   - female-only missingness
+      sex_chr_dir/chrX/chrX_male.vmiss     - male-only missingness
+      sex_chr_dir/chrY/chrY_male.vmiss     - male-only missingness
+      sex_chr_dir/chrY/chrY_male.afreq     - male-only allele frequency
+
+    Returns a dict with keys 'chrX' and 'chrY', each mapping variant_id
+    to a dict of QC metrics with column-name-ready keys.
+    """
+    result = {'chrX': {}, 'chrY': {}}
+
+    if not sex_chr_dir or not os.path.isdir(sex_chr_dir):
+        return result
+
+    # ---- chrX ----
+    chrx_dir = os.path.join(sex_chr_dir, 'chrX')
+    if os.path.isdir(chrx_dir):
+        # All-sample call rate & MAF
+        chrx_all_vmiss = read_plink2_vmiss(
+            os.path.join(chrx_dir, 'chrX_all.vmiss'))
+        chrx_all_afreq = read_plink2_afreq(
+            os.path.join(chrx_dir, 'chrX_all.afreq'))
+        # Female-only HWE & missingness
+        chrx_female_hardy = read_plink2_hardy(
+            os.path.join(chrx_dir, 'chrX_female.hardy'))
+        chrx_female_vmiss = read_plink2_vmiss(
+            os.path.join(chrx_dir, 'chrX_female.vmiss'))
+        # Male-only missingness
+        chrx_male_vmiss = read_plink2_vmiss(
+            os.path.join(chrx_dir, 'chrX_male.vmiss'))
+
+        all_chrx_ids = sorted(set(
+            list(chrx_all_vmiss.keys()) +
+            list(chrx_all_afreq.keys()) +
+            list(chrx_female_hardy.keys()) +
+            list(chrx_female_vmiss.keys()) +
+            list(chrx_male_vmiss.keys())
+        ))
+
+        for vid in all_chrx_ids:
+            # All-sample metrics
+            all_vm = chrx_all_vmiss.get(vid, {})
+            fmiss = all_vm.get('F_MISS', 'NA')
+            try:
+                cr = f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
+            except ValueError:
+                cr = 'NA'
+
+            # Female metrics
+            fem_vm = chrx_female_vmiss.get(vid, {})
+            fem_fmiss = fem_vm.get('F_MISS', 'NA')
+            try:
+                fem_cr = f'{1 - float(fem_fmiss):.6f}' if fem_fmiss != 'NA' else 'NA'
+            except ValueError:
+                fem_cr = 'NA'
+
+            fem_hardy = chrx_female_hardy.get(vid, {})
+
+            # Male metrics
+            male_vm = chrx_male_vmiss.get(vid, {})
+            male_fmiss = male_vm.get('F_MISS', 'NA')
+            try:
+                male_cr = f'{1 - float(male_fmiss):.6f}' if male_fmiss != 'NA' else 'NA'
+            except ValueError:
+                male_cr = 'NA'
+
+            result['chrX'][vid] = {
+                'chrX_call_rate': cr,
+                'chrX_maf': chrx_all_afreq.get(vid, 'NA'),
+                'chrX_female_call_rate': fem_cr,
+                'chrX_female_hwe_p': fem_hardy.get('P', 'NA'),
+                'chrX_male_call_rate': male_cr,
+            }
+
+    # ---- chrY ----
+    chry_dir = os.path.join(sex_chr_dir, 'chrY')
+    if os.path.isdir(chry_dir):
+        chry_male_vmiss = read_plink2_vmiss(
+            os.path.join(chry_dir, 'chrY_male.vmiss'))
+        chry_male_afreq = read_plink2_afreq(
+            os.path.join(chry_dir, 'chrY_male.afreq'))
+
+        all_chry_ids = sorted(set(
+            list(chry_male_vmiss.keys()) +
+            list(chry_male_afreq.keys())
+        ))
+
+        for vid in all_chry_ids:
+            vm = chry_male_vmiss.get(vid, {})
+            fmiss = vm.get('F_MISS', 'NA')
+            try:
+                cr = f'{1 - float(fmiss):.6f}' if fmiss != 'NA' else 'NA'
+            except ValueError:
+                cr = 'NA'
+
+            result['chrY'][vid] = {
+                'chrY_male_call_rate': cr,
+                'chrY_male_maf': chry_male_afreq.get(vid, 'NA'),
+            }
+
+    return result
+
+
 def parse_tstv_file(filepath):
     """Parse bcftools stats tstv output for project-level Ti/Tv ratio.
 
@@ -177,6 +295,10 @@ def main():
     parser.add_argument("--tstv-file", default=None,
                         help="bcftools stats tstv output file for project-level "
                              "Ti/Tv ratio (tstv_stats.txt)")
+    parser.add_argument("--sex-chr-qc-dir", default=None,
+                        help="Directory with sex-chromosome variant QC from "
+                             "compute_sex_chr_variant_qc.sh (chrX/ and chrY/ "
+                             "subdirectories)")
     parser.add_argument("--output", required=True,
                         help="Output collated TSV file")
     args = parser.parse_args()
@@ -207,10 +329,23 @@ def main():
     # Parse project-level Ti/Tv ratio
     tstv_ratio = parse_tstv_file(args.tstv_file)
 
-    # Collect all variant IDs
+    # Load sex-chromosome QC if available
+    sex_chr_data = load_sex_chr_qc(args.sex_chr_qc_dir)
+    has_chrx = bool(sex_chr_data.get('chrX'))
+    has_chry = bool(sex_chr_data.get('chrY'))
+    if has_chrx:
+        print(f"  chrX variant QC: {len(sex_chr_data['chrX'])} variants")
+    if has_chry:
+        print(f"  chrY variant QC: {len(sex_chr_data['chrY'])} variants")
+
+    # Collect all variant IDs (autosomes + sex chromosomes)
     all_variants = set(all_data.keys())
     for anc_data in ancestry_data.values():
         all_variants.update(anc_data.keys())
+    if has_chrx:
+        all_variants.update(sex_chr_data['chrX'].keys())
+    if has_chry:
+        all_variants.update(sex_chr_data['chrY'].keys())
     all_variants = sorted(all_variants)
 
     if not all_variants:
@@ -246,6 +381,22 @@ def main():
         'all_ancestries_maf_pass',
         'all_ancestries_qc_pass',
     ])
+
+    # Sex-chromosome columns (appended when data is available)
+    chrx_columns = []
+    if has_chrx:
+        chrx_columns = [
+            'chrX_call_rate', 'chrX_maf',
+            'chrX_female_call_rate', 'chrX_female_hwe_p',
+            'chrX_male_call_rate',
+        ]
+        columns.extend(chrx_columns)
+    chry_columns = []
+    if has_chry:
+        chry_columns = [
+            'chrY_male_call_rate', 'chrY_male_maf',
+        ]
+        columns.extend(chry_columns)
 
     # Write collated output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -302,6 +453,17 @@ def main():
                 ])
             else:
                 row.extend(['NA', 'NA', 'NA', 'NA'])
+
+            # Append sex-chromosome columns
+            if has_chrx:
+                chrx_vd = sex_chr_data['chrX'].get(vid, {})
+                for col in chrx_columns:
+                    row.append(chrx_vd.get(col, 'NA'))
+            if has_chry:
+                chry_vd = sex_chr_data['chrY'].get(vid, {})
+                for col in chry_columns:
+                    row.append(chry_vd.get(col, 'NA'))
+
             f.write('\t'.join(row) + '\n')
 
     print(f"Collated variant QC: {args.output}")

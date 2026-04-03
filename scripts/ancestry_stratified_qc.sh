@@ -49,6 +49,11 @@ Options:
                           PCA.  Used for related and het-outlier samples.
   --tstv-file FILE        bcftools stats tstv output file for project-level
                           Ti/Tv ratio in collated output
+  --sample-qc FILE        Sample QC TSV with computed_gender column for
+                          sex-chromosome variant QC (chrX HWE on females,
+                          chrY on males)
+  --genome STRING         Genome build for PAR/XTR exclusion in sex-chr QC
+                          (CHM13, GRCh38, or GRCh37; default: CHM13)
   --threads INT           Number of threads (default: all available)
   --force                 Re-run even if outputs exist
   --help                  Show this help message
@@ -69,6 +74,8 @@ OUTPUT_DIR=""
 MIN_SAMPLES=100
 EXCLUDE_SAMPLES=""
 TSTV_FILE=""
+SAMPLE_QC=""
+GENOME="CHM13"
 THREADS=$(nproc 2>/dev/null || echo 1)
 FORCE="false"
 
@@ -80,6 +87,8 @@ while [[ $# -gt 0 ]]; do
         --min-samples)      MIN_SAMPLES="$2"; shift 2 ;;
         --exclude-samples)  EXCLUDE_SAMPLES="$2"; shift 2 ;;
         --tstv-file)        TSTV_FILE="$2"; shift 2 ;;
+        --sample-qc)        SAMPLE_QC="$2"; shift 2 ;;
+        --genome)           GENOME="$2"; shift 2 ;;
         --threads)          THREADS="$2"; shift 2 ;;
         --force)            FORCE="true"; shift ;;
         --help)             usage ;;
@@ -280,6 +289,33 @@ for ANCESTRY in "${ANCESTRIES[@]}"; do
 done
 
 # -----------------------------------------------------------------
+# Step 2b: Sex-chromosome variant QC (chrX and chrY)
+# -----------------------------------------------------------------
+SEX_CHR_QC_DIR="${OUTPUT_DIR}/sex_chr_qc"
+
+echo "======================================================"
+echo "  Sex-Chromosome Variant QC (chrX/chrY)"
+echo "======================================================"
+echo ""
+
+if [[ -n "${SAMPLE_QC}" && -f "${SAMPLE_QC}" ]]; then
+    if [[ "${FORCE}" == "true" || ! -d "${SEX_CHR_QC_DIR}/chrX" ]]; then
+        echo "  Running sex-chromosome variant QC..."
+        bash "${SCRIPT_DIR}/compute_sex_chr_variant_qc.sh" \
+            --vcf "${VCF}" \
+            --sample-qc "${SAMPLE_QC}" \
+            --output-dir "${SEX_CHR_QC_DIR}" \
+            --genome "${GENOME}" \
+            --threads "${THREADS}" 2>&1 | sed 's/^/    /'
+    else
+        echo "  Sex-chromosome variant QC already exists."
+    fi
+else
+    echo "  Skipping sex-chromosome variant QC (--sample-qc not provided)."
+fi
+echo ""
+
+# -----------------------------------------------------------------
 # Step 3: Collate variant QC across all ancestries
 # -----------------------------------------------------------------
 echo "======================================================"
@@ -329,6 +365,11 @@ for ANCESTRY in "${PROCESSED_ANCESTRIES[@]}"; do
         COLLATE_ARGS+=(--ancestry-variant-qc "${ANCESTRY}:${ANC_VQC_DIR}")
     fi
 done
+
+# Add sex-chromosome QC directory if available
+if [[ -d "${SEX_CHR_QC_DIR}" ]]; then
+    COLLATE_ARGS+=(--sex-chr-qc-dir "${SEX_CHR_QC_DIR}")
+fi
 
 if command -v python3 &>/dev/null; then
     python3 "${SCRIPT_DIR}/collate_variant_qc.py" "${COLLATE_ARGS[@]}" 2>&1 || true

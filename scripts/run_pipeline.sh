@@ -616,6 +616,11 @@ else
         if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
             STRAT_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
         fi
+        # Pass sample QC for sex-chromosome variant QC (chrX/chrY)
+        if [[ -f "${FINAL_QC}" ]]; then
+            STRAT_ARGS+=(--sample-qc "${FINAL_QC}")
+        fi
+        STRAT_ARGS+=(--genome "${GENOME}")
         # Pass Ti/Tv stats file explicitly (from variant QC step output)
         for tstv_candidate in \
             "${OUTPUT_DIR}/stage2/qc/tstv_stats.txt" \
