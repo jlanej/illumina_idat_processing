@@ -1490,6 +1490,15 @@ print(f'{n_total}\t{n_m}\t{n_f}\t{n_a}\t{n_valid}\t{n_na}\t{first_f}')
             (( FAIL++ )) || true
         fi
 
+        # Category counts should partition all samples
+        if [[ $((N_MALE + N_FEMALE + N_AMBIG)) -eq "${N_TOTAL}" ]]; then
+            echo "  PASS: Male + female + ambiguous counts sum to total"
+            (( PASS++ )) || true
+        else
+            echo "  FAIL: Category counts do not sum to total (M=${N_MALE}, F=${N_FEMALE}, A=${N_AMBIG}, total=${N_TOTAL})"
+            (( FAIL++ )) || true
+        fi
+
         # F-stat must be a real float (not NA or empty)
         if [[ "${FIRST_F}" != "None" && "${FIRST_F}" != "NA" && -n "${FIRST_F}" ]]; then
             echo "  PASS: F-stat values are numeric (first=${FIRST_F})"
@@ -1519,7 +1528,7 @@ print(f'{n_total}\t{n_m}\t{n_f}\t{n_a}\t{n_valid}\t{n_na}\t{first_f}')
         echo "  FAIL: F-stat computation returned empty output"
         (( FAIL++ )) || true
         # Count this as 6 failures for the 6 sub-assertions above
-        for i in 1 2 3 4 5; do (( FAIL++ )) || true; done
+        FAIL=$((FAIL + 5))
     fi
 else
     echo "  SKIP: plink2 or bcftools not available (or test BCF missing)"
