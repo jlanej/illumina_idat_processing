@@ -650,6 +650,8 @@ if [[ -z "${PED_FILE}" || ! -f "${PED_FILE}" ]]; then
                     *)          sex_map["${sid}"]="0" ;;
                 esac
             done < <(tail -n +2 "${SAMPLE_QC}")
+        else
+            echo "Warning: 'computed_gender' column not found in ${SAMPLE_QC}; all PED sex values will be 0 (unknown)." >&2
         fi
     fi
 
