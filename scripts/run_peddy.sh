@@ -638,13 +638,19 @@ if [[ -z "${PED_FILE}" || ! -f "${PED_FILE}" ]]; then
 
     declare -A sex_map
     if [[ -n "${SAMPLE_QC}" && -f "${SAMPLE_QC}" ]]; then
-        while IFS=$'\t' read -r sid _ _ _ _ _ _ gender _; do
-            case "${gender}" in
-                M|male|1)   sex_map["${sid}"]="1" ;;
-                F|female|2) sex_map["${sid}"]="2" ;;
-                *)          sex_map["${sid}"]="0" ;;
-            esac
-        done < <(tail -n +2 "${SAMPLE_QC}")
+        # Header-aware column lookup for computed_gender
+        gender_col=$(head -1 "${SAMPLE_QC}" | tr '\t' '\n' | grep -n '^computed_gender$' | cut -d: -f1)
+        if [[ -n "${gender_col}" ]]; then
+            while IFS=$'\t' read -r line; do
+                sid=$(echo "${line}" | cut -f1)
+                gender=$(echo "${line}" | cut -f"${gender_col}")
+                case "${gender}" in
+                    M|male|1)   sex_map["${sid}"]="1" ;;
+                    F|female|2) sex_map["${sid}"]="2" ;;
+                    *)          sex_map["${sid}"]="0" ;;
+                esac
+            done < <(tail -n +2 "${SAMPLE_QC}")
+        fi
     fi
 
     : > "${GENERATED_PED}"

@@ -718,8 +718,6 @@ def cross_tabulate_sex(sample_names, sex_map, chrx_medians, chry_medians,
             status = 'DISCORDANT'
         elif raw_f_sex == 'ambiguous':
             status = 'AMBIGUOUS'
-        elif peddy_error:
-            status = 'PEDDY_ERROR'
         elif len(methods) >= 2 and len(set(methods)) == 1:
             status = 'CONCORDANT'
         elif len(methods) == 1:
