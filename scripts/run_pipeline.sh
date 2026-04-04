@@ -616,6 +616,11 @@ else
         if [[ -s "${PRE_PCA_EXCLUDE}" ]]; then
             STRAT_ARGS+=(--exclude-samples "${PRE_PCA_EXCLUDE}")
         fi
+        # Pass sample QC for sex-chromosome variant QC (chrX/chrY)
+        if [[ -f "${FINAL_QC}" ]]; then
+            STRAT_ARGS+=(--sample-qc "${FINAL_QC}")
+        fi
+        STRAT_ARGS+=(--genome "${GENOME}")
         # Pass Ti/Tv stats file explicitly (from variant QC step output)
         for tstv_candidate in \
             "${OUTPUT_DIR}/stage2/qc/tstv_stats.txt" \
@@ -632,6 +637,35 @@ else
         bash "${SCRIPT_DIR}/ancestry_stratified_qc.sh" "${STRAT_ARGS[@]}" 2>&1 || true
     else
         echo "Note: Skipping ancestry-stratified QC (final VCF or peddy output not available)."
+        # Run sex-chr variant QC directly as a fallback when ancestry QC
+        # cannot run (e.g., peddy skipped or VCF missing).  This ensures
+        # chrX/chrY variants still appear in collated_variant_qc.tsv.
+        SEX_CHR_QC_FALLBACK="${ANCESTRY_QC_DIR}/sex_chr_qc"
+        if [[ -f "${FINAL_VCF}" && -f "${FINAL_QC}" ]]; then
+            echo "Running standalone sex-chromosome variant QC (ancestry QC skipped)..."
+            mkdir -p "${ANCESTRY_QC_DIR}"
+            bash "${SCRIPT_DIR}/compute_sex_chr_variant_qc.sh" \
+                --vcf "${FINAL_VCF}" \
+                --sample-qc "${FINAL_QC}" \
+                --output-dir "${SEX_CHR_QC_FALLBACK}" \
+                --genome "${GENOME}" \
+                --threads "${THREADS}" 2>&1 || true
+
+            # Collate with sex-chr QC only (no ancestry data)
+            FALLBACK_COLLATE_ARGS=(--output "${ANCESTRY_QC_DIR}/collated_variant_qc.tsv")
+            for vqc_candidate in \
+                "${OUTPUT_DIR}/stage2/qc/variant_qc" \
+                "${OUTPUT_DIR}/stage1/qc/variant_qc"; do
+                if [[ -d "${vqc_candidate}" && -f "${vqc_candidate}/variant_qc.vmiss" ]]; then
+                    FALLBACK_COLLATE_ARGS+=(--all-variant-qc-dir "${vqc_candidate}")
+                    break
+                fi
+            done
+            if [[ -d "${SEX_CHR_QC_FALLBACK}" ]]; then
+                FALLBACK_COLLATE_ARGS+=(--sex-chr-qc-dir "${SEX_CHR_QC_FALLBACK}")
+            fi
+            python3 "${SCRIPT_DIR}/collate_variant_qc.py" "${FALLBACK_COLLATE_ARGS[@]}" 2>&1 || true
+        fi
     fi
 fi
 echo ""
