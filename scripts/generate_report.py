@@ -959,10 +959,15 @@ def _best_sex(computed_gender, f_sex, peddy_sex):
 
     Priority order:
       1. computed_gender (LRR-based, from the sample QC pipeline)
-      2. f_sex (F-statistic based; only M/F accepted — 'ambiguous' is skipped)
+      2. f_sex (F-statistic based; only 'M'/'F' accepted — values such as
+         'ambiguous' or 'NA' are skipped because they are not conclusive)
       3. peddy_sex (Peddy predicted sex)
-      4. 'NA' if none of the above resolve to M or F
+      4. 'NA' if none of the above resolves to a definitive M or F
+
+    Numeric PLINK codes '1' (male) and '2' (female) are also accepted and
+    normalised to 'M' / 'F' respectively.
     """
+    # Only single-character letter codes or PLINK numeric codes are accepted
     _valid = {'M', 'F', '1', '2'}
     for val in (computed_gender, f_sex, peddy_sex):
         norm = (val or '').strip().upper()
