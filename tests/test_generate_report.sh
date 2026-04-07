@@ -69,10 +69,13 @@ printf 'mock-png' > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_samples.png"
 printf 'mock-png' > "${TMP_DIR}/stage2/qc/comparison/qc_comparison_variants.png"
 printf 'mock-png' > "${TMP_DIR}/sex_check/sex_check_chrXY_lrr.png"
 cat > "${TMP_DIR}/sex_check/sex_check_chrXY_lrr.tsv" << 'EOF'
-sample_id	chrx_lrr_median	chry_lrr_median	computed_gender
-S001	-0.1200	0.0900	M
-S002	0.0400	-0.0800	F
-S003	-0.1000	0.0700	M
+sample_id	chrx_lrr_median	chry_lrr_median	computed_gender	chrx_f_stat	f_sex	peddy_sex	sex_status
+S001	-0.1200	0.0900	M	0.970	M	M	CONCORDANT
+S002	0.0400	-0.0800	F	0.160	F	F	CONCORDANT
+S003	-0.1000	0.0700	M	0.950	M	M	CONCORDANT
+S004	-0.1100	0.0850	NA	0.960	M	M	CONCORDANT
+S005	0.0450	-0.0750	NA	0.180	F	F	CONCORDANT
+S006	0.0420	-0.0700	NA	NA	NA	F	SINGLE_METHOD
 EOF
 
 cat > "${TMP_DIR}/mock_data_notice.txt" << 'EOF'
@@ -313,6 +316,29 @@ if grep -q 'id="sex-data"' "${REPORT}" && grep -q '"chrx_lrr_median"' "${REPORT}
     (( PASS++ )) || true
 else
     echo "  FAIL: Sex check data JSON block missing or incomplete"
+    (( FAIL++ )) || true
+fi
+
+# --- Test 7d: Sex check fallback gender logic ---
+# S004/S005 have computed_gender=NA but valid f_sex (M/F); S006 has computed_gender=NA and f_sex=NA but peddy_sex=F.
+# All three should resolve to a non-NA gender in the embedded sex-data JSON.
+echo "--- Test 7d: Sex check gender fallback (computed_gender=NA) ---"
+SEX_JSON=$(python3 -c "
+import json, sys, re
+html = open('${REPORT}').read()
+m = re.search(r'id=\"sex-data\">(\[.*?\])<', html, re.DOTALL)
+if not m:
+    print('NOT_FOUND')
+    sys.exit(1)
+data = json.loads(m.group(1))
+by_id = {p['id']: p['gender'] for p in data}
+print(by_id.get('S004','MISSING'), by_id.get('S005','MISSING'), by_id.get('S006','MISSING'))
+" 2>/dev/null)
+if [[ "${SEX_JSON}" == "M F F" ]]; then
+    echo "  PASS: Fallback gender correctly resolved (S004=M from f_sex, S005=F from f_sex, S006=F from peddy_sex)"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Fallback gender incorrect: got '${SEX_JSON}', expected 'M F F'"
     (( FAIL++ )) || true
 fi
 

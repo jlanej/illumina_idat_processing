@@ -954,10 +954,38 @@ def _prepare_pca_json(pca_file, qc_rows):
     return json.dumps(points)
 
 
+def _best_sex(computed_gender, f_sex, peddy_sex):
+    """Return the best available sex call from multiple sources.
+
+    Priority order:
+      1. computed_gender (LRR-based, from the sample QC pipeline)
+      2. f_sex (F-statistic based; only M/F accepted — 'ambiguous' is skipped)
+      3. peddy_sex (Peddy predicted sex)
+      4. 'NA' if none of the above resolve to M or F
+    """
+    _valid = {'M', 'F', '1', '2'}
+    for val in (computed_gender, f_sex, peddy_sex):
+        norm = (val or '').strip().upper()
+        if norm in _valid:
+            # Normalise numeric codes to letters so the JS layer is consistent
+            if norm == '1':
+                return 'M'
+            if norm == '2':
+                return 'F'
+            return norm
+    return 'NA'
+
+
 def _prepare_sex_check_json(sex_check_file):
     """Serialize sex check chrX/chrY median LRR data for interactive plotting.
 
     Includes F-statistic and cross-tabulation status when available.
+
+    The ``gender`` field used for plot colouring is derived from the best
+    available sex call (computed_gender → f_sex → peddy_sex) so that the
+    scatter plot is correctly coloured even when the LRR-based
+    ``computed_gender`` column is absent or 'NA' (e.g. when peddy or the
+    F-statistic are the only sex-determination methods that ran).
     """
     if not os.path.exists(sex_check_file):
         return '[]'
@@ -969,9 +997,11 @@ def _prepare_sex_check_json(sex_check_file):
         y = safe_float(row.get('chry_lrr_median'))
         if x is None or y is None:
             continue
+        f_sex = row.get('f_sex', '')
+        peddy_sex = row.get('peddy_sex', '')
         point = {
             'id': row.get('sample_id', ''),
-            'gender': row.get('computed_gender', 'NA'),
+            'gender': _best_sex(row.get('computed_gender', ''), f_sex, peddy_sex),
             'chrx_lrr_median': round(x, 6),
             'chry_lrr_median': round(y, 6),
         }
@@ -979,10 +1009,8 @@ def _prepare_sex_check_json(sex_check_file):
         f_val = safe_float(row.get('chrx_f_stat'))
         if f_val is not None:
             point['chrx_f_stat'] = round(f_val, 6)
-        f_sex = row.get('f_sex', '')
         if f_sex:
             point['f_sex'] = f_sex
-        peddy_sex = row.get('peddy_sex', '')
         if peddy_sex:
             point['peddy_sex'] = peddy_sex
         status = row.get('sex_status', '')
