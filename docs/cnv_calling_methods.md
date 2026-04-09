@@ -19,7 +19,7 @@ The pipeline outputs a BCF/VCF with per-sample `GT`, `BAF`, and `LRR` FORMAT fie
 - **Input**: Per-SNP LRR and BAF values, plus a population frequency of B allele (PFB) file and GC content model for wave correction.
 - **Integration**: **High**. PennCNV is the most widely used array-based CNV caller. The pipeline's per-probe LRR and BAF can be exported to PennCNV's tabular input format with a straightforward `bcftools query` extraction:
   ```bash
-  bcftools query -f '%CHROM\t%POS\t%ID[\t%LRR\t%BAF]\n' stage2_reclustered.bcf
+  bcftools query -f '%CHROM\t%POS\t%ID\t[%LRR]\t[%BAF]\n' stage2_reclustered.bcf
   ```
   PFB files can be computed from cohort BAF values. GC model files for GRCh38 are available from the PennCNV distribution.
 - **Strengths**: Mature, well-validated, supports family-based calling (trio/joint), GC wave adjustment, and has extensive documentation.

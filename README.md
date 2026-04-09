@@ -16,7 +16,7 @@ The pipeline runs in eleven phases:
 
 4. **Sex Check**: Both intensity-based and genotype-based sex determination methods are applied and cross-tabulated. **PAR1, PAR2, and XTR (X-transposed) regions are excluded** from all chrX-based analyses to avoid inflated male heterozygosity — these regions behave as autosomal loci and their inclusion biases the F-statistic toward 0 in males. Region definitions are centralized in `scripts/par_xtr_regions.py` and `scripts/utils.sh` per genome build (CHM13, GRCh38, GRCh37):
    - **LRR-based**: A scatter plot of median chrX vs chrY LRR per sample, colored by predicted sex. Males are expected to have lower chrX LRR (hemizygous) and higher chrY LRR. PAR/XTR sites on chrX are excluded so that the median reflects only non-pseudoautosomal loci.
-   - **X-chromosome F-statistic**: Genotype-based inbreeding coefficient on chrX (non-PAR/XTR), computed via **plink2 `--check-sex`** when available. plink2 uses per-variant allele frequencies to compute expected heterozygosity, producing a more accurate F-statistic than simple het-rate proxies. If plink2 is not installed, a simplified bcftools-based approximation is used as a fallback. Males (hemizygous X) have F ≈ 1.0; females (diploid X) have F ≈ 0.0. Samples with 0.2 ≤ F ≤ 0.8 are flagged as ambiguous (potential aneuploidy or data issue). The raw plink2 `.sexcheck` output is exported for diagnostics. Both F-stat and LRR median results are cached for reuse when the pipeline re-invokes sex check after peddy.
+   - **X-chromosome F-statistic**: Genotype-based inbreeding coefficient on chrX (non-PAR/XTR), computed via **plink2 `--impute-sex`** (with `--split-par` and `--make-pgen`) on modern plink2 builds (v2.00a6+). plink2 uses per-variant allele frequencies to compute expected heterozygosity, producing a more accurate F-statistic than simple het-rate proxies. On older plink2 builds, the legacy `--check-sex` flag is used as a fallback. If plink2 is not installed at all, a simplified bcftools-based approximation is used. Males (hemizygous X) have F ≈ 1.0; females (diploid X) have F ≈ 0.0. Samples with 0.2 ≤ F ≤ 0.8 are flagged as ambiguous (potential aneuploidy or data issue). The raw plink2 sexcheck output is exported as `plink2_sexcheck.tsv` for diagnostics. Both F-stat and LRR median results are cached for reuse when the pipeline re-invokes sex check after peddy.
    - **Peddy sex check** *(when peddy is enabled)*: After peddy runs, its genotype-based sex prediction is integrated into the cross-tabulation. chrX sites appended for peddy also exclude PAR/XTR regions.
    - All three methods are compared per sample. Discordances are flagged as `DISCORDANT`, ambiguous F-statistics as `AMBIGUOUS`, and full agreement as `CONCORDANT`. A summary report (`sex_check_summary.txt`) documents all findings and suggests potential causes (aneuploidy, sample swaps, contamination).
 
@@ -377,7 +377,9 @@ output/
 │       └── reclustered.egt          # Study-specific EGT cluster file
 ├── sex_check/
 │   ├── sex_check_chrXY_lrr.png     # Median chrX vs chrY LRR by predicted sex
-│   └── sex_check_chrXY_lrr.tsv     # Per-sample median chrX/chrY LRR values used in report
+│   ├── sex_check_chrXY_lrr.tsv     # Per-sample median chrX/chrY LRR values and concordance
+│   ├── sex_check_summary.txt       # Summary of sex check findings and discordances
+│   └── plink2_sexcheck.tsv         # Raw plink2 sexcheck output (if plink2 available)
 ├── peddy/                           # Peddy pedigree/sex/ancestry QC
 │   ├── peddy.het_check.csv          # Ancestry prediction, het ratio, PCs per sample
 │   ├── peddy.sex_check.csv          # Sex check: predicted vs PED sex per sample
@@ -413,9 +415,26 @@ output/
 ├── qc_diagnostic_report.txt         # Automated QC diagnostic report
 ├── pipeline_report.html             # Comprehensive HTML report with figures
 ├── summary_statistics.tsv           # Publication-ready summary statistics table
+├── citations_summary.tsv            # Methods citations with rationale
 ├── methods_text.txt                 # Auto-generated methods paragraph
 ├── qc_dashboard.png                 # Sample QC dashboard figure
 ├── pca_scatter.png                  # PCA scatter plots (PC1 vs PC2, PC3 vs PC4)
+├── summary/                    # Consolidated key outputs for easy retrieval
+│   ├── pipeline_report.html
+│   ├── summary_statistics.tsv
+│   ├── methods_text.txt
+│   ├── citations_summary.tsv
+│   ├── compiled_sample_sheet.tsv
+│   ├── qc_diagnostic_report.txt
+│   ├── sex_check_chrXY_lrr.png
+│   ├── sex_check_chrXY_lrr.tsv
+│   ├── sex_check_summary.txt
+│   ├── collated_variant_qc.tsv
+│   ├── ancestry_stratified_summary.txt
+│   ├── pre_pca_excluded_samples.txt
+│   ├── relatedness_exclusions.tsv
+│   ├── het_outlier_details.tsv
+│   └── peddy.*.csv / peddy_final.ped
 ├── manifests/                  # Downloaded manifest files (if auto-downloaded)
 ├── realigned_manifests/        # Realigned manifest and mapping summary
 │   ├── *.realigned.csv         # CSV with validated/remapped coordinates
