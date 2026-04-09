@@ -68,7 +68,7 @@ export BCFTOOLS_PLUGINS="$HOME/bin"
 ### 2. Install Python packages
 
 ```bash
-pip install "numpy<1.25" matplotlib
+pip install "numpy<1.25" matplotlib peddy
 ```
 
 ### 3. Run the pipeline
@@ -86,8 +86,10 @@ The pipeline will auto-download the correct BPM, EGT, and CSV manifest files for
 
 - Linux (tested on Ubuntu/Debian; should work on any HPC)
 - GCC 5+ (for compiling bcftools and plugins)
-- Python 3.6+ with NumPy and Matplotlib
+- Python 3.6+ with NumPy, Matplotlib, and peddy
 - Standard tools: `wget`, `samtools`, `bwa`, `make`
 - ~30 GB disk for reference genome (CHM13, GRCh38, or GRCh37)
 
-All other dependencies (bcftools, gtc2vcf, idat2gtc) are installed by `scripts/install_dependencies.sh`.
+All other dependencies (bcftools, gtc2vcf, idat2gtc, plink2) are installed by `scripts/install_dependencies.sh`.
+
+> **Note**: Unlike the Docker image (which pins all dependencies to specific commits for full reproducibility), `install_dependencies.sh` pulls the latest `master` branch of gtc2vcf and mocha plugins and the latest plink2 binary. It also does **not** install flashpca2 or the liftover plugin — these must be installed separately if needed. For fully reproducible builds, use the Docker/Apptainer image.

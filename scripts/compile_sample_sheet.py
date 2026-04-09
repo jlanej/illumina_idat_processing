@@ -7,6 +7,7 @@ from the Illumina IDAT processing pipeline.
 
 Merges:
   - Sample QC metrics (call rate, LRR SD/mean/median, BAF mean/SD, het rate)
+  - Pre-recluster QC metrics (Stage 1, prefixed with ``pre_recluster_``)
   - Sex check cross-tabulation (chrX/Y LRR medians, F-stat, peddy sex,
     concordance status)
   - Pre-PCA exclusion flags (relatedness, het outlier, combined)
@@ -17,6 +18,7 @@ Merges:
 Usage:
     python3 compile_sample_sheet.py \\
         --sample-qc stage2/qc/stage2_sample_qc.tsv \\
+        --pre-recluster-qc stage1/qc/stage1_sample_qc.tsv \\
         --pca-projections pca/pca_projections.tsv \\
         --sex-check sex_check/sex_check_chrXY_lrr.tsv \\
         --relatedness-excluded relatedness_excluded_samples.txt \\
@@ -143,6 +145,11 @@ def main():
     )
     parser.add_argument("--sample-qc", required=True,
                         help="Sample QC TSV file (from collect_qc_metrics.sh)")
+    parser.add_argument("--pre-recluster-qc", default=None,
+                        help="Pre-recluster (Stage 1) sample QC TSV file. "
+                             "When provided alongside a Stage 2 --sample-qc, "
+                             "these metrics are included with a 'pre_recluster_' "
+                             "prefix for easy comparison.")
     parser.add_argument("--pca-projections", default=None,
                         help="PCA projections TSV (from ancestry_pca.sh)")
     parser.add_argument("--het-file", default=None,
@@ -183,6 +190,30 @@ def main():
     if not qc_data:
         print(f"Error: No data in QC file: {args.sample_qc}", file=sys.stderr)
         sys.exit(1)
+
+    # Read pre-recluster (Stage 1) QC metrics if available.
+    # Numeric QC columns are prefixed with 'pre_recluster_' so users can
+    # easily compare pre vs post reclustering in the compiled sheet.
+    PRE_RECLUSTER_QC_FIELDS = [
+        'call_rate', 'lrr_sd', 'lrr_mean', 'lrr_median',
+        'baf_mean', 'baf_sd', 'het_rate',
+    ]
+    pre_recluster_cols = []
+    pre_recluster_data = {}
+    if args.pre_recluster_qc and os.path.exists(args.pre_recluster_qc):
+        _pr_header, _pr_data = read_tsv(args.pre_recluster_qc)
+        for field in PRE_RECLUSTER_QC_FIELDS:
+            if field in _pr_header:
+                pre_recluster_cols.append(f'pre_recluster_{field}')
+        for sid, row in _pr_data.items():
+            pre_recluster_data[sid] = {
+                f'pre_recluster_{field}': row.get(field, 'NA')
+                for field in PRE_RECLUSTER_QC_FIELDS
+                if field in _pr_header
+            }
+    elif args.pre_recluster_qc:
+        print(f"Warning: Pre-recluster QC file not found: "
+              f"{args.pre_recluster_qc}", file=sys.stderr)
 
     # Read PCA projections if available
     pc_cols, pc_data = [], {}
@@ -291,6 +322,7 @@ def main():
 
     # Build unified header
     output_cols = list(qc_header)
+    output_cols.extend(pre_recluster_cols)
     if het_data:
         output_cols.append('inbreeding_F')
     output_cols.extend(sex_check_cols)
@@ -325,6 +357,10 @@ def main():
             # Override sample_id if it's the first column
             if qc_header and qc_header[0] == 'sample_id':
                 row[0] = sample_id
+            # Pre-recluster QC columns (Stage 1 metrics for comparison)
+            pr_row = pre_recluster_data.get(sample_id, {})
+            for col in pre_recluster_cols:
+                row.append(pr_row.get(col, 'NA'))
             # Inbreeding coefficient
             if het_data:
                 row.append(het_data.get(sample_id, 'NA'))
@@ -364,6 +400,8 @@ def main():
     print(f"Compiled sample sheet: {args.output}")
     print(f"  Total samples:     {n_samples}")
     print(f"  QC columns:        {len(qc_header)}")
+    if pre_recluster_cols:
+        print(f"  Pre-recluster cols: {len(pre_recluster_cols)}")
     print(f"  PC columns:        {len(pc_cols)}")
     print(f"  Samples with PCs:  {n_with_pcs}")
     if sex_check_cols:

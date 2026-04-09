@@ -725,6 +725,13 @@ if command -v python3 &>/dev/null && [[ -f "${FINAL_QC}" ]]; then
             --sample-qc "${FINAL_QC}"
             --output "${COMPILED_SHEET}"
         )
+
+        # Include pre-recluster (Stage 1) QC for comparison when Stage 2 ran
+        STAGE1_QC="${OUTPUT_DIR}/stage1/qc/stage1_sample_qc.tsv"
+        if [[ "${SKIP_STAGE2}" != "true" && -f "${STAGE1_QC}" ]]; then
+            COMPILE_ARGS+=(--pre-recluster-qc "${STAGE1_QC}")
+        fi
+
         if [[ -f "${PCA_DIR}/pca_projections.tsv" ]]; then
             COMPILE_ARGS+=(--pca-projections "${PCA_DIR}/pca_projections.tsv")
         fi
