@@ -211,6 +211,9 @@ def main():
                 for field in PRE_RECLUSTER_QC_FIELDS
                 if field in _pr_header
             }
+    elif args.pre_recluster_qc:
+        print(f"Warning: Pre-recluster QC file not found: "
+              f"{args.pre_recluster_qc}", file=sys.stderr)
 
     # Read PCA projections if available
     pc_cols, pc_data = [], {}
