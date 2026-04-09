@@ -472,7 +472,8 @@ The `compiled_sample_sheet.tsv` merges all per-sample QC metrics into a single t
 
 | Column(s) | Source | Description |
 |-----------|--------|-------------|
-| `sample_id`, `call_rate`, `lrr_sd`, `lrr_mean`, `lrr_median`, `baf_mean`, `baf_sd`, `het_rate`, `computed_gender` | `*_sample_qc.tsv` | Core QC metrics from collect_qc_metrics.sh |
+| `sample_id`, `call_rate`, `lrr_sd`, `lrr_mean`, `lrr_median`, `baf_mean`, `baf_sd`, `het_rate`, `computed_gender` | `*_sample_qc.tsv` | Core QC metrics from collect_qc_metrics.sh (post-recluster when Stage 2 runs) |
+| `pre_recluster_call_rate`, `pre_recluster_lrr_sd`, `pre_recluster_lrr_mean`, `pre_recluster_lrr_median`, `pre_recluster_baf_mean`, `pre_recluster_baf_sd`, `pre_recluster_het_rate` | Stage 1 `*_sample_qc.tsv` | Pre-recluster QC metrics for comparison (only present when Stage 2 runs) |
 | `inbreeding_F` | plink2 `.het` file | Inbreeding coefficient (if variant QC .het available) |
 | `chrx_lrr_median`, `chry_lrr_median`, `chrx_f_stat`, `f_sex`, `peddy_sex`, `sex_status` | `sex_check_chrXY_lrr.tsv` | Sex check cross-tabulation (LRR-based, F-stat, peddy, concordance) |
 | `excluded_relatedness`, `excluded_het_outlier`, `pre_pca_excluded` | Exclusion lists | Pre-PCA exclusion flags (1=excluded, 0=not excluded) |

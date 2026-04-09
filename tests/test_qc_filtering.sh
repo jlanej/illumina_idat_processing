@@ -1221,6 +1221,7 @@ assert_contains "${CSS_HELP}" "sex-check" "compile_sample_sheet.py help mentions
 assert_contains "${CSS_HELP}" "relatedness-excluded" "compile_sample_sheet.py help mentions --relatedness-excluded"
 assert_contains "${CSS_HELP}" "het-outlier-excluded" "compile_sample_sheet.py help mentions --het-outlier-excluded"
 assert_contains "${CSS_HELP}" "pre-pca-excluded" "compile_sample_sheet.py help mentions --pre-pca-excluded"
+assert_contains "${CSS_HELP}" "pre-recluster-qc" "compile_sample_sheet.py help mentions --pre-recluster-qc"
 
 echo ""
 
@@ -1242,11 +1243,12 @@ echo "--- Test 35: run_pipeline.sh wires sex check and exclusion args ---"
 if grep -q -- '--sex-check "${SEX_CHECK_TSV}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
    grep -q -- '--relatedness-excluded "${RELATEDNESS_EXCLUDED}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
    grep -q -- '--het-outlier-excluded "${HET_OUTLIER_EXCLUDED}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
-   grep -q -- '--pre-pca-excluded "${PRE_PCA_EXCLUDE}"' "${REPO_DIR}/scripts/run_pipeline.sh"; then
-    echo "  PASS: run_pipeline.sh passes sex check and exclusion args to compile_sample_sheet.py"
+   grep -q -- '--pre-pca-excluded "${PRE_PCA_EXCLUDE}"' "${REPO_DIR}/scripts/run_pipeline.sh" && \
+   grep -q -- '--pre-recluster-qc "${STAGE1_QC}"' "${REPO_DIR}/scripts/run_pipeline.sh"; then
+    echo "  PASS: run_pipeline.sh passes sex check, exclusion, and pre-recluster args to compile_sample_sheet.py"
     (( PASS++ )) || true
 else
-    echo "  FAIL: run_pipeline.sh missing sex check or exclusion args for compile_sample_sheet.py"
+    echo "  FAIL: run_pipeline.sh missing sex check, exclusion, or pre-recluster args for compile_sample_sheet.py"
     (( FAIL++ )) || true
 fi
 
@@ -1756,6 +1758,55 @@ echo "--- Test 44: ancestry_stratified_qc.sh help shows per-ancestry sex-chr QC 
 HELP_ASQ=$(bash "${REPO_DIR}/scripts/ancestry_stratified_qc.sh" --help 2>&1 || true)
 assert_contains "${HELP_ASQ}" "sex_chr_qc" \
     "ancestry_stratified_qc.sh help mentions sex_chr_qc"
+
+echo ""
+
+# ===============================================================
+# Test 45: compile_sample_sheet.py — pre-recluster QC metrics
+# ===============================================================
+echo "--- Test 45: compile_sample_sheet.py pre-recluster QC merge ---"
+
+printf 'sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_mean\tbaf_sd\thet_rate\tcomputed_gender\n' > "${TMP_DIR}/post_qc.tsv"
+printf 'PA\t0.995\t0.15\t0.01\t0.005\t0.50\t0.03\t0.30\t2\n' >> "${TMP_DIR}/post_qc.tsv"
+printf 'PB\t0.990\t0.18\t0.02\t0.010\t0.49\t0.04\t0.31\t1\n' >> "${TMP_DIR}/post_qc.tsv"
+
+printf 'sample_id\tcall_rate\tlrr_sd\tlrr_mean\tlrr_median\tbaf_mean\tbaf_sd\thet_rate\tcomputed_gender\n' > "${TMP_DIR}/pre_qc.tsv"
+printf 'PA\t0.990\t0.20\t0.02\t0.010\t0.50\t0.04\t0.30\t2\n' >> "${TMP_DIR}/pre_qc.tsv"
+printf 'PB\t0.985\t0.22\t0.03\t0.015\t0.49\t0.05\t0.31\t1\n' >> "${TMP_DIR}/pre_qc.tsv"
+
+python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" \
+    --sample-qc "${TMP_DIR}/post_qc.tsv" \
+    --pre-recluster-qc "${TMP_DIR}/pre_qc.tsv" \
+    --output "${TMP_DIR}/pre_recluster_output.tsv" > /dev/null
+
+# Verify pre-recluster columns are in header
+PRE_HEADER=$(head -1 "${TMP_DIR}/pre_recluster_output.tsv")
+assert_contains "${PRE_HEADER}" "pre_recluster_call_rate" "compiled sheet has pre_recluster_call_rate"
+assert_contains "${PRE_HEADER}" "pre_recluster_lrr_sd" "compiled sheet has pre_recluster_lrr_sd"
+assert_contains "${PRE_HEADER}" "pre_recluster_het_rate" "compiled sheet has pre_recluster_het_rate"
+
+# Verify pre-recluster values for PA
+PA_PRE_CR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="pre_recluster_call_rate") c=i} NR>1 && $1=="PA" {print $c}' "${TMP_DIR}/pre_recluster_output.tsv")
+PA_POST_CR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="call_rate") c=i} NR>1 && $1=="PA" {print $c}' "${TMP_DIR}/pre_recluster_output.tsv")
+PA_PRE_LRR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="pre_recluster_lrr_sd") c=i} NR>1 && $1=="PA" {print $c}' "${TMP_DIR}/pre_recluster_output.tsv")
+
+assert_eq "${PA_PRE_CR}" "0.990" "PA pre_recluster_call_rate = 0.990"
+assert_eq "${PA_POST_CR}" "0.995" "PA post-recluster call_rate = 0.995"
+assert_eq "${PA_PRE_LRR}" "0.20" "PA pre_recluster_lrr_sd = 0.20"
+
+# Verify pre-recluster columns are absent when --pre-recluster-qc not given
+python3 "${REPO_DIR}/scripts/compile_sample_sheet.py" \
+    --sample-qc "${TMP_DIR}/post_qc.tsv" \
+    --output "${TMP_DIR}/no_pre_output.tsv" > /dev/null
+
+NO_PRE_HEADER=$(head -1 "${TMP_DIR}/no_pre_output.tsv")
+if echo "${NO_PRE_HEADER}" | grep -q "pre_recluster_"; then
+    echo "  FAIL: pre_recluster_ columns present when --pre-recluster-qc not given"
+    (( FAIL++ )) || true
+else
+    echo "  PASS: no pre_recluster_ columns without --pre-recluster-qc"
+    (( PASS++ )) || true
+fi
 
 echo ""
 
