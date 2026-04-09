@@ -802,6 +802,15 @@ _STATUS_COLORS = {
 # Order also controls tie-break precedence when selecting the default
 # (most-complete) variable: sex_status first because it is the most
 # informative summary when all methods have run.
+# Each entry is a (var_name, cross_tab_field, display_label, kind) tuple:
+#   var_name      – identifier used as the color_by key and in PNG filenames
+#   cross_tab_field – key in each cross_tabulate_sex() row dict
+#   display_label – human-readable string for plot titles / colorbars
+#   kind          – rendering strategy (see _create_sex_check_plot_for_var)
+#
+# Order also controls tie-break precedence when selecting the default
+# (most-complete) variable: sex_status first because it is the most
+# informative summary when all methods have run.
 _SEX_COLOR_VARS = [
     ('sex_status',      'status',     'Sex Status (Concordance)',     'categorical_status'),
     ('computed_gender', 'lrr_sex',    'Computed Gender (LRR-based)',  'categorical_sex'),
@@ -1038,12 +1047,12 @@ def create_sex_check_plots(cross_tab, output_dir, default_color_by=None):
     elif plot_paths:
         # Fallback: use whichever variable was plotted first
         first_var = next(
-            v for v in plot_paths
-            if not v.startswith('_')
+            (v for v in plot_paths if not v.startswith('_')), None
         )
-        canonical = os.path.join(output_dir, 'sex_check_chrXY_lrr.png')
-        shutil.copy2(plot_paths[first_var], canonical)
-        plot_paths['_default'] = canonical
+        if first_var:
+            canonical = os.path.join(output_dir, 'sex_check_chrXY_lrr.png')
+            shutil.copy2(plot_paths[first_var], canonical)
+            plot_paths['_default'] = canonical
         plot_paths['_default_var'] = first_var
 
     return plot_paths
@@ -1112,7 +1121,7 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
             r.get('peddy_sex') not in (None, '', 'NA')
             for r in cross_tab
         )
-        if has_peddy or peddy_sex_results:
+        if has_peddy:
             out.write("  3. Peddy: Genotype-based sex prediction via peddy\n")
         out.write("\nDiscordant samples may indicate:\n")
         out.write("  - Sex chromosome aneuploidy (e.g. XXY, X0)\n")
