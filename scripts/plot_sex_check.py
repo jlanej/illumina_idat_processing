@@ -771,76 +771,320 @@ def read_predicted_sex(sample_qc_file):
     return sex_map
 
 
-def create_sex_check_plot(chrx_medians, chry_medians, sample_names,
-                          sex_map, output_dir):
-    """Create scatter plot of median chrX LRR vs median chrY LRR."""
+# ---------------------------------------------------------------------------
+# Sex check plot color schemes and variable metadata
+# ---------------------------------------------------------------------------
+
+# Colors for M/F/ambiguous categorical sex variables
+_SEX_COLORS = {
+    'M': '#4393C3',       # blue – male
+    'F': '#D6604D',       # red  – female
+    'ambiguous': '#F1A340',  # orange – ambiguous F-stat
+    'NA': '#999999',      # grey  – unknown / not available
+}
+
+# Colors for the concordance status variable
+_STATUS_COLORS = {
+    'CONCORDANT':    '#4DAC26',  # green
+    'DISCORDANT':    '#D01C8B',  # magenta
+    'AMBIGUOUS':     '#F1A340',  # orange
+    'SINGLE_METHOD': '#4393C3',  # blue
+    'UNDETERMINED':  '#999999',  # grey
+}
+
+# Ordered list of all supported color-by variables.
+# Each entry: (var_name, cross_tab_field, display_label, kind)
+#   kind: 'categorical_sex'        – M / F / NA
+#         'categorical_sex_ext'    – M / F / ambiguous / NA
+#         'categorical_status'     – CONCORDANT / DISCORDANT / …
+#         'numeric'                – continuous float 0–1
+#
+# Order also controls tie-break precedence when selecting the default
+# (most-complete) variable: sex_status first because it is the most
+# informative summary when all methods have run.
+# Each entry is a (var_name, cross_tab_field, display_label, kind) tuple:
+#   var_name      – identifier used as the color_by key and in PNG filenames
+#   cross_tab_field – key in each cross_tabulate_sex() row dict
+#   display_label – human-readable string for plot titles / colorbars
+#   kind          – rendering strategy (see _create_sex_check_plot_for_var)
+#
+# Order also controls tie-break precedence when selecting the default
+# (most-complete) variable: sex_status first because it is the most
+# informative summary when all methods have run.
+_SEX_COLOR_VARS = [
+    ('sex_status',      'status',     'Sex Status (Concordance)',     'categorical_status'),
+    ('computed_gender', 'lrr_sex',    'Computed Gender (LRR-based)',  'categorical_sex'),
+    ('f_sex',           'f_sex',      'F-Statistic Sex',              'categorical_sex_ext'),
+    ('chrx_f_stat',     'f_stat',     'ChrX F-Statistic (numeric)',   'numeric'),
+    ('peddy_sex',       'peddy_sex',  'Peddy Sex',                    'categorical_sex'),
+]
+
+
+def _score_completeness(cross_tab, var_field):
+    """Count rows where *var_field* has a non-null, non-empty, non-'NA' value."""
+    count = 0
+    for row in cross_tab:
+        val = row.get(var_field)
+        if val is not None and val != '' and val != 'NA':
+            count += 1
+    return count
+
+
+def _pick_default_color_by(cross_tab):
+    """Return the variable name with the most complete (non-NA) data.
+
+    Iterates ``_SEX_COLOR_VARS`` in preference order so that ties are broken
+    predictably (``sex_status`` > ``computed_gender`` > ``f_sex`` > …).
+    Returns ``None`` when *cross_tab* is empty.
+    """
+    best_var = None
+    best_score = -1
+    for var_name, var_field, _, _ in _SEX_COLOR_VARS:
+        score = _score_completeness(cross_tab, var_field)
+        if score > best_score:
+            best_score = score
+            best_var = var_name
+    return best_var if best_score > 0 else None
+
+
+def _create_sex_check_plot_for_var(cross_tab, var_field, kind, display_label,
+                                   output_path):
+    """Render one chrX-vs-chrY LRR scatter plot colored by *var_field*.
+
+    Parameters
+    ----------
+    cross_tab : list[dict]
+        Rows from :func:`cross_tabulate_sex`.
+    var_field : str
+        Key within each *cross_tab* row that provides the color value.
+    kind : str
+        One of ``'categorical_sex'``, ``'categorical_sex_ext'``,
+        ``'categorical_status'``, or ``'numeric'``.
+    display_label : str
+        Human-readable name shown in the plot title and colorbar.
+    output_path : str
+        Destination PNG file path.
+
+    Returns
+    -------
+    str or None
+        *output_path* on success, ``None`` if nothing could be plotted.
+    """
     try:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
     except (ImportError, AttributeError):
         print("Warning: matplotlib not available. Skipping sex check plot.",
               file=sys.stderr)
         return None
 
-    # Gather data points with their sex labels
-    points = []  # list of (x, y, sex_code)
-    for i, name in enumerate(sample_names):
-        if i in chrx_medians and i in chry_medians:
-            sex = sex_map.get(name, 'NA')
-            points.append((chrx_medians[i], chry_medians[i], sex))
-
-    if not points:
+    # Filter to samples that have valid LRR coordinates
+    valid = [
+        r for r in cross_tab
+        if r.get('chrx_lrr_median') is not None
+        and r.get('chry_lrr_median') is not None
+    ]
+    if not valid:
         print("Warning: No samples with both chrX and chrY LRR data.",
               file=sys.stderr)
         return None
 
+    xs = [r['chrx_lrr_median'] for r in valid]
+    ys = [r['chry_lrr_median'] for r in valid]
+
     fig, ax = plt.subplots(figsize=(8, 7))
-
-    # Plot by sex category for legend (deduplicate Male codes 1/M, Female 2/F)
-    sex_groups = {
-        'Male': {'codes': {'1', 'M'}, 'color': '#4393C3'},
-        'Female': {'codes': {'2', 'F'}, 'color': '#D6604D'},
-        'Unknown': {'codes': {'NA', 'U', ''}, 'color': '#999999'},
-    }
-    for label, group in sex_groups.items():
-        xi = [p[0] for p in points if p[2] in group['codes']]
-        yi = [p[1] for p in points if p[2] in group['codes']]
-        if xi:
-            ax.scatter(xi, yi, c=group['color'], label=label, alpha=0.6,
-                       s=20, edgecolors='none')
-
     ax.set_xlabel('Median LRR (chrX)', fontsize=12)
     ax.set_ylabel('Median LRR (chrY)', fontsize=12)
-    ax.set_title('Sex Check: Median chrX vs chrY LRR', fontsize=14,
-                 fontweight='bold')
-    ax.legend(fontsize=10)
+    ax.set_title(f'Sex Check: chrX vs chrY LRR\nColored by {display_label}',
+                 fontsize=13, fontweight='bold')
     ax.grid(True, alpha=0.3)
 
+    if kind == 'numeric':
+        # Continuous colormap for F-statistic (0 = female, 1 = male)
+        vals = [r.get(var_field) for r in valid]
+        numeric = [v if isinstance(v, (int, float)) else None for v in vals]
+        has_val = [v is not None for v in numeric]
+
+        if any(has_val):
+            c_vals = [v for v in numeric if v is not None]
+            xi = [xs[i] for i, h in enumerate(has_val) if h]
+            yi = [ys[i] for i, h in enumerate(has_val) if h]
+            cmap = cm.RdBu_r
+            norm = mcolors.Normalize(vmin=0.0, vmax=1.0)
+            sc = ax.scatter(xi, yi, c=c_vals, cmap=cmap, norm=norm,
+                            alpha=0.7, s=20, edgecolors='none')
+            cbar = fig.colorbar(sc, ax=ax)
+            cbar.set_label(display_label, fontsize=10)
+            cbar.set_ticks([0.0, 0.2, 0.5, 0.8, 1.0])
+            cbar.ax.axhline(0.2, color='black', linewidth=0.8, linestyle='--')
+            cbar.ax.axhline(0.8, color='black', linewidth=0.8, linestyle='--')
+
+        # Plot NA samples separately
+        xi_na = [xs[i] for i, h in enumerate(has_val) if not h]
+        yi_na = [ys[i] for i, h in enumerate(has_val) if not h]
+        if xi_na:
+            ax.scatter(xi_na, yi_na, c=_SEX_COLORS['NA'], label='NA',
+                       alpha=0.4, s=20, edgecolors='none')
+            ax.legend(fontsize=9)
+
+    elif kind == 'categorical_status':
+        color_map = _STATUS_COLORS
+        # Preserve a defined legend order
+        order = ['CONCORDANT', 'DISCORDANT', 'AMBIGUOUS',
+                 'SINGLE_METHOD', 'UNDETERMINED']
+        seen = set(r.get(var_field, 'UNDETERMINED') for r in valid)
+        for status in order:
+            if status not in seen:
+                continue
+            xi = [xs[i] for i, r in enumerate(valid)
+                  if r.get(var_field, 'UNDETERMINED') == status]
+            yi = [ys[i] for i, r in enumerate(valid)
+                  if r.get(var_field, 'UNDETERMINED') == status]
+            if xi:
+                ax.scatter(xi, yi, c=color_map.get(status, '#999999'),
+                           label=status.capitalize().replace('_', ' '),
+                           alpha=0.7, s=20, edgecolors='none')
+        ax.legend(fontsize=9)
+
+    else:
+        # categorical_sex or categorical_sex_ext
+        # Normalise to uppercase M / F; keep 'ambiguous' for categorical_sex_ext
+        norm_map = {'1': 'M', 'M': 'M', '2': 'F', 'F': 'F',
+                    'male': 'M', 'female': 'F', 'ambiguous': 'ambiguous'}
+        order = (['M', 'F', 'ambiguous'] if kind == 'categorical_sex_ext'
+                 else ['M', 'F'])
+        labels = {'M': 'Male', 'F': 'Female',
+                  'ambiguous': 'Ambiguous', 'NA': 'Unknown / NA'}
+
+        normed = [norm_map.get(str(r.get(var_field, '')), 'NA') for r in valid]
+        seen = set(normed)
+
+        for code in order + ['NA']:
+            if code not in seen:
+                continue
+            xi = [xs[i] for i, v in enumerate(normed) if v == code]
+            yi = [ys[i] for i, v in enumerate(normed) if v == code]
+            if xi:
+                ax.scatter(xi, yi, c=_SEX_COLORS.get(code, '#999999'),
+                           label=labels.get(code, code),
+                           alpha=0.7, s=20, edgecolors='none')
+        ax.legend(fontsize=9)
+
     plt.tight_layout()
-    plot_path = os.path.join(output_dir, 'sex_check_chrXY_lrr.png')
-    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close()
-    return plot_path
+    return output_path
+
+
+def create_sex_check_plots(cross_tab, output_dir, default_color_by=None):
+    """Create sex check scatter plots for every available color-by variable.
+
+    One PNG is generated per variable that has at least one non-NA value.
+    The canonical ``sex_check_chrXY_lrr.png`` file is set to whichever
+    variable has the most complete data (fewest NA / None values) across
+    the cohort.  When *default_color_by* is explicitly supplied it overrides
+    the auto-detected variable.
+
+    Supported color-by variables
+    ----------------------------
+    * ``computed_gender``   – LRR-based sex call (M / F)
+    * ``f_sex``             – F-statistic categorical sex (M / F / ambiguous)
+    * ``chrx_f_stat``       – F-statistic as a continuous 0–1 numeric scale
+    * ``peddy_sex``         – Peddy sex prediction (M / F)
+    * ``sex_status``        – Cross-method concordance
+                              (CONCORDANT / DISCORDANT / AMBIGUOUS / …)
+
+    Parameters
+    ----------
+    cross_tab : list[dict]
+        Rows from :func:`cross_tabulate_sex`.
+    output_dir : str
+        Directory where PNG files are written.
+    default_color_by : str or None
+        Override the auto-selected default variable.  If ``None`` (default)
+        the variable with the most complete data is used.
+
+    Returns
+    -------
+    dict
+        ``{var_name: plot_path}`` for each variable that produced a plot,
+        plus the special key ``'_default'`` pointing to the canonical PNG
+        and ``'_default_var'`` recording which variable was chosen.
+    """
+    if not cross_tab:
+        return {}
+
+    # Score completeness for each variable
+    completeness = {
+        var_name: _score_completeness(cross_tab, var_field)
+        for var_name, var_field, _, _ in _SEX_COLOR_VARS
+    }
+
+    # Choose default (auto or explicit)
+    if default_color_by is None:
+        default_color_by = _pick_default_color_by(cross_tab)
+
+    plot_paths = {}
+    for var_name, var_field, display_label, kind in _SEX_COLOR_VARS:
+        if completeness.get(var_name, 0) == 0:
+            continue  # no data for this variable — skip
+        out_path = os.path.join(output_dir,
+                                f'sex_check_chrXY_lrr_{var_name}.png')
+        result = _create_sex_check_plot_for_var(
+            cross_tab, var_field, kind, display_label, out_path)
+        if result:
+            plot_paths[var_name] = result
+
+    # Write / overwrite the canonical plot with the chosen default variable
+    if default_color_by and default_color_by in plot_paths:
+        canonical = os.path.join(output_dir, 'sex_check_chrXY_lrr.png')
+        shutil.copy2(plot_paths[default_color_by], canonical)
+        plot_paths['_default'] = canonical
+        plot_paths['_default_var'] = default_color_by
+    elif plot_paths:
+        # Fallback: use whichever variable was plotted first
+        first_var = next(
+            (v for v in plot_paths if not v.startswith('_')), None
+        )
+        if first_var:
+            canonical = os.path.join(output_dir, 'sex_check_chrXY_lrr.png')
+            shutil.copy2(plot_paths[first_var], canonical)
+            plot_paths['_default'] = canonical
+        plot_paths['_default_var'] = first_var
+
+    return plot_paths
 
 
 def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
                           output_dir, f_stat_results=None,
-                          peddy_sex_results=None):
+                          peddy_sex_results=None, cross_tab=None):
     """Write per-sample sex check table with all available methods.
 
     Columns include LRR-based, F-statistic, and peddy sex determinations
     along with a concordance status flag.
-    """
-    if f_stat_results is None:
-        f_stat_results = {}
-    if peddy_sex_results is None:
-        peddy_sex_results = {}
 
-    cross_tab = cross_tabulate_sex(
-        sample_names, sex_map, chrx_medians, chry_medians,
-        f_stat_results, peddy_sex_results,
-    )
+    Parameters
+    ----------
+    cross_tab : list[dict] or None
+        Pre-computed rows from :func:`cross_tabulate_sex`.  When supplied the
+        other arguments (*chrx_medians*, *chry_medians*, *sample_names*,
+        *sex_map*, *f_stat_results*, *peddy_sex_results*) are ignored for the
+        table body (but *output_dir* is always required).  Pass this to avoid
+        recomputing the cross-tabulation when it has already been done in the
+        calling code.
+    """
+    if cross_tab is None:
+        if f_stat_results is None:
+            f_stat_results = {}
+        if peddy_sex_results is None:
+            peddy_sex_results = {}
+        cross_tab = cross_tabulate_sex(
+            sample_names, sex_map, chrx_medians, chry_medians,
+            f_stat_results, peddy_sex_results,
+        )
 
     table_path = os.path.join(output_dir, 'sex_check_chrXY_lrr.tsv')
     with open(table_path, 'w') as out:
@@ -873,7 +1117,11 @@ def write_sex_check_table(chrx_medians, chry_medians, sample_names, sex_map,
                   "(PAR/XTR excluded)\n")
         out.write("  2. F-statistic: chrX genotype heterozygosity "
                   "(F>0.8=M, F<0.2=F, PAR/XTR excluded)\n")
-        if peddy_sex_results:
+        has_peddy = any(
+            r.get('peddy_sex') not in (None, '', 'NA')
+            for r in cross_tab
+        )
+        if has_peddy:
             out.write("  3. Peddy: Genotype-based sex prediction via peddy\n")
         out.write("\nDiscordant samples may indicate:\n")
         out.write("  - Sex chromosome aneuploidy (e.g. XXY, X0)\n")
@@ -949,19 +1197,31 @@ def main():
     if peddy_sex_results:
         print(f"  Peddy sex check: {len(peddy_sex_results)} samples loaded")
 
-    plot_path = create_sex_check_plot(
-        chrx_medians, chry_medians, sample_names, sex_map, args.output_dir
+    # Build cross-tabulation once; shared by both the plot and the table.
+    cross_tab = cross_tabulate_sex(
+        sample_names, sex_map, chrx_medians, chry_medians,
+        f_stat_results, peddy_sex_results,
     )
+
+    print("  Generating sex check plots for all available color-by variables...")
+    plot_paths = create_sex_check_plots(cross_tab, args.output_dir)
+    default_var = plot_paths.get('_default_var')
+    if plot_paths.get('_default'):
+        print(f"  Sex check plot (default – colored by {default_var}): "
+              f"{plot_paths['_default']}")
+        for var_name, path in sorted(plot_paths.items()):
+            if not var_name.startswith('_') and var_name != default_var:
+                print(f"  Sex check plot ({var_name}): {path}")
+    else:
+        print("  Warning: Sex check plot could not be generated.")
+
     table_path = write_sex_check_table(
         chrx_medians, chry_medians, sample_names, sex_map, args.output_dir,
         f_stat_results=f_stat_results,
         peddy_sex_results=peddy_sex_results,
+        cross_tab=cross_tab,
     )
 
-    if plot_path:
-        print(f"  Sex check plot: {plot_path}")
-    else:
-        print("  Warning: Sex check plot could not be generated.")
     if table_path:
         print(f"  Sex check table: {table_path}")
     summary_path = os.path.join(args.output_dir, 'sex_check_summary.txt')
