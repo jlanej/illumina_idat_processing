@@ -356,7 +356,7 @@ has_status   = 'value=\"sex_status\"' in html
 # Check computed_gender field appears in the sex-data JSON
 m = re.search(r'id=\"sex-data\">(\[.*?\])<', html, re.DOTALL)
 if not m:
-    print('NO_JSON')
+    print('ERROR: sex-data JSON block not found in HTML')
     sys.exit(1)
 data = json.loads(m.group(1))
 has_cg_field  = any('computed_gender' in p for p in data)

@@ -2173,6 +2173,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             color: vals,
                             colorscale: 'RdBu',
                             reversescale: true,
+                            /* F-statistic valid biological range: 0 (female/diploid) to 1 (male/hemizygous) */
                             cmin: 0, cmax: 1,
                             size: 5, opacity: 0.75,
                             showscale: true,
