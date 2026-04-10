@@ -1004,12 +1004,17 @@ def _prepare_sex_check_json(sex_check_file):
             continue
         f_sex = row.get('f_sex', '')
         peddy_sex = row.get('peddy_sex', '')
+        computed_gender = row.get('computed_gender', '')
         point = {
             'id': row.get('sample_id', ''),
-            'gender': _best_sex(row.get('computed_gender', ''), f_sex, peddy_sex),
+            'gender': _best_sex(computed_gender, f_sex, peddy_sex),
             'chrx_lrr_median': round(x, 6),
             'chry_lrr_median': round(y, 6),
         }
+        # Include individual sex-determination method fields so the
+        # interactive report can colour by each variable independently
+        if computed_gender:
+            point['computed_gender'] = computed_gender
         # Include F-statistic and cross-tabulation columns if present
         f_val = safe_float(row.get('chrx_f_stat'))
         if f_val is not None:
@@ -2096,82 +2101,207 @@ document.addEventListener('DOMContentLoaded', function() {
     if (sexEl) {
         var sexData = JSON.parse(sexEl.textContent || '[]');
         if (sexData && sexData.length) {
-            var grouped2 = {};
-            var allX2 = [];
-            var allY2 = [];
-            sexData.forEach(function(p) {
-                if (p.chrx_lrr_median === null || p.chry_lrr_median === null) return;
-                var sx = normSex(p.gender);
-                var label = sx === 'M' ? 'Male' : (sx === 'F' ? 'Female' : 'Unknown');
-                var color = sx === 'M' ? '#4393C3' : (sx === 'F' ? '#D6604D' : '#6b7280');
-                if (!grouped2[label]) {
-                    grouped2[label] = {x:[], y:[], text:[], color:color};
-                }
-                grouped2[label].x.push(p.chrx_lrr_median);
-                grouped2[label].y.push(p.chry_lrr_median);
-                grouped2[label].text.push(p.id);
-                allX2.push(p.chrx_lrr_median);
-                allY2.push(p.chry_lrr_median);
-            });
+            /* Detect which color-by fields are present in the data */
+            var sexFields = {
+                computed_gender: sexData.some(function(p) { return p.computed_gender && p.computed_gender !== 'NA'; }),
+                f_sex:           sexData.some(function(p) { return p.f_sex && p.f_sex !== 'NA'; }),
+                peddy_sex:       sexData.some(function(p) { return p.peddy_sex && p.peddy_sex !== 'NA'; }),
+                sex_status:      sexData.some(function(p) { return p.sex_status && p.sex_status !== 'NA'; }),
+                chrx_f_stat:     sexData.some(function(p) { return typeof p.chrx_f_stat === 'number'; })
+            };
 
-            var traces2 = Object.keys(grouped2).sort().map(function(label) {
-                var g = grouped2[label];
-                return {
-                    x:g.x, y:g.y, text:g.text, mode:'markers', type:'scatter',
-                    name:label+' (n='+g.x.length+')',
-                    marker:{color:g.color, size:5, opacity:0.65},
-                    hovertemplate:'<b>%{text}</b><br>Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<extra>'+label+'</extra>'
-                };
-            });
-            if (traces2.length) {
-                var densityIdx2 = traces2.length;
-                traces2.push({
-                    x:allX2, y:allY2, type:'histogram2d', name:'Density',
-                    nbinsx:35, nbinsy:35,
-                    colorscale:[
-                        [0.0, 'rgba(37,99,235,0)'],
-                        [0.05, 'rgba(37,99,235,0.2)'],
-                        [0.4, 'rgba(37,99,235,0.5)'],
-                        [1.0, 'rgba(30,64,175,0.85)']
-                    ],
-                    zmin:0, showscale:true, colorbar:{title:'Count'},
-                    hovertemplate:'Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<br>Count: %{z}<extra>Density</extra>',
-                    visible:false
+            /* Disable unavailable options in the color-by selector */
+            var sexColorSel = document.getElementById('sex-color-mode');
+            if (sexColorSel) {
+                Array.from(sexColorSel.options).forEach(function(opt) {
+                    if (opt.value !== 'auto' && !sexFields[opt.value]) {
+                        opt.disabled = true;
+                    }
                 });
-                var sexDiv = document.getElementById('plot-sex-check');
-                if (sexDiv) {
-                    var sexTraceCount = traces2.length;
-                    Plotly.newPlot(sexDiv, traces2, Object.assign({}, baseLayout, {
-                        title:{text:'Sex Check: Median chrX vs chrY LRR',font:{size:14}},
-                        xaxis:{title:'Median chrX LRR',gridcolor:'#f1f5f9',zeroline:false},
-                        yaxis:{title:'Median chrY LRR',gridcolor:'#f1f5f9',zeroline:false}
+            }
+
+            /* ---- Color helpers ---- */
+            function sexColorForValue(colorBy, val) {
+                if (colorBy === 'sex_status') {
+                    var statusColors = {
+                        CONCORDANT:    '#22c55e',
+                        DISCORDANT:    '#ef4444',
+                        AMBIGUOUS:     '#f59e0b',
+                        SINGLE_METHOD: '#3b82f6',
+                        UNDETERMINED:  '#9ca3af'
+                    };
+                    return statusColors[val] || '#6b7280';
+                }
+                /* Categorical sex fields */
+                var sx = normSex(val);
+                if (sx === 'M') return '#4393C3';
+                if (sx === 'F') return '#D6604D';
+                var v = (val || '').toLowerCase();
+                if (v === 'ambiguous') return '#f59e0b';
+                return '#6b7280';
+            }
+
+            function sexLabelForValue(colorBy, val) {
+                if (colorBy === 'sex_status') {
+                    if (!val || val === 'NA') return 'Unknown';
+                    return val.charAt(0) + val.slice(1).toLowerCase();
+                }
+                var sx = normSex(val);
+                if (sx === 'M') return 'Male';
+                if (sx === 'F') return 'Female';
+                var v = (val || '').toLowerCase();
+                if (v === 'ambiguous') return 'Ambiguous';
+                return 'Unknown';
+            }
+
+            /* ---- Build scatter traces for the selected color-by variable ---- */
+            function buildSexScatterTraces(colorBy) {
+                /* Numeric continuous mode: single trace with colorscale */
+                if (colorBy === 'chrx_f_stat') {
+                    var xs = [], ys = [], ids = [], vals = [];
+                    sexData.forEach(function(p) {
+                        if (p.chrx_lrr_median === null || p.chry_lrr_median === null) return;
+                        xs.push(p.chrx_lrr_median);
+                        ys.push(p.chry_lrr_median);
+                        ids.push(p.id);
+                        vals.push(typeof p.chrx_f_stat === 'number' ? p.chrx_f_stat : null);
+                    });
+                    return [{
+                        x: xs, y: ys, text: ids, mode: 'markers', type: 'scatter',
+                        name: 'ChrX F-stat',
+                        marker: {
+                            color: vals,
+                            colorscale: 'RdBu',
+                            reversescale: true,
+                            /* F-statistic valid biological range: 0 (female/diploid) to 1 (male/hemizygous) */
+                            cmin: 0, cmax: 1,
+                            size: 5, opacity: 0.75,
+                            showscale: true,
+                            colorbar: {title: 'F-stat', thickness: 12}
+                        },
+                        hovertemplate: '<b>%{text}</b><br>Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<br>F-stat: %{marker.color:.4f}<extra>ChrX F-stat</extra>'
+                    }];
+                }
+
+                /* Categorical mode: group by label */
+                var grouped = {};
+                var allX = [], allY = [];
+                sexData.forEach(function(p) {
+                    if (p.chrx_lrr_median === null || p.chry_lrr_median === null) return;
+                    var rawVal;
+                    if (colorBy === 'auto') {
+                        rawVal = p.gender;
+                    } else {
+                        rawVal = p[colorBy] || '';
+                    }
+                    var label = sexLabelForValue(colorBy, rawVal);
+                    var color = sexColorForValue(colorBy, rawVal);
+                    if (!grouped[label]) {
+                        grouped[label] = {x: [], y: [], text: [], color: color};
+                    }
+                    grouped[label].x.push(p.chrx_lrr_median);
+                    grouped[label].y.push(p.chry_lrr_median);
+                    grouped[label].text.push(p.id);
+                    allX.push(p.chrx_lrr_median);
+                    allY.push(p.chry_lrr_median);
+                });
+
+                return Object.keys(grouped).sort().map(function(label) {
+                    var g = grouped[label];
+                    return {
+                        x: g.x, y: g.y, text: g.text, mode: 'markers', type: 'scatter',
+                        name: label + ' (n=' + g.x.length + ')',
+                        marker: {color: g.color, size: 5, opacity: 0.65},
+                        hovertemplate: '<b>%{text}</b><br>Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<extra>' + label + '</extra>'
+                    };
+                });
+            }
+
+            /* ---- State ---- */
+            var sexState = {colorBy: 'auto', viewMode: 'scatter'};
+
+            /* ---- Density trace (all points, view-mode toggled) ---- */
+            var allX2 = [], allY2 = [];
+            sexData.forEach(function(p) {
+                if (p.chrx_lrr_median !== null && p.chry_lrr_median !== null) {
+                    allX2.push(p.chrx_lrr_median);
+                    allY2.push(p.chry_lrr_median);
+                }
+            });
+            var densityTrace2 = {
+                x: allX2, y: allY2, type: 'histogram2d', name: 'Density',
+                nbinsx: 35, nbinsy: 35,
+                colorscale: [
+                    [0.0,  'rgba(37,99,235,0)'],
+                    [0.05, 'rgba(37,99,235,0.2)'],
+                    [0.4,  'rgba(37,99,235,0.5)'],
+                    [1.0,  'rgba(30,64,175,0.85)']
+                ],
+                zmin: 0, showscale: true, colorbar: {title: 'Count'},
+                hovertemplate: 'Median chrX LRR: %{x:.4f}<br>Median chrY LRR: %{y:.4f}<br>Count: %{z}<extra>Density</extra>',
+                visible: false
+            };
+
+            /* ---- Initial traces ---- */
+            var scatterTraces2 = buildSexScatterTraces('auto');
+            var traces2 = scatterTraces2.concat([densityTrace2]);
+            var densityIdx2 = traces2.length - 1;
+
+            var sexDiv = document.getElementById('plot-sex-check');
+            if (sexDiv && traces2.length > 1) {
+                Plotly.newPlot(sexDiv, traces2, Object.assign({}, baseLayout, {
+                    title: {text: 'Sex Check: Median chrX vs chrY LRR', font: {size: 14}},
+                    xaxis: {title: 'Median chrX LRR', gridcolor: '#f1f5f9', zeroline: false},
+                    yaxis: {title: 'Median chrY LRR', gridcolor: '#f1f5f9', zeroline: false}
+                }), cfg);
+
+                /* ---- Refresh: rebuild scatter traces while preserving density ---- */
+                function refreshSexPlot() {
+                    var newScatter = buildSexScatterTraces(sexState.colorBy);
+                    var isDensity = (sexState.viewMode === 'density');
+                    densityTrace2.visible = isDensity;
+                    newScatter.forEach(function(t) { t.visible = !isDensity; });
+                    var newTraces = newScatter.concat([densityTrace2]);
+                    densityIdx2 = newTraces.length - 1;
+                    Plotly.react(sexDiv, newTraces, Object.assign({}, baseLayout, {
+                        title: {text: 'Sex Check: Median chrX vs chrY LRR', font: {size: 14}},
+                        xaxis: {title: 'Median chrX LRR', gridcolor: '#f1f5f9', zeroline: false},
+                        yaxis: {title: 'Median chrY LRR', gridcolor: '#f1f5f9', zeroline: false}
                     }), cfg);
+                }
 
-                    var sexSlider = document.getElementById('sex-density-bins');
-                    var sexSliderVal = document.getElementById('sex-density-bins-value');
-                    if (sexSlider) {
-                        sexSlider.value = '35';
-                        if (sexSliderVal) sexSliderVal.textContent = '35';
-                        sexSlider.addEventListener('input', function() {
-                            var bins = parseInt(this.value, 10);
-                            if (!isFinite(bins)) return;
-                            if (sexSliderVal) sexSliderVal.textContent = String(bins);
-                            Plotly.restyle(sexDiv, {'nbinsx': bins, 'nbinsy': bins}, [densityIdx2]);
-                        });
-                    }
+                /* ---- Density bins slider ---- */
+                var sexSlider = document.getElementById('sex-density-bins');
+                var sexSliderVal = document.getElementById('sex-density-bins-value');
+                if (sexSlider) {
+                    sexSlider.value = '35';
+                    if (sexSliderVal) sexSliderVal.textContent = '35';
+                    sexSlider.addEventListener('input', function() {
+                        var bins = parseInt(this.value, 10);
+                        if (!isFinite(bins)) return;
+                        if (sexSliderVal) sexSliderVal.textContent = String(bins);
+                        Plotly.restyle(sexDiv, {'nbinsx': bins, 'nbinsy': bins}, [densityIdx2]);
+                    });
+                }
 
-                    var sexScatterBtn = document.getElementById('sex-scatter-btn');
-                    var sexDensityBtn = document.getElementById('sex-density-btn');
-                    function setSexViewMode(mode) {
-                        var visible = Array.from({length: sexTraceCount}, function(_, i) {
-                            return mode === 'density' ? i === densityIdx2 : i !== densityIdx2;
-                        });
-                        Plotly.restyle(sexDiv, {visible: visible});
-                        if (sexScatterBtn) sexScatterBtn.classList.toggle('active', mode === 'scatter');
-                        if (sexDensityBtn) sexDensityBtn.classList.toggle('active', mode === 'density');
-                    }
-                    if (sexScatterBtn) sexScatterBtn.addEventListener('click', function() { setSexViewMode('scatter'); });
-                    if (sexDensityBtn) sexDensityBtn.addEventListener('click', function() { setSexViewMode('density'); });
+                /* ---- Scatter / Density toggle ---- */
+                var sexScatterBtn = document.getElementById('sex-scatter-btn');
+                var sexDensityBtn = document.getElementById('sex-density-btn');
+                function setSexViewMode(mode) {
+                    sexState.viewMode = mode;
+                    refreshSexPlot();
+                    if (sexScatterBtn) sexScatterBtn.classList.toggle('active', mode === 'scatter');
+                    if (sexDensityBtn) sexDensityBtn.classList.toggle('active', mode === 'density');
+                }
+                if (sexScatterBtn) sexScatterBtn.addEventListener('click', function() { setSexViewMode('scatter'); });
+                if (sexDensityBtn) sexDensityBtn.addEventListener('click', function() { setSexViewMode('density'); });
+
+                /* ---- Color by selector ---- */
+                if (sexColorSel) {
+                    sexColorSel.addEventListener('change', function() {
+                        sexState.colorBy = this.value;
+                        refreshSexPlot();
+                    });
                 }
             }
         }
@@ -2960,6 +3090,16 @@ def _build_html(stats, stage1_stats, figures, realign_text,
             <div class="control-sep"></div>
             <label for="sex-density-bins">Bins: <span id="sex-density-bins-value">35</span></label>
             <input id="sex-density-bins" class="plot-slider" type="range" min="10" max="80" value="35" step="1">
+            <div class="control-sep"></div>
+            <label for="sex-color-mode">Color by</label>
+            <select id="sex-color-mode" class="plot-input">
+                <option value="auto">Best sex call</option>
+                <option value="computed_gender">LRR-based sex</option>
+                <option value="f_sex">F-stat sex</option>
+                <option value="peddy_sex">Peddy sex</option>
+                <option value="sex_status">Sex status</option>
+                <option value="chrx_f_stat">ChrX F-stat (numeric)</option>
+            </select>
         </div>
         <div class="card"><div id="plot-sex-check" class="plot-box"></div></div>
         <noscript>
