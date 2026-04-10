@@ -342,6 +342,39 @@ else
     (( FAIL++ )) || true
 fi
 
+# --- Test 7e: Sex check color-by selector and computed_gender field ---
+echo "--- Test 7e: Sex check color-by selector and per-variable fields ---"
+SEX_COLORBY=$(python3 -c "
+import json, sys, re
+html = open('${REPORT}').read()
+# Check selector is present with expected options
+has_selector = 'id=\"sex-color-mode\"' in html
+has_auto     = 'value=\"auto\"' in html
+has_computed = 'value=\"computed_gender\"' in html
+has_fstat    = 'value=\"chrx_f_stat\"' in html
+has_status   = 'value=\"sex_status\"' in html
+# Check computed_gender field appears in the sex-data JSON
+m = re.search(r'id=\"sex-data\">(\[.*?\])<', html, re.DOTALL)
+if not m:
+    print('NO_JSON')
+    sys.exit(1)
+data = json.loads(m.group(1))
+has_cg_field  = any('computed_gender' in p for p in data)
+has_fsx_field = any('f_sex' in p for p in data)
+has_sts_field = any('sex_status' in p for p in data)
+# S001-S003 have computed_gender set; S004-S006 have NA computed_gender (not included)
+cg_s001 = next((p.get('computed_gender') for p in data if p['id'] == 'S001'), 'MISSING')
+print(int(has_selector), int(has_auto), int(has_computed), int(has_fstat), int(has_status),
+      int(has_cg_field), int(has_fsx_field), int(has_sts_field), cg_s001)
+" 2>/dev/null)
+if [[ "${SEX_COLORBY}" == "1 1 1 1 1 1 1 1 M" ]]; then
+    echo "  PASS: Color-by selector present with all options; computed_gender, f_sex, sex_status fields in JSON; S001 computed_gender=M"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: Color-by selector or JSON fields incorrect: got '${SEX_COLORBY}'"
+    (( FAIL++ )) || true
+fi
+
 # --- Test 8: Pass/fail classification in JSON ---
 echo "--- Test 8: Pass/fail classification ---"
 # S001 and S003 should pass (CR >= 0.97, LRR SD <= 0.35)
