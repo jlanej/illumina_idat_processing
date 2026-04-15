@@ -561,6 +561,8 @@ The pipeline report surfaces default QC thresholds that are commonly used in GWA
 
 These are robust defaults, but they are not one-size-fits-all. For very small cohorts, founder populations, case-only designs, or rare-variant-focused studies, thresholds should be reviewed with domain context and adjusted using pipeline options where appropriate.
 
+See **[docs/maf_usage.md](docs/maf_usage.md)** for a detailed map of every place in the pipeline where MAF is used as a filter or output column.
+
 > **Diagnostic vs. GWAS thresholds**: The automated QC diagnostics tool (`diagnose_qc.py`) uses intentionally wider thresholds (call rate ≥ 0.95, LRR SD ≤ 0.40) to flag potential systematic issues such as build mismatches or normalization errors. These are separate from the stricter GWAS QC thresholds above, which are used for sample pass/fail classification in the pipeline report and for Stage 2 sample filtering.
 
 ### Pre/Post Reclustering QC Comparison
