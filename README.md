@@ -104,6 +104,9 @@ The collated output `collated_variant_qc.tsv` includes these sex-chromosome colu
 | `chrX_maf` | chrX minor allele frequency, all samples |
 | `chrX_female_call_rate` | chrX call rate, females only |
 | `chrX_female_hwe_p` | chrX HWE p-value, females only (diploid) |
+| `chrX_female_hom_a1_ct` | chrX female homozygous A1 genotype count |
+| `chrX_female_het_ct` | chrX female heterozygous genotype count |
+| `chrX_female_hom_a2_ct` | chrX female homozygous A2 genotype count |
 | `chrX_male_call_rate` | chrX call rate, males only |
 | `chrY_male_call_rate` | chrY call rate, males only (non-PAR) |
 | `chrY_male_maf` | chrY minor allele frequency, males only |
@@ -118,11 +121,26 @@ When ancestry-stratified QC is run, sex-chromosome variant QC is also computed *
 | `{ANC}_chrX_maf` | chrX MAF within ancestry group |
 | `{ANC}_chrX_female_call_rate` | chrX female call rate within ancestry group |
 | `{ANC}_chrX_female_hwe_p` | chrX female HWE p-value within ancestry group |
+| `{ANC}_chrX_female_hom_a1_ct` | chrX female homozygous A1 count within ancestry group |
+| `{ANC}_chrX_female_het_ct` | chrX female heterozygous count within ancestry group |
+| `{ANC}_chrX_female_hom_a2_ct` | chrX female homozygous A2 count within ancestry group |
 | `{ANC}_chrX_male_call_rate` | chrX male call rate within ancestry group |
 | `{ANC}_chrY_male_call_rate` | chrY male call rate within ancestry group |
 | `{ANC}_chrY_male_maf` | chrY male MAF within ancestry group |
 
 For example, `EUR_chrX_female_hwe_p` is the chrX HWE p-value computed on European-ancestry females only.
+
+##### Cross-Ancestry Sex-Chromosome Pass Flags
+
+When ancestry-stratified sex-chromosome QC is available, the collated output includes cross-ancestry pass flags that mirror the autosomal `all_ancestries_*_pass` columns:
+
+| Column | Description |
+|--------|-------------|
+| `all_ancestries_chrX_female_hwe_pass` | 1 if chrX female HWE p ≥ threshold in all ancestry groups; 0 if any fail; NA if variant not on chrX |
+| `all_ancestries_chrX_call_rate_pass` | 1 if chrX call rate ≥ threshold in all ancestry groups; 0 if any fail; NA if variant not on chrX |
+| `all_ancestries_chrY_male_call_rate_pass` | 1 if chrY male call rate ≥ threshold in all ancestry groups; 0 if any fail; NA if variant not on chrY |
+
+These flags enable filtering sex-chromosome variants that fail QC in any ancestry group, analogous to how autosomal variants are filtered across ancestries.
 
 When ancestry-stratified QC is skipped (e.g., peddy not available), the pipeline runs sex-chromosome QC as a standalone fallback to ensure chrX/chrY variants appear in the collated output.
 

@@ -1347,6 +1347,9 @@ assert_contains "${SEXCHR_HEADER}" "chrX_call_rate" "sex-chr collation has chrX_
 assert_contains "${SEXCHR_HEADER}" "chrX_maf" "sex-chr collation has chrX_maf"
 assert_contains "${SEXCHR_HEADER}" "chrX_female_call_rate" "sex-chr collation has chrX_female_call_rate"
 assert_contains "${SEXCHR_HEADER}" "chrX_female_hwe_p" "sex-chr collation has chrX_female_hwe_p"
+assert_contains "${SEXCHR_HEADER}" "chrX_female_hom_a1_ct" "sex-chr collation has chrX_female_hom_a1_ct"
+assert_contains "${SEXCHR_HEADER}" "chrX_female_het_ct" "sex-chr collation has chrX_female_het_ct"
+assert_contains "${SEXCHR_HEADER}" "chrX_female_hom_a2_ct" "sex-chr collation has chrX_female_hom_a2_ct"
 assert_contains "${SEXCHR_HEADER}" "chrX_male_call_rate" "sex-chr collation has chrX_male_call_rate"
 assert_contains "${SEXCHR_HEADER}" "chrY_male_call_rate" "sex-chr collation has chrY_male_call_rate"
 assert_contains "${SEXCHR_HEADER}" "chrY_male_maf" "sex-chr collation has chrY_male_maf"
@@ -1378,6 +1381,16 @@ assert_eq "${CHRX_V1_MCR}" "0.986000" "chrX v1 male call rate = 0.986000"
 # Verify chrY male call rate for chry_v1 = 1 - 0.010 = 0.990000
 CHRY_V1_MCR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrY_male_call_rate") c=i} /^chry_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
 assert_eq "${CHRY_V1_MCR}" "0.990000" "chrY v1 male call rate = 0.990000"
+
+# Verify chrX female genotype counts for chrx_v1 from .hardy file
+CHRX_V1_HOM1=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_female_hom_a1_ct") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRX_V1_HOM1}" "150" "chrX v1 female hom_a1_ct = 150"
+
+CHRX_V1_HET=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_female_het_ct") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRX_V1_HET}" "300" "chrX v1 female het_ct = 300"
+
+CHRX_V1_HOM2=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_female_hom_a2_ct") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
+assert_eq "${CHRX_V1_HOM2}" "50" "chrX v1 female hom_a2_ct = 50"
 
 # Verify autosomal variant has NA for sex-chr columns
 AUTO_CHRX_CR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="chrX_call_rate") c=i} /^auto_v1\t/ {print $c}' <(grep -v '^#' "${SEXCHR_TEST}/collated_sexchr.tsv"))
@@ -1727,6 +1740,24 @@ assert_contains "${ANCSEX_HEADER}" "AFR_chrX_female_hwe_p" \
 assert_contains "${ANCSEX_HEADER}" "AFR_chrX_male_call_rate" \
     "collation has AFR_chrX_male_call_rate column"
 
+# Verify per-ancestry genotype count columns exist
+assert_contains "${ANCSEX_HEADER}" "EUR_chrX_female_hom_a1_ct" \
+    "collation has EUR_chrX_female_hom_a1_ct column"
+assert_contains "${ANCSEX_HEADER}" "EUR_chrX_female_het_ct" \
+    "collation has EUR_chrX_female_het_ct column"
+assert_contains "${ANCSEX_HEADER}" "EUR_chrX_female_hom_a2_ct" \
+    "collation has EUR_chrX_female_hom_a2_ct column"
+assert_contains "${ANCSEX_HEADER}" "AFR_chrX_female_hom_a1_ct" \
+    "collation has AFR_chrX_female_hom_a1_ct column"
+
+# Verify cross-ancestry sex-chr pass flag columns exist
+assert_contains "${ANCSEX_HEADER}" "all_ancestries_chrX_female_hwe_pass" \
+    "collation has all_ancestries_chrX_female_hwe_pass column"
+assert_contains "${ANCSEX_HEADER}" "all_ancestries_chrX_call_rate_pass" \
+    "collation has all_ancestries_chrX_call_rate_pass column"
+assert_contains "${ANCSEX_HEADER}" "all_ancestries_chrY_male_call_rate_pass" \
+    "collation has all_ancestries_chrY_male_call_rate_pass column"
+
 # Verify EUR chrX female HWE p-value for chrx_v1 = 0.45
 EUR_CHRX_HWE=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_female_hwe_p") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
 assert_eq "${EUR_CHRX_HWE}" "0.45" "EUR chrX v1 female HWE p = 0.45"
@@ -1738,6 +1769,35 @@ assert_eq "${AFR_CHRX_HWE}" "0.55" "AFR chrX v1 female HWE p = 0.55"
 # Verify EUR chrY male call rate for chry_v1 = 1 - 0.00667 = 0.993330
 EUR_CHRY_MCR=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrY_male_call_rate") c=i} /^chry_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
 assert_eq "${EUR_CHRY_MCR}" "0.993330" "EUR chrY v1 male call rate = 0.993330"
+
+# Verify EUR chrX female genotype counts for chrx_v1
+EUR_HOM1=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_female_hom_a1_ct") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${EUR_HOM1}" "90" "EUR chrX v1 female hom_a1_ct = 90"
+
+EUR_HET=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_female_het_ct") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${EUR_HET}" "180" "EUR chrX v1 female het_ct = 180"
+
+EUR_HOM2=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_female_hom_a2_ct") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${EUR_HOM2}" "30" "EUR chrX v1 female hom_a2_ct = 30"
+
+# Verify cross-ancestry chrX female HWE pass for chrx_v1 (EUR=0.45, AFR=0.55 both > 1e-6)
+CHRX_HWE_PASS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_ancestries_chrX_female_hwe_pass") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${CHRX_HWE_PASS}" "1" "chrX v1 passes cross-ancestry female HWE"
+
+# Verify cross-ancestry chrX call rate pass for chrx_v1
+CHRX_CR_PASS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_ancestries_chrX_call_rate_pass") c=i} /^chrx_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${CHRX_CR_PASS}" "1" "chrX v1 passes cross-ancestry call rate"
+
+# Verify cross-ancestry chrY male call rate pass for chry_v1 (EUR only, 0.993330 > 0.98)
+CHRY_CR_PASS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_ancestries_chrY_male_call_rate_pass") c=i} /^chry_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${CHRY_CR_PASS}" "1" "chrY v1 passes cross-ancestry male call rate"
+
+# Verify autosomal variant has NA for cross-ancestry sex-chr flags
+AUTO_CHRX_HWE_PASS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_ancestries_chrX_female_hwe_pass") c=i} /^auto_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${AUTO_CHRX_HWE_PASS}" "NA" "autosomal variant has NA for chrX female HWE pass flag"
+
+AUTO_CHRY_CR_PASS=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="all_ancestries_chrY_male_call_rate_pass") c=i} /^auto_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))
+assert_eq "${AUTO_CHRY_CR_PASS}" "NA" "autosomal variant has NA for chrY male call rate pass flag"
 
 # Verify autosomal variant has NA for per-ancestry sex-chr columns
 AUTO_EUR_CHRX=$(awk -F'\t' 'NR==1 {for(i=1;i<=NF;i++) if($i=="EUR_chrX_call_rate") c=i} /^auto_v1\t/ {print $c}' <(grep -v '^#' "${ANCSEX_TEST}/collated.tsv"))

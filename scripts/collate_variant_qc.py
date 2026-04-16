@@ -18,8 +18,19 @@ and chrY variant metrics are also included in the output.  Sex-chromosome
 QC follows best practices (Laurie et al. 2012, Genet Epidemiol 36:384-91):
   - chrX HWE is computed on females only (diploid genotypes)
   - chrX call rate / MAF are reported for all samples, plus per-sex
+  - chrX female genotype counts (hom_a1_ct, het_ct, hom_a2_ct) are
+    included for transparency and downstream filtering
   - chrY metrics are computed on males only
   - PAR/XTR regions are excluded
+
+When ancestry-stratified sex-chromosome QC is provided (--ancestry-sex-chr-qc),
+cross-ancestry pass flags for sex chromosomes are emitted:
+  - all_ancestries_chrX_female_hwe_pass: chrX female HWE p >= threshold
+    in every ancestry group
+  - all_ancestries_chrX_call_rate_pass: chrX call rate >= threshold in
+    every ancestry group
+  - all_ancestries_chrY_male_call_rate_pass: chrY male call rate >=
+    threshold in every ancestry group
 
 Usage:
     python3 collate_variant_qc.py \\
@@ -185,7 +196,9 @@ def load_sex_chr_qc(sex_chr_dir):
       sex_chr_dir/chrY/chrY_male.afreq     - male-only allele frequency
 
     Returns a dict with keys 'chrX' and 'chrY', each mapping variant_id
-    to a dict of QC metrics with column-name-ready keys.
+    to a dict of QC metrics with column-name-ready keys.  chrX metrics
+    include female genotype counts (hom_a1_ct, het_ct, hom_a2_ct) from
+    the .hardy file to mirror autosomal genotype count reporting.
     """
     result = {'chrX': {}, 'chrY': {}}
 
@@ -226,6 +239,9 @@ def load_sex_chr_qc(sex_chr_dir):
                 'chrX_female_call_rate': _fmiss_to_call_rate(
                     chrx_female_vmiss.get(vid, {})),
                 'chrX_female_hwe_p': fem_hardy.get('P', 'NA'),
+                'chrX_female_hom_a1_ct': fem_hardy.get('HOM_A1_CT', 'NA'),
+                'chrX_female_het_ct': fem_hardy.get('HET_A1_AX_CT', 'NA'),
+                'chrX_female_hom_a2_ct': fem_hardy.get('TWO_AX_CT', 'NA'),
                 'chrX_male_call_rate': _fmiss_to_call_rate(
                     chrx_male_vmiss.get(vid, {})),
             }
@@ -396,6 +412,8 @@ def main():
         chrx_columns = [
             'chrX_call_rate', 'chrX_maf',
             'chrX_female_call_rate', 'chrX_female_hwe_p',
+            'chrX_female_hom_a1_ct', 'chrX_female_het_ct',
+            'chrX_female_hom_a2_ct',
             'chrX_male_call_rate',
         ]
         columns.extend(chrx_columns)
@@ -418,6 +436,8 @@ def main():
             cols = [
                 f'{anc}_chrX_call_rate', f'{anc}_chrX_maf',
                 f'{anc}_chrX_female_call_rate', f'{anc}_chrX_female_hwe_p',
+                f'{anc}_chrX_female_hom_a1_ct', f'{anc}_chrX_female_het_ct',
+                f'{anc}_chrX_female_hom_a2_ct',
                 f'{anc}_chrX_male_call_rate',
             ]
             anc_chrx_col_defs[anc] = cols
@@ -428,6 +448,20 @@ def main():
             ]
             anc_chry_col_defs[anc] = cols
             columns.extend(cols)
+
+    # Cross-ancestry sex-chromosome pass flags.  These mirror the autosomal
+    # all_ancestries_*_pass flags but apply to sex-chromosome metrics:
+    #   - chrX call rate (all-sample) must pass in every ancestry group
+    #   - chrX female HWE p-value must pass in every ancestry group
+    #   - chrY male call rate must pass in every ancestry group
+    # Only emitted when at least one ancestry-specific sex-chr QC is present.
+    has_anc_sex_chr_flags = bool(ancestry_sex_chr_data)
+    if has_anc_sex_chr_flags:
+        columns.extend([
+            'all_ancestries_chrX_female_hwe_pass',
+            'all_ancestries_chrX_call_rate_pass',
+            'all_ancestries_chrY_male_call_rate_pass',
+        ])
 
     # Write collated output
     os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
@@ -519,6 +553,48 @@ def main():
                     for col in anc_chry_col_defs[anc]:
                         internal_key = col[len(anc) + 1:]
                         row.append(chry_vd.get(internal_key, 'NA'))
+
+            # Cross-ancestry sex-chromosome pass flags
+            if has_anc_sex_chr_flags:
+                chrx_hwe_pass = True
+                chrx_cr_pass = True
+                chry_cr_pass = True
+                # A flag is only meaningful when at least one ancestry
+                # provides data for that chromosome; otherwise emit 'NA'.
+                any_chrx = False
+                any_chry = False
+                for anc in anc_sex_chr_sorted:
+                    anc_scqc = ancestry_sex_chr_data[anc]
+                    chrx_vd = anc_scqc.get('chrX', {}).get(vid, {})
+                    chry_vd = anc_scqc.get('chrY', {}).get(vid, {})
+                    if chrx_vd:
+                        any_chrx = True
+                        hwe_val = _safe_float(chrx_vd.get(
+                            'chrX_female_hwe_p'))
+                        cr_val = _safe_float(chrx_vd.get(
+                            'chrX_call_rate'))
+                        chrx_hwe_pass = (chrx_hwe_pass
+                                         and hwe_val is not None
+                                         and hwe_val >= HWE_P_THRESHOLD)
+                        chrx_cr_pass = (chrx_cr_pass
+                                        and cr_val is not None
+                                        and cr_val >= CALL_RATE_THRESHOLD)
+                    if chry_vd:
+                        any_chry = True
+                        cr_val = _safe_float(chry_vd.get(
+                            'chrY_male_call_rate'))
+                        chry_cr_pass = (chry_cr_pass
+                                        and cr_val is not None
+                                        and cr_val >= CALL_RATE_THRESHOLD)
+                row.append(
+                    '1' if any_chrx and chrx_hwe_pass
+                    else ('0' if any_chrx else 'NA'))
+                row.append(
+                    '1' if any_chrx and chrx_cr_pass
+                    else ('0' if any_chrx else 'NA'))
+                row.append(
+                    '1' if any_chry and chry_cr_pass
+                    else ('0' if any_chry else 'NA'))
 
             f.write('\t'.join(row) + '\n')
 
