@@ -136,9 +136,9 @@ When ancestry-stratified sex-chromosome QC is available, the collated output inc
 
 | Column | Description |
 |--------|-------------|
-| `all_ancestries_chrX_female_hwe_pass` | 1 if chrX female HWE p ≥ threshold in all ancestry groups; 0 if any fail; NA if variant not on chrX |
-| `all_ancestries_chrX_call_rate_pass` | 1 if chrX call rate ≥ threshold in all ancestry groups; 0 if any fail; NA if variant not on chrX |
-| `all_ancestries_chrY_male_call_rate_pass` | 1 if chrY male call rate ≥ threshold in all ancestry groups; 0 if any fail; NA if variant not on chrY |
+| `all_ancestries_chrX_female_hwe_pass` | 1 if chrX female HWE p ≥ threshold in all ancestry groups with data; 0 if any fail; NA if no ancestry-stratified chrX QC data for this variant |
+| `all_ancestries_chrX_call_rate_pass` | 1 if chrX call rate ≥ threshold in all ancestry groups with data; 0 if any fail; NA if no ancestry-stratified chrX QC data for this variant |
+| `all_ancestries_chrY_male_call_rate_pass` | 1 if chrY male call rate ≥ threshold in all ancestry groups with data; 0 if any fail; NA if no ancestry-stratified chrY QC data for this variant |
 
 These flags enable filtering sex-chromosome variants that fail QC in any ancestry group, analogous to how autosomal variants are filtered across ancestries.
 

@@ -474,10 +474,15 @@ def main():
             f.write('#sex_chr_qc_note=chrX HWE computed on females only '
                     '(males are hemizygous; diploid HWE is undefined). '
                     'chrX_male_hwe_p is intentionally omitted. '
+                    'chrX_female_hom_a1_ct/het_ct/hom_a2_ct are genotype '
+                    'counts from the female-only .hardy file. '
                     'chrY metrics are computed on males only. '
                     'PAR/XTR regions excluded. '
                     'Per-ancestry sex-chr columns (e.g. EUR_chrX_female_hwe_p) '
                     'follow the same conventions within each ancestry subset. '
+                    'all_ancestries_chrX_*/chrY_* pass flags are 1/0 when '
+                    'ancestry-stratified sex-chr QC is available; NA when no '
+                    'ancestry-stratified data exists for that variant/chromosome. '
                     'Ref: Laurie et al. 2012 Genet Epidemiol 36:384-91\n')
         f.write('\t'.join(columns) + '\n')
         for vid in all_variants:
