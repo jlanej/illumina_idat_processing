@@ -22,6 +22,18 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      - name: Install plink2 and bcftools for sex-chromosome QC tests
+        run: |
+          # Install bcftools from apt
+          sudo apt-get install -y --no-install-recommends bcftools
+          # Install plink2 from official release
+          wget -q "https://s3.amazonaws.com/plink2-assets/alpha6/plink2_linux_x86_64_20250304.zip" -O /tmp/plink2.zip
+          sudo unzip -o /tmp/plink2.zip plink2 -d /usr/local/bin/
+          sudo chmod +x /usr/local/bin/plink2
+          rm /tmp/plink2.zip
+          plink2 --version | head -1
+          bcftools --version | head -1
+
       - name: Install Python test dependencies
         run: python3 -m pip install --upgrade pip "numpy<1.25"
 
@@ -43,3 +55,4 @@ jobs:
           bash tests/test_ancestry_pca_projection.sh
           bash tests/test_qc_filtering.sh
           bash tests/test_recluster_welford.sh
+          bash tests/test_plink2_sex_chr.sh

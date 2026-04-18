@@ -1895,13 +1895,24 @@ else
     (( FAIL++ )) || true
 fi
 
-# The sex update file generation must use plink2 coding (1=male, 2=female)
-if grep -q "out.write(f'{s}\\\\t{s}\\\\t1\\\\n')" "${SEX_QC_SCRIPT}" && \
-   grep -q "out.write(f'{s}\\\\t{s}\\\\t2\\\\n')" "${SEX_QC_SCRIPT}"; then
-    echo "  PASS: sex_update.txt uses plink2 coding (1=male, 2=female)"
+# The sex update file generation must use #IID header and plink2 coding (1=male, 2=female)
+if grep -q "#IID" "${SEX_QC_SCRIPT}" && \
+   grep -q "out.write(f'{s}\\\\t1\\\\n')" "${SEX_QC_SCRIPT}" && \
+   grep -q "out.write(f'{s}\\\\t2\\\\n')" "${SEX_QC_SCRIPT}"; then
+    echo "  PASS: sex_update.txt uses #IID header and plink2 coding (1=male, 2=female)"
     (( PASS++ )) || true
 else
-    echo "  FAIL: sex_update.txt generation missing plink2 coding"
+    echo "  FAIL: sex_update.txt generation missing #IID header or plink2 coding"
+    (( FAIL++ )) || true
+fi
+
+# chrX plink2 commands must include --split-par for PAR reclassification
+SPLIT_PAR_COUNT=$(grep -c '\-\-split-par' "${SEX_QC_SCRIPT}" || true)
+if [[ "${SPLIT_PAR_COUNT}" -ge 3 ]]; then
+    echo "  PASS: compute_sex_chr_variant_qc.sh has --split-par in ${SPLIT_PAR_COUNT} plink2 chrX commands"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: compute_sex_chr_variant_qc.sh has --split-par in only ${SPLIT_PAR_COUNT} commands (expected >= 3)"
     (( FAIL++ )) || true
 fi
 
@@ -1950,34 +1961,35 @@ with open('${SEX_UPDATE_TEST}/sample_qc.tsv') as f:
             females.append(sid)
 
 with open('${SEX_UPDATE_TEST}/sex_update.txt', 'w') as out:
+    out.write('#IID\tSEX\n')
     for s in males:
-        out.write(f'{s}\t{s}\t1\n')
+        out.write(f'{s}\t1\n')
     for s in females:
-        out.write(f'{s}\t{s}\t2\n')
+        out.write(f'{s}\t2\n')
 "
 
-# Verify sex_update.txt has 5 lines (2 males + 3 females)
+# Verify sex_update.txt has 6 lines (1 header + 2 males + 3 females)
 N_SEX_LINES=$(wc -l < "${SEX_UPDATE_TEST}/sex_update.txt" | tr -d ' ')
-assert_eq "${N_SEX_LINES}" "5" "sex_update.txt has 5 entries (2M + 3F)"
+assert_eq "${N_SEX_LINES}" "6" "sex_update.txt has 6 lines (1 header + 2M + 3F)"
 
-# Verify males are coded as 1
-MALE_COUNT=$(awk -F'\t' '$3 == 1' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
+# Verify header is #IID<tab>SEX
+HEADER_LINE=$(head -1 "${SEX_UPDATE_TEST}/sex_update.txt")
+assert_eq "${HEADER_LINE}" "#IID	SEX" "sex_update.txt has #IID<tab>SEX header"
+
+# Verify males are coded as 1 (column 2, skipping header)
+MALE_COUNT=$(awk -F'\t' 'NR>1 && $2 == 1' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
 assert_eq "${MALE_COUNT}" "2" "sex_update.txt has 2 males coded as 1"
 
-# Verify females are coded as 2
-FEMALE_COUNT=$(awk -F'\t' '$3 == 2' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
+# Verify females are coded as 2 (column 2, skipping header)
+FEMALE_COUNT=$(awk -F'\t' 'NR>1 && $2 == 2' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
 assert_eq "${FEMALE_COUNT}" "3" "sex_update.txt has 3 females coded as 2"
 
-# Verify FID == IID (both columns match)
-MISMATCHED=$(awk -F'\t' '$1 != $2' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
-assert_eq "${MISMATCHED}" "0" "sex_update.txt FID matches IID for all entries"
-
 # Verify SAM_001 is male (sex=1)
-SAM001_SEX=$(awk -F'\t' '$1 == "SAM_001" {print $3}' "${SEX_UPDATE_TEST}/sex_update.txt")
+SAM001_SEX=$(awk -F'\t' '$1 == "SAM_001" {print $2}' "${SEX_UPDATE_TEST}/sex_update.txt")
 assert_eq "${SAM001_SEX}" "1" "SAM_001 coded as male (1)"
 
 # Verify SAM_002 is female (sex=2)
-SAM002_SEX=$(awk -F'\t' '$1 == "SAM_002" {print $3}' "${SEX_UPDATE_TEST}/sex_update.txt")
+SAM002_SEX=$(awk -F'\t' '$1 == "SAM_002" {print $2}' "${SEX_UPDATE_TEST}/sex_update.txt")
 assert_eq "${SAM002_SEX}" "2" "SAM_002 coded as female (2)"
 
 echo ""

@@ -153,12 +153,15 @@ with open('${FEMALE_SAMPLES}', 'w') as out:
     for s in females:
         out.write(s + '\n')
 
-# Generate plink2 --update-sex file: FID IID SEX (1=male, 2=female)
+# Generate plink2 --update-sex file with #IID header for BCF compatibility.
+# plink2 v2.00a6+ may assign FID=0 when importing BCF; using #IID header
+# ensures matching on IID regardless of plink2's FID assignment.
 with open('${SEX_UPDATE}', 'w') as out:
+    out.write('#IID\tSEX\n')
     for s in males:
-        out.write(f'{s}\t{s}\t1\n')
+        out.write(f'{s}\t1\n')
     for s in females:
-        out.write(f'{s}\t{s}\t2\n')
+        out.write(f'{s}\t2\n')
 
 print(f'  Males: {len(males)}, Females: {len(females)}')
 "
@@ -176,6 +179,19 @@ fi
 # -----------------------------------------------------------------
 PAR_BED="${TMP_DIR}/par_xtr.bed"
 get_par_xtr_bed "${GENOME}" "${PAR_BED}"
+
+# -----------------------------------------------------------------
+# --split-par coordinates for chrX.
+# plink2 v2.00a6+ requires --split-par when PAR variants are present
+# in chrX input.  Coordinates cover PAR1+XTR..PAR2, matching the
+# definitions in par_xtr_regions.py and utils.sh get_par_xtr_bed.
+# -----------------------------------------------------------------
+case "${GENOME}" in
+    CHM13)  SPLIT_PAR_BP1=6400875;  SPLIT_PAR_BP2=155701382 ;;
+    GRCh38) SPLIT_PAR_BP1=6400000;  SPLIT_PAR_BP2=155701383 ;;
+    GRCh37) SPLIT_PAR_BP1=6100000;  SPLIT_PAR_BP2=154931044 ;;
+    *)      SPLIT_PAR_BP1=6400875;  SPLIT_PAR_BP2=155701382 ;;
+esac
 
 # -----------------------------------------------------------------
 # Filter VCF to remove intensity-only probes
@@ -225,6 +241,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
     plink2 \
         --bcf "${CHRX_VCF}" \
         --allow-extra-chr \
+        --split-par "${SPLIT_PAR_BP1}" "${SPLIT_PAR_BP2}" \
         --update-sex "${SEX_UPDATE}" \
         --exclude bed0 "${PAR_BED}" \
         --threads "${THREADS}" \
@@ -237,13 +254,14 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
     # Reference: Laurie et al. 2012, Genet Epidemiol 36:384-91
     if [[ "${N_FEMALES}" -gt 0 ]]; then
         echo "  Computing chrX female-only HWE and missingness (${N_FEMALES} females)..."
-        # Create plink2 keep file (FID IID format; use sample_id for both)
+        # Create plink2 keep file with #IID header for BCF compatibility
         FEMALE_KEEP="${TMP_DIR}/female_keep.txt"
-        awk '{print $1, $1}' "${FEMALE_SAMPLES}" > "${FEMALE_KEEP}"
+        { echo "#IID"; cat "${FEMALE_SAMPLES}"; } > "${FEMALE_KEEP}"
 
         plink2 \
             --bcf "${CHRX_VCF}" \
             --allow-extra-chr \
+            --split-par "${SPLIT_PAR_BP1}" "${SPLIT_PAR_BP2}" \
             --update-sex "${SEX_UPDATE}" \
             --exclude bed0 "${PAR_BED}" \
             --keep "${FEMALE_KEEP}" \
@@ -257,11 +275,12 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
     if [[ "${N_MALES}" -gt 0 ]]; then
         echo "  Computing chrX male-only missingness (${N_MALES} males)..."
         MALE_KEEP="${TMP_DIR}/male_keep.txt"
-        awk '{print $1, $1}' "${MALE_SAMPLES}" > "${MALE_KEEP}"
+        { echo "#IID"; cat "${MALE_SAMPLES}"; } > "${MALE_KEEP}"
 
         plink2 \
             --bcf "${CHRX_VCF}" \
             --allow-extra-chr \
+            --split-par "${SPLIT_PAR_BP1}" "${SPLIT_PAR_BP2}" \
             --update-sex "${SEX_UPDATE}" \
             --exclude bed0 "${PAR_BED}" \
             --keep "${MALE_KEEP}" \
@@ -294,7 +313,7 @@ if [[ "${N_CHRY}" -gt 0 && "${N_MALES}" -gt 0 ]]; then
     # chrY males-only: missingness and allele frequency (PAR excluded)
     echo "  Computing chrY male-only missingness and allele frequency (${N_MALES} males)..."
     MALE_KEEP="${TMP_DIR}/male_keep.txt"
-    awk '{print $1, $1}' "${MALE_SAMPLES}" > "${MALE_KEEP}"
+    { echo "#IID"; cat "${MALE_SAMPLES}"; } > "${MALE_KEEP}"
 
     plink2 \
         --bcf "${CHRY_VCF}" \
