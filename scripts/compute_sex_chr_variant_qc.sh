@@ -118,6 +118,8 @@ echo "  Threads: ${THREADS}"
 MALE_SAMPLES="${TMP_DIR}/male_samples.txt"
 FEMALE_SAMPLES="${TMP_DIR}/female_samples.txt"
 
+SEX_UPDATE="${TMP_DIR}/sex_update.txt"
+
 python3 -c "
 import sys
 males, females = [], []
@@ -150,6 +152,13 @@ with open('${MALE_SAMPLES}', 'w') as out:
 with open('${FEMALE_SAMPLES}', 'w') as out:
     for s in females:
         out.write(s + '\n')
+
+# Generate plink2 --update-sex file: FID IID SEX (1=male, 2=female)
+with open('${SEX_UPDATE}', 'w') as out:
+    for s in males:
+        out.write(f'{s}\t{s}\t1\n')
+    for s in females:
+        out.write(f'{s}\t{s}\t2\n')
 
 print(f'  Males: {len(males)}, Females: {len(females)}')
 "
@@ -216,6 +225,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
     plink2 \
         --bcf "${CHRX_VCF}" \
         --allow-extra-chr \
+        --update-sex "${SEX_UPDATE}" \
         --exclude bed0 "${PAR_BED}" \
         --threads "${THREADS}" \
         --missing variant-only \
@@ -234,6 +244,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
         plink2 \
             --bcf "${CHRX_VCF}" \
             --allow-extra-chr \
+            --update-sex "${SEX_UPDATE}" \
             --exclude bed0 "${PAR_BED}" \
             --keep "${FEMALE_KEEP}" \
             --threads "${THREADS}" \
@@ -251,6 +262,7 @@ if [[ "${N_CHRX}" -gt 0 ]]; then
         plink2 \
             --bcf "${CHRX_VCF}" \
             --allow-extra-chr \
+            --update-sex "${SEX_UPDATE}" \
             --exclude bed0 "${PAR_BED}" \
             --keep "${MALE_KEEP}" \
             --threads "${THREADS}" \
@@ -287,6 +299,7 @@ if [[ "${N_CHRY}" -gt 0 && "${N_MALES}" -gt 0 ]]; then
     plink2 \
         --bcf "${CHRY_VCF}" \
         --allow-extra-chr \
+        --update-sex "${SEX_UPDATE}" \
         --exclude bed0 "${PAR_BED}" \
         --keep "${MALE_KEEP}" \
         --threads "${THREADS}" \

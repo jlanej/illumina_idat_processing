@@ -1868,6 +1868,118 @@ else
     (( PASS++ )) || true
 fi
 
+# ===============================================================
+# Test 47: compute_sex_chr_variant_qc.sh — --update-sex present
+# ===============================================================
+echo "--- Test 47: compute_sex_chr_variant_qc.sh --update-sex in plink2 commands ---"
+
+SEX_QC_SCRIPT="${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh"
+
+# Every plink2 invocation in the script must include --update-sex
+PLINK2_CMDS_TOTAL=$(grep -c 'plink2' "${SEX_QC_SCRIPT}" || true)
+PLINK2_CMDS_WITH_SEX=$(grep -c '\-\-update-sex' "${SEX_QC_SCRIPT}" || true)
+if [[ "${PLINK2_CMDS_WITH_SEX}" -ge 4 ]]; then
+    echo "  PASS: compute_sex_chr_variant_qc.sh has --update-sex in ${PLINK2_CMDS_WITH_SEX} plink2 commands"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: compute_sex_chr_variant_qc.sh only has --update-sex in ${PLINK2_CMDS_WITH_SEX} of ${PLINK2_CMDS_TOTAL} plink2 commands (expected >= 4)"
+    (( FAIL++ )) || true
+fi
+
+# Script must reference SEX_UPDATE variable
+if grep -q 'SEX_UPDATE=' "${SEX_QC_SCRIPT}"; then
+    echo "  PASS: compute_sex_chr_variant_qc.sh defines SEX_UPDATE variable"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: compute_sex_chr_variant_qc.sh missing SEX_UPDATE variable"
+    (( FAIL++ )) || true
+fi
+
+# The sex update file generation must use plink2 coding (1=male, 2=female)
+if grep -q "out.write(f'{s}\\\\t{s}\\\\t1\\\\n')" "${SEX_QC_SCRIPT}" && \
+   grep -q "out.write(f'{s}\\\\t{s}\\\\t2\\\\n')" "${SEX_QC_SCRIPT}"; then
+    echo "  PASS: sex_update.txt uses plink2 coding (1=male, 2=female)"
+    (( PASS++ )) || true
+else
+    echo "  FAIL: sex_update.txt generation missing plink2 coding"
+    (( FAIL++ )) || true
+fi
+
+echo ""
+
+# ===============================================================
+# Test 48: sex_update.txt generation — correctness
+# ===============================================================
+echo "--- Test 48: sex_update.txt generation from sample QC ---"
+
+SEX_UPDATE_TEST="${TMP_DIR}/sex_update_test"
+mkdir -p "${SEX_UPDATE_TEST}"
+
+cat > "${SEX_UPDATE_TEST}/sample_qc.tsv" <<EOF
+sample_id	call_rate	lrr_sd	computed_gender
+SAM_001	0.990	0.15	M
+SAM_002	0.985	0.18	F
+SAM_003	0.992	0.12	M
+SAM_004	0.988	0.20	F
+SAM_005	0.991	0.14	F
+EOF
+
+python3 -c "
+import sys
+males, females = [], []
+with open('${SEX_UPDATE_TEST}/sample_qc.tsv') as f:
+    header = f.readline().strip().split('\t')
+    sex_idx = None
+    sid_idx = 0
+    for i, col in enumerate(header):
+        if col == 'computed_gender':
+            sex_idx = i
+        if col == 'sample_id':
+            sid_idx = i
+    if sex_idx is None:
+        sys.exit(1)
+    for line in f:
+        fields = line.strip().split('\t')
+        if len(fields) <= sex_idx:
+            continue
+        sid = fields[sid_idx]
+        sex = fields[sex_idx].upper().strip()
+        if sex in ('M', '1', 'MALE'):
+            males.append(sid)
+        elif sex in ('F', '2', 'FEMALE'):
+            females.append(sid)
+
+with open('${SEX_UPDATE_TEST}/sex_update.txt', 'w') as out:
+    for s in males:
+        out.write(f'{s}\t{s}\t1\n')
+    for s in females:
+        out.write(f'{s}\t{s}\t2\n')
+"
+
+# Verify sex_update.txt has 5 lines (2 males + 3 females)
+N_SEX_LINES=$(wc -l < "${SEX_UPDATE_TEST}/sex_update.txt" | tr -d ' ')
+assert_eq "${N_SEX_LINES}" "5" "sex_update.txt has 5 entries (2M + 3F)"
+
+# Verify males are coded as 1
+MALE_COUNT=$(awk -F'\t' '$3 == 1' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
+assert_eq "${MALE_COUNT}" "2" "sex_update.txt has 2 males coded as 1"
+
+# Verify females are coded as 2
+FEMALE_COUNT=$(awk -F'\t' '$3 == 2' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
+assert_eq "${FEMALE_COUNT}" "3" "sex_update.txt has 3 females coded as 2"
+
+# Verify FID == IID (both columns match)
+MISMATCHED=$(awk -F'\t' '$1 != $2' "${SEX_UPDATE_TEST}/sex_update.txt" | wc -l | tr -d ' ')
+assert_eq "${MISMATCHED}" "0" "sex_update.txt FID matches IID for all entries"
+
+# Verify SAM_001 is male (sex=1)
+SAM001_SEX=$(awk -F'\t' '$1 == "SAM_001" {print $3}' "${SEX_UPDATE_TEST}/sex_update.txt")
+assert_eq "${SAM001_SEX}" "1" "SAM_001 coded as male (1)"
+
+# Verify SAM_002 is female (sex=2)
+SAM002_SEX=$(awk -F'\t' '$1 == "SAM_002" {print $3}' "${SEX_UPDATE_TEST}/sex_update.txt")
+assert_eq "${SAM002_SEX}" "2" "SAM_002 coded as female (2)"
+
 echo ""
 
 # ---------------------------------------------------------------
