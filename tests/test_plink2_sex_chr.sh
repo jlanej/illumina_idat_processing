@@ -254,9 +254,10 @@ echo "--- Test 2: Verify #IID header format in generated files ---"
 # Re-run pipeline with a fresh output dir to inspect tmp files before cleanup
 OUTPUT_DIR2="${TMP_DIR}/sex_chr_qc2"
 
-# We patch the script to skip cleanup so we can inspect tmp files
+# We patch the script to skip cleanup so we can inspect tmp files.
+# Use a broad pattern to match the rm -rf cleanup line robustly.
 PATCHED_SCRIPT="${TMP_DIR}/patched_sex_qc.sh"
-sed 's/^rm -rf "${TMP_DIR}"$/# rm -rf "${TMP_DIR}" # skip cleanup for test/' \
+sed '/rm -rf.*TMP_DIR/s/^/# /' \
     "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh" > "${PATCHED_SCRIPT}"
 chmod +x "${PATCHED_SCRIPT}"
 
