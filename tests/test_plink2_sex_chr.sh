@@ -77,11 +77,22 @@ assert_ge() {
 # ---------------------------------------------------------------
 # Pre-flight: check required tools
 # ---------------------------------------------------------------
+REQUIRE_PLINK2="${REQUIRE_PLINK2:-0}"
+REQUIRE_BCFTOOLS="${REQUIRE_BCFTOOLS:-0}"
+
 if ! command -v plink2 &>/dev/null; then
+    if [[ "${REQUIRE_PLINK2}" == "1" ]]; then
+        echo "FAIL: plink2 not available but REQUIRE_PLINK2=1"
+        exit 1
+    fi
     echo "SKIP: plink2 not available — install plink2 to run this test"
     exit 0
 fi
 if ! command -v bcftools &>/dev/null; then
+    if [[ "${REQUIRE_BCFTOOLS}" == "1" ]]; then
+        echo "FAIL: bcftools not available but REQUIRE_BCFTOOLS=1"
+        exit 1
+    fi
     echo "SKIP: bcftools not available — install bcftools to run this test"
     exit 0
 fi
