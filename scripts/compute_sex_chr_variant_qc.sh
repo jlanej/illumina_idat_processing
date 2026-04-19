@@ -194,11 +194,18 @@ case "${GENOME}" in
 esac
 
 # -----------------------------------------------------------------
-# Filter VCF to remove intensity-only probes
+# Filter VCF to remove intensity-only probes (only when the INFO
+# tag is defined in the header; bcftools v1.15+ exits 255 on
+# undefined filter tags, which would abort this script via set -e)
 # -----------------------------------------------------------------
 FILTERED_VCF=$(mktemp -p "${TMP_DIR}" --suffix=.bcf filtered_sexchr.XXXXXX)
-bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \
-    -Ob -o "${FILTERED_VCF}" "${VCF}" 2>/dev/null
+if bcftools view -h "${VCF}" 2>/dev/null | grep -q '##INFO=<ID=INTENSITY_ONLY'; then
+    bcftools view -e 'INFO/INTENSITY_ONLY=1' --threads "${THREADS}" \
+        -Ob -o "${FILTERED_VCF}" "${VCF}" 2>/dev/null
+else
+    bcftools view --threads "${THREADS}" \
+        -Ob -o "${FILTERED_VCF}" "${VCF}" 2>/dev/null
+fi
 bcftools index --threads "${THREADS}" "${FILTERED_VCF}" 2>/dev/null
 
 # -----------------------------------------------------------------
