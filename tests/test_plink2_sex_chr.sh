@@ -270,6 +270,8 @@ OUTPUT_DIR2="${TMP_DIR}/sex_chr_qc2"
 PATCHED_SCRIPT="${TMP_DIR}/patched_sex_qc.sh"
 sed '/rm -rf.*TMP_DIR/s/^/# /' \
     "${REPO_DIR}/scripts/compute_sex_chr_variant_qc.sh" > "${PATCHED_SCRIPT}"
+# copy utils.sh so that SCRIPT_DIR-relative source works from the temp dir
+cp "${REPO_DIR}/scripts/utils.sh" "${TMP_DIR}/utils.sh"
 chmod +x "${PATCHED_SCRIPT}"
 
 bash "${PATCHED_SCRIPT}" \
