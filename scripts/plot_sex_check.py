@@ -107,7 +107,7 @@ def extract_chrXY_lrr_medians(vcf_file, threads=1, genome='CHM13',
         return {}, {}
 
     if chrom_x:
-        print(f"  [diag] chrX contig found in VCF: {chrom_x}")
+        print(f"  [diag] chrX contig found in VCF: {chrom_x}", file=sys.stderr)
     else:
         print("  [diag] No chrX contig found in VCF — chrX F-stat will be NA.",
               file=sys.stderr)
@@ -396,7 +396,7 @@ def _compute_f_stat_plink2(vcf_file, sample_names, threads, genome,
             return {}
 
         print(f"  [diag] plink2 chrX input: {n_chrx} variants "
-              f"(contig={chrx_contig})")
+              f"(contig={chrx_contig})", file=sys.stderr)
 
         # Modern plink2 (v2.00a6+): --impute-sex + --split-par + --make-pgen
         # This is the correct approach for BCF input without sex info.
