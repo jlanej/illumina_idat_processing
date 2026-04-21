@@ -96,6 +96,8 @@ The `compute_sex_chr_variant_qc.sh` script computes sex-aware variant QC for chr
   - All metrics computed on **males only** (`chrY_male_call_rate`, `chrY_male_maf`), as females do not carry chrY.
 - **PAR/XTR regions** are excluded from all sex-chromosome QC using the same build-specific BED files used for sex determination.
 
+> **Implementation note**: plink2 writes its Hardy-Weinberg report across two files whenever chrX variants are present: `<prefix>.hardy` (autosomal-style — PAR1/PAR2 variants reclassified by `--split-par` land here) and `<prefix>.hardy.x` (chrX non-PAR, female-only diploid HWE). Both files are consumed by `collate_variant_qc.py`; reading only `.hardy` would drop HWE p-values for every non-PAR chrX variant.
+
 The collated output `collated_variant_qc.tsv` includes these sex-chromosome columns alongside autosomal metrics. A `#sex_chr_qc_note=...` header comment documents these design decisions for downstream consumers.
 
 | Column | Description |

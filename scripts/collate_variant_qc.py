@@ -85,10 +85,38 @@ def read_plink2_vmiss(filepath):
     return data
 
 
-def read_plink2_hardy(filepath):
-    """Read plink2 .hardy file. Returns dict of variant_id -> row dict.
+def _first_idx(header, candidates):
+    """Return index of the first candidate name that appears in header, or None."""
+    for name in candidates:
+        if name in header:
+            return header.index(name)
+    return None
 
-    Returned fields per variant: P, HOM_A1_CT, HET_A1_AX_CT, TWO_AX_CT.
+
+def read_plink2_hardy(filepath):
+    """Read plink2 .hardy or .hardy.x file. Returns dict of variant_id -> row dict.
+
+    PLINK2 writes two separate Hardy-Weinberg reports when chrX variants
+    are present in the input:
+      - ``<prefix>.hardy``    : autosomal-style report (and PAR variants
+                                reclassified to PAR1/PAR2 via --split-par)
+      - ``<prefix>.hardy.x``  : chrX non-PAR report (female-only genotype
+                                counts; males are hemizygous and contribute
+                                to separate MALE_A1_CT / MALE_AX_CT columns)
+
+    Column names vary between these two reports and between plink2
+    versions:
+      - P-value column is ``P`` (default) or ``MIDP`` (with --hardy midp)
+      - Autosomal biallelic counts: ``HOM_A1_CT``, ``HET_A1_CT``, ``TWO_AX_CT``
+      - Autosomal multi-allelic counts: ``HOM_A1_CT``, ``HET_A1_AX_CT``, ``TWO_AX_CT``
+      - chrX female counts in .hardy.x: ``FEMALE_HOM_A1_CT``,
+        ``FEMALE_HET_A1_CT`` (or ``FEMALE_HET_A1_AX_CT``),
+        ``FEMALE_TWO_AX_CT``
+
+    Returned row fields are normalised to: ``P``, ``HOM_A1_CT``,
+    ``HET_A1_AX_CT`` (the key name is kept for back-compat; it holds the
+    heterozygous count regardless of which plink2 column name was used),
+    and ``TWO_AX_CT``.
     """
     data = {}
     if not os.path.exists(filepath):
@@ -96,10 +124,18 @@ def read_plink2_hardy(filepath):
     with open(filepath) as f:
         header = f.readline().strip().split()
         id_idx = header.index('ID') if 'ID' in header else 1
-        p_idx = header.index('P') if 'P' in header else len(header) - 1
-        hom_a1_idx = header.index('HOM_A1_CT') if 'HOM_A1_CT' in header else None
-        het_idx = header.index('HET_A1_AX_CT') if 'HET_A1_AX_CT' in header else None
-        two_ax_idx = header.index('TWO_AX_CT') if 'TWO_AX_CT' in header else None
+        # Prefer 'P'; fall back to 'MIDP' (written by --hardy midp).
+        p_idx = _first_idx(header, ['P', 'MIDP'])
+        if p_idx is None:
+            # Legacy fallback: p-value is the last column in every plink2
+            # .hardy / .hardy.x report we have seen.
+            p_idx = len(header) - 1
+        hom_a1_idx = _first_idx(header, ['HOM_A1_CT', 'FEMALE_HOM_A1_CT'])
+        het_idx = _first_idx(header, [
+            'HET_A1_CT', 'HET_A1_AX_CT',
+            'FEMALE_HET_A1_CT', 'FEMALE_HET_A1_AX_CT',
+        ])
+        two_ax_idx = _first_idx(header, ['TWO_AX_CT', 'FEMALE_TWO_AX_CT'])
         for line in f:
             fields = line.strip().split()
             if len(fields) > max(id_idx, p_idx):
@@ -112,6 +148,29 @@ def read_plink2_hardy(filepath):
                     row['TWO_AX_CT'] = fields[two_ax_idx]
                 data[fields[id_idx]] = row
     return data
+
+
+def read_plink2_hardy_merged(prefix_path):
+    """Read both ``<prefix>.hardy`` and ``<prefix>.hardy.x`` and merge.
+
+    plink2 splits its Hardy-Weinberg report across two files whenever chrX
+    variants are present: the autosomal-style report (``<prefix>.hardy``,
+    which also receives variants reclassified to PAR1/PAR2 by
+    ``--split-par``) and the chrX-specific report
+    (``<prefix>.hardy.x``, which holds non-PAR chrX variants with
+    female-only diploid HWE).  Both files must be consumed to get HWE
+    p-values for every sex-chromosome variant — reading only
+    ``<prefix>.hardy`` would drop every non-PAR chrX variant, which was
+    the root cause of ``chrX_female_hwe_p`` being ``NA`` for the vast
+    majority of chrX variants in collated output.
+
+    Returns a single dict variant_id -> row dict (see :func:`read_plink2_hardy`
+    for row fields).  When a variant appears in both files (should not
+    happen in practice), the ``.hardy.x`` (chrX-specific) row wins.
+    """
+    merged = dict(read_plink2_hardy(prefix_path + '.hardy'))
+    merged.update(read_plink2_hardy(prefix_path + '.hardy.x'))
+    return merged
 
 
 def read_plink2_afreq(filepath):
@@ -189,7 +248,12 @@ def load_sex_chr_qc(sex_chr_dir):
     Expected layout (produced by compute_sex_chr_variant_qc.sh):
       sex_chr_dir/chrX/chrX_all.vmiss     - all-sample missingness
       sex_chr_dir/chrX/chrX_all.afreq     - all-sample allele frequency
-      sex_chr_dir/chrX/chrX_female.hardy   - female-only HWE
+      sex_chr_dir/chrX/chrX_female.hardy   - female-only HWE (PAR/PAR2
+                                             variants reclassified by
+                                             --split-par land here)
+      sex_chr_dir/chrX/chrX_female.hardy.x - female-only HWE for chrX
+                                             non-PAR variants (the
+                                             majority of chrX variants)
       sex_chr_dir/chrX/chrX_female.vmiss   - female-only missingness
       sex_chr_dir/chrX/chrX_male.vmiss     - male-only missingness
       sex_chr_dir/chrY/chrY_male.vmiss     - male-only missingness
@@ -198,7 +262,8 @@ def load_sex_chr_qc(sex_chr_dir):
     Returns a dict with keys 'chrX' and 'chrY', each mapping variant_id
     to a dict of QC metrics with column-name-ready keys.  chrX metrics
     include female genotype counts (hom_a1_ct, het_ct, hom_a2_ct) from
-    the .hardy file to mirror autosomal genotype count reporting.
+    the .hardy / .hardy.x files to mirror autosomal genotype count
+    reporting.
     """
     result = {'chrX': {}, 'chrY': {}}
 
@@ -213,9 +278,14 @@ def load_sex_chr_qc(sex_chr_dir):
             os.path.join(chrx_dir, 'chrX_all.vmiss'))
         chrx_all_afreq = read_plink2_afreq(
             os.path.join(chrx_dir, 'chrX_all.afreq'))
-        # Female-only HWE & missingness
-        chrx_female_hardy = read_plink2_hardy(
-            os.path.join(chrx_dir, 'chrX_female.hardy'))
+        # Female-only HWE & missingness.  plink2 splits its --hardy output
+        # into <prefix>.hardy (autosomal-style; receives PAR variants
+        # reclassified by --split-par) and <prefix>.hardy.x (chrX non-PAR,
+        # female-only diploid HWE).  Both must be read so that HWE
+        # p-values and female genotype counts are reported for every
+        # chrX variant, not just the handful in PAR/XTR.
+        chrx_female_hardy = read_plink2_hardy_merged(
+            os.path.join(chrx_dir, 'chrX_female'))
         chrx_female_vmiss = read_plink2_vmiss(
             os.path.join(chrx_dir, 'chrX_female.vmiss'))
         # Male-only missingness
@@ -475,7 +545,12 @@ def main():
                     '(males are hemizygous; diploid HWE is undefined). '
                     'chrX_male_hwe_p is intentionally omitted. '
                     'chrX_female_hom_a1_ct/het_ct/hom_a2_ct are genotype '
-                    'counts from the female-only .hardy file. '
+                    'counts from the female-only .hardy / .hardy.x files '
+                    '(plink2 splits its Hardy-Weinberg report between a '
+                    '.hardy file for autosomal-style variants — including '
+                    'PAR/PAR2 reclassified by --split-par — and a '
+                    '.hardy.x file for chrX non-PAR variants; both are '
+                    'consumed). '
                     'chrY metrics are computed on males only. '
                     'PAR/XTR regions excluded. '
                     'Per-ancestry sex-chr columns (e.g. EUR_chrX_female_hwe_p) '
