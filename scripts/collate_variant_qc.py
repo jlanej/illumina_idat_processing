@@ -168,7 +168,7 @@ def read_plink2_hardy_merged(prefix_path):
     for row fields).  When a variant appears in both files (should not
     happen in practice), the ``.hardy.x`` (chrX-specific) row wins.
     """
-    merged = dict(read_plink2_hardy(prefix_path + '.hardy'))
+    merged = read_plink2_hardy(prefix_path + '.hardy')
     merged.update(read_plink2_hardy(prefix_path + '.hardy.x'))
     return merged
 
