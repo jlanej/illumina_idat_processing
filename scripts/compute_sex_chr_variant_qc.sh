@@ -43,7 +43,10 @@ Options:
 Output files:
   chrX/chrX_all.vmiss          chrX missingness (all samples, non-PAR/XTR)
   chrX/chrX_all.afreq          chrX allele frequencies (all samples)
-  chrX/chrX_female.hardy       chrX HWE (females only — diploid chrX)
+  chrX/chrX_female.hardy       chrX HWE, autosomal-style (PAR variants
+                                reclassified by --split-par)
+  chrX/chrX_female.hardy.x     chrX HWE for chrX non-PAR variants
+                                (females only — diploid chrX)
   chrX/chrX_female.vmiss       chrX missingness (females only)
   chrX/chrX_male.vmiss         chrX missingness (males only)
   chrY/chrY_male.vmiss         chrY missingness (males only, non-PAR)
