@@ -223,8 +223,6 @@ from recluster_egt import EGTFile
 # Reuse a tiny v9 EGT and verify that an unfixed writer would have
 # produced a file num_records*4 bytes shorter.  We do this by writing
 # with trailing_floats forcibly cleared, then comparing sizes.
-import importlib
-import recluster_egt as rg
 
 with tempfile.TemporaryDirectory() as tmp:
     src = os.path.join(tmp, "src.egt")
@@ -233,7 +231,6 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # Build src by re-using the helper above via a small inline write.
     # Easier: just call the round-trip path (we already trust it).
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) if "__file__" in dir() else ".")
     # Build a v9 EGT inline (smaller copy of helper)
     import numpy as np
     from recluster_egt import write_byte, write_int, write_float, write_string
