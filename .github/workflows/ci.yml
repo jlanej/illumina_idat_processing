@@ -59,4 +59,5 @@ jobs:
           bash tests/test_ancestry_pca_projection.sh
           bash tests/test_qc_filtering.sh
           bash tests/test_recluster_welford.sh
+          bash tests/test_recluster_egt_roundtrip.sh
           REQUIRE_PLINK2=1 REQUIRE_BCFTOOLS=1 bash tests/test_plink2_sex_chr.sh

@@ -136,6 +136,12 @@ class EGTFile:
         self.data_block_version = 0
         self.opa = ""
         self.records = []  # list of ClusterRecord
+        # Per-record trailing float block, present only when
+        # data_block_version == 9 (one float per record, written after
+        # the cluster counts at the end of the file). Preserved verbatim
+        # from the source EGT so the round-tripped file has the exact
+        # byte layout expected by gtc2vcf/idat2gtc.
+        self.trailing_floats = []
 
     @staticmethod
     def read(filepath):
@@ -227,6 +233,23 @@ class EGTFile:
                 assert rec.ab.N == counts[1], f"AB count mismatch for {rec.locus_name}"
                 assert rec.bb.N == counts[2], f"BB count mismatch for {rec.locus_name}"
 
+            # Data block version 9 has an additional trailing block of
+            # one float per record after the cluster counts. The
+            # reference gtc2vcf/idat2gtc reader (gtc2vcf.c) skips this
+            # region but expects it to exist; failing to write it back
+            # produces the "Failed to reposition stream forward
+            # <num_records*4> bytes" error in idat2gtc. We preserve the
+            # bytes verbatim so the rewritten EGT is byte-complete.
+            if egt.data_block_version == 9:
+                egt.trailing_floats = list(
+                    np.frombuffer(f.read(4 * num_records), dtype=np.float32)
+                )
+                if len(egt.trailing_floats) != num_records:
+                    raise ValueError(
+                        f"EGT data_block_version 9 trailing block truncated: "
+                        f"expected {num_records} floats, got {len(egt.trailing_floats)}"
+                    )
+
             egt.records = records
         return egt
 
@@ -300,6 +323,21 @@ class EGTFile:
                 write_int(f, rec.aa.N)
                 write_int(f, rec.ab.N)
                 write_int(f, rec.bb.N)
+
+            # Data block version 9: write the trailing per-record float
+            # block. The reference idat2gtc reader requires this block
+            # to be present (see gtc2vcf.c clusterrecord reading); if
+            # it's missing, idat2gtc fails with
+            #   "Failed to reposition stream forward <num_records*4> bytes"
+            # for every sample. Pad with zeros if the count doesn't
+            # match (e.g. records were added or the source EGT was a
+            # different version).
+            if self.data_block_version == 9:
+                pad = max(0, len(self.records) - len(self.trailing_floats))
+                for val in self.trailing_floats[: len(self.records)]:
+                    write_float(f, val)
+                for _ in range(pad):
+                    write_float(f, 0.0)
 
 
 # =============================================================================
@@ -1004,6 +1042,11 @@ def recluster(egt, gtc_files, norm_ids, min_samples_per_cluster=5, n_workers=0):
     new_egt.manifest_name = egt.manifest_name
     new_egt.data_block_version = egt.data_block_version
     new_egt.opa = egt.opa
+    # Preserve the v9-only trailing per-record float block. Without this
+    # the rewritten EGT is missing num_records*4 bytes at the end and
+    # idat2gtc fails with "Failed to reposition stream forward" errors
+    # on every sample.
+    new_egt.trailing_floats = list(egt.trailing_floats)
 
     updated_count = 0
     fallback_count = 0
